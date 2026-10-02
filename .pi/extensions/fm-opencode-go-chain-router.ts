@@ -54,16 +54,18 @@ export type FailureVerdict = "retryable" | "terminal";
 // even when its text also matches a retryable pattern.
 const TERMINAL_PATTERNS = [
   /context (window|length|overflow)|context_length|max(imum)? context|prompt (is )?too (long|large)|input (is )?too (long|large)|too many tokens|tokens? (exceed|exceeds|exceeded)|exceeds? (the |its |their )?(context|token|input|prompt|maximum)/i,
-  /content.?filter|moderation|safety (block|filter|refusal|violation)|blocked by|policy (violation|refusal)|disallowed|inappropriate|harmful content|refus(e|ed|al)/i,
+  /content.?filter|moderation|safety (block|filter|refusal|violation)|blocked by|policy (violation|refusal)|disallowed|inappropriate|harmful content|(?<!connection |connect |econn)refus(e|ed|al)/i,
   /\babort(ed|ing)?\b|cancell?ed|cancellation|AbortError|interrupted by user|stopped by user/i,
 ];
 
 // Retryable only when no terminal pattern matched: quota exhaustion, rate
-// limiting, and transient provider failures.
+// limiting, and transient provider failures, including transport-level
+// connection, socket, DNS, reset, refused, and unreachable failures.
 const RETRYABLE_PATTERNS = [
   /quota|exhaust(ed|ion)?|usage.?limit|out of (credits?|quota)|insufficient (credits?|quota|balance|funds?)|credit (exhausted|expired|limit)|billing|payment required/i,
   /rate.?limit|too many requests|\b429\b|throttl/i,
   /overload|temporar|transient|unavailable|server_?error|upstream|timed? ?out|network|econn|socket hang|eai_again|service unavailable|bad gateway|gateway (timeout|error)|internal (server )?error|try again|5\d\d/i,
+  /connection error|connection (refused|reset|failed|closed|timed? ?out)|connect ECONN|ECONN(REFUSED|RESET|ABORTED)|socket (closed|ended|destroyed|reset|refused)|EPIPE|ENOTFOUND|getaddrinfo|EHOST(UNREACH|DOWN)?|ENET(UNREACH|DOWN|RESET)?|DNS|host (unreachable|not found|unknown)|no route to host|destination unreachable|network (down|failure|reset)|transport (error|failure|closed|reset)|fetch failed|connection failure/i,
 ];
 
 export function classifyRouterFailure(stopReason: string, errorMessage: string): FailureVerdict {
@@ -95,7 +97,14 @@ export default function (pi: ExtensionAPI) {
       if (request.reason === "retry") {
         const failed = request.failed;
         if (!failed) {
-          throw new Error("[fm-fallback-chain] retry arrived with no failure detail; the chain ends here");
+          // Pi leaves failed absent when routing itself failed
+          // (docs/virtual-models.md: "Absent when routing itself failed"), so
+          // there is no provider failure to classify and no evidence to advance
+          // on: hold the current attempt's model for one more dispatch. A
+          // successful route ends routing, so this cannot loop; the next genuine
+          // provider failure arrives with detail and classifies normally.
+          const index = Math.min(state.attempt, FM_CHAIN_MODELS.length - 1);
+          return routeTo(ctx, index, { attempt: index });
         }
         const message = failed.message as { stopReason?: string; errorMessage?: string } | undefined;
         const stopReason = message?.stopReason ?? "";
