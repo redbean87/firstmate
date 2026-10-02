@@ -48,7 +48,8 @@ point where broader policies attach later without rewriting the callers.
 2. Bot tab: create/reset the bot token -> `DISCORD_BOT_TOKEN`.
 3. General Information: copy Application ID -> `DISCORD_CLIENT_ID`, and the
    client secret -> `DISCORD_CLIENT_SECRET`. Copy the public key ->
-   `DISCORD_PUBLIC_KEY` (interaction signature verification).
+   `DISCORD_PUBLIC_KEY` (key schema in `docs/configuration.md`; retained
+   only for the `verify` test helper, never consulted on the live path).
 4. OAuth2 -> Redirects: add the redirect URI (see below), e.g.
    `http://localhost:8787/discord/callback` (local) or
    `https://<host>/discord/callback` (production).
@@ -185,7 +186,8 @@ this integration.
   `fm-discord-gateway.py --stop` ends the running one.
 - Slash commands: `/firstmate ask <question>`, `/firstmate status`
   (registered by `fm-discord-commands.sh register`; interactions arrive
-  over the gateway via `handle --gateway`, are owner- and guild-checked
+  over the gateway via `handle --gateway`, are owner-, guild-, and
+  channel-checked
   before mapping, and are answered through the REST interaction
   callback), plus message equivalents `!fm ask <question>` and
   `!fm status` (`handle-message`, routed automatically from `!fm`- or
