@@ -366,6 +366,56 @@ if (which === "classification-table") {
   }
 }
 
+// Transport-level failures retry: the exact live-observed shapes, including the
+// verbatim `Connection error.` text from the forced-failure run against a closed
+// port. Each must advance the chain rather than terminate it.
+if (which === "transport-retryable") {
+  const transportFailures = [
+    ["muse-spark-1.3-contributor", "error", "Connection error."],
+    ["muse-spark-1.3-contributor", "error", "connect ECONNREFUSED 127.0.0.1:1"],
+    ["muse-spark-1.3-contributor", "error", "Connection reset by peer"],
+    ["mimo-v2.6-flash", "error", "getaddrinfo ENOTFOUND api.example.com"],
+    ["mimo-v2.6-flash", "error", "network unreachable: no route to host"],
+    ["mimo-v2.6-flash", "error", "transport closed before the response completed"],
+    ["muse-spark-1.3-contributor", "error", "Connection error."],
+  ];
+  const first = await route("user", undefined, undefined, undefined);
+  let state = first.state;
+  for (const [id, stop, message] of transportFailures) {
+    const verdict = mod.classifyRouterFailure(stop, message);
+    expect(verdict === "retryable", `transport failure not retryable: [${stop}] ${message} (got ${verdict})`);
+    const next = await route("retry", state, failedOf(id, stop, message), undefined);
+    expect(next.state.attempt === Math.min(state.attempt + 1, 2), `transport failure did not advance: [${stop}] ${message}`);
+    state = next.state;
+    if (state.attempt >= 2) state = first.state;
+  }
+  // A bare policy refusal still terminates even though it shares wording with a
+  // refused connection: terminal patterns win over the transport families.
+  const policyVerdict = mod.classifyRouterFailure("error", "response refused under the usage policy");
+  expect(policyVerdict === "terminal", `policy refusal lost terminal verdict: ${policyVerdict}`);
+}
+
+// A retry with no failure detail holds the current model: Pi sends failed
+// absent when routing itself failed, so there is nothing to classify and no
+// evidence to advance on. The route returns the current attempt's model without
+// throwing and without touching the registry past the current model.
+if (which === "retry-no-failure-detail") {
+  const first = await route("user", undefined, undefined, undefined);
+  const held = await route("retry", first.state, undefined, undefined);
+  expect(held.model.id === "muse-spark-1.3-contributor", `detail-less retry left the current model: ${held.model.id}`);
+  expect(held.thinkingLevel === "low", "detail-less retry lost thinking low");
+  expect(held.state.attempt === 0, `detail-less retry moved the attempt: ${JSON.stringify(held.state)}`);
+  expect(findCalls.length === 2 && findCalls[1] === "opencode-go/muse-spark-1.3-contributor", `detail-less retry looked past the current model: ${JSON.stringify(findCalls)}`);
+  // Mid-chain holds too, and the held position still advances on the next real
+  // provider failure, so one routing-level retry can never spin the chain.
+  const second = await route("retry", first.state, failedOf("muse-spark-1.3-contributor", "error", "Connection error."), undefined);
+  const heldMid = await route("retry", second.state, undefined, undefined);
+  expect(heldMid.model.id === "mimo-v2.6-flash", `mid-chain detail-less retry left the model: ${heldMid.model.id}`);
+  expect(heldMid.state.attempt === 1, `mid-chain detail-less retry moved the attempt: ${JSON.stringify(heldMid.state)}`);
+  const third = await route("retry", heldMid.state, failedOf("mimo-v2.6-flash", "error", "Connection error."), undefined);
+  expect(third.model.id === "deepseek-v4.1-flash", `held position did not advance on the next real failure: ${third.model.id}`);
+}
+
 console.log(`chain driver case ${which}: ok`);
 JS
 }
@@ -424,6 +474,18 @@ test_chain_classification_table() {
   pass "quota, rate-limit, and transient failures retry while overflow, filter, abort, and task errors end the chain"
 }
 
+test_chain_transport_failures_retry() {
+  require_chain_node || return 0
+  run_chain_driver transport-retryable || fail "a transport-level failure did not advance the chain"
+  pass "transport failures including the live-observed Connection error. advance the chain"
+}
+
+test_chain_retry_without_failure_detail_holds() {
+  require_chain_node || return 0
+  run_chain_driver retry-no-failure-detail || fail "a retry with no failure detail threw or moved the chain"
+  pass "a retry with no failure detail holds the current model without error"
+}
+
 test_pi_crewmate_launch_loads_chain_router_alongside_turnend_extension
 test_pi_signed_launch_loads_chain_router
 test_pi_secondmate_launch_loads_chain_router
@@ -435,5 +497,7 @@ test_chain_terminates_after_third
 test_chain_thinking_low_on_every_hop
 test_chain_sticky_followups_and_no_backward_skip
 test_chain_classification_table
+test_chain_transport_failures_retry
+test_chain_retry_without_failure_detail_holds
 
 echo "# all fm-pi-fallback-chain tests passed"
