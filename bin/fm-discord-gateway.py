@@ -40,6 +40,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import hashlib
 import base64
@@ -239,6 +240,16 @@ def ws_connect(host, port, path):
     return WsConn(sock, pending=trailing)
 
 
+def _route_poll(poll, path):
+    try:
+        subprocess.run([poll, "--event-file", path], check=False)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def route_event(evt):
     home = resolve_home()
     root = os.environ.get("FM_ROOT_OVERRIDE") or os.path.join(
@@ -249,13 +260,7 @@ def route_event(evt):
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(evt, f)
         path = f.name
-    try:
-        subprocess.run([poll, "--event-file", path], check=False)
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+    threading.Thread(target=_route_poll, args=(poll, path), daemon=True).start()
 
 
 def run_once(token):

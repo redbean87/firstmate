@@ -92,12 +92,10 @@ route_message_file() { # <message.json>
   fi
   if ! discord_authorize_sender "$author" "$guild" "$ch"; then return 0; fi
   # Message-based command equivalents (!fm ask/!fm status) need no
-  # interaction delivery at all; probe only messages carrying a command
-  # prefix, and only the command handler claims its own cmd-<id> marker,
-  # so a refused probe still falls through to the normal message path.
-  case "$content" in
-    '!fm '*|'<@'*'> fm '*)
-      if "$SCRIPT_DIR/fm-discord-commands.sh" handle-message --message-file "$f" 2>/dev/null; then return 0; fi ;; esac
+  # interaction delivery at all; the command handler decides what is a
+  # command, and only it claims its own cmd-<id> marker, so a refusal
+  # falls through to the normal message path.
+  if "$SCRIPT_DIR/fm-discord-commands.sh" handle-message --message-file "$f" 2>/dev/null; then return 0; fi
   # Idempotent event processing: duplicates are absorbed silently.
   discord_seen_claim "$mid"
   case "$?" in 0) ;; 1) return 0 ;; *) echo "fm-discord-poll: dedup store failure" >&2; return 0 ;; esac

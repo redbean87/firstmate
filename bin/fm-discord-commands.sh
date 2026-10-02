@@ -129,8 +129,9 @@ PY
     # member.user.id, direct-message interactions carry user.id.
     iguild=$(jq -r '.guild_id // empty' "$file")
     iuser=$(jq -r '.member.user.id // .user.id // empty' "$file")
+    ich=$(jq -r '.channel_id // .channel.id // empty' "$file")
     discord_require_guild "$iguild" || { echo "fm-discord-commands: refusing unknown guild" >&2; exit 1; }
-    discord_authorize_sender "$iuser" "$iguild" "" || { echo "fm-discord-commands: refusing unauthorized interaction author" >&2; exit 1; }
+    discord_authorize_sender "$iuser" "$iguild" "$ich" || { echo "fm-discord-commands: refusing unauthorized interaction author" >&2; exit 1; }
     iid=$(jq -r '.id // empty' "$file")
     case "$iid" in ''|.*|*[!A-Za-z0-9._-]*) echo "fm-discord-commands: unsafe interaction id" >&2; exit 1 ;; esac
     discord_seen_claim "$iid"
