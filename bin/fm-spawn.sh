@@ -176,7 +176,9 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin)
+#   /updatefirstmate, restart). A raw launch command never satisfies a
+#   deterministic project pin (docs/configuration.md "Crew dispatch profiles").
+#   A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
@@ -644,6 +646,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
 . "$SCRIPT_DIR/fm-worker-account-lib.sh"
+# shellcheck source=bin/fm-project-profile-lib.sh
+. "$SCRIPT_DIR/fm-project-profile-lib.sh"
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
 # a direct report (see bin/fm-gate-refuse-lib.sh).
 fm_refuse_if_gate_agent
@@ -3185,6 +3189,39 @@ if [ "$KIND" = ship ]; then
   STANDING_BRANCH=$("$FM_ROOT/bin/fm-project-mode.sh" --branch-prefix "$PROJ_NAME" 2>/dev/null) || STANDING_BRANCH=
   if [ "$BRANCH" != "$STANDING_BRANCH$ID" ]; then
     echo "notice: $ID ships branch=$BRANCH while $PROJ_NAME registers the ship-branch prefix '$STANDING_BRANCH' (branch $STANDING_BRANCH$ID) - the task's branch and PR will read as firstmate-authored; proceed only on a current explicit captain instruction or an intake judgment you can state" >&2
+  fi
+fi
+
+# Deterministic project-to-worker-profile binding (bin/fm-project-profile-lib.sh
+# owns the lookup; docs/configuration.md "Crew dispatch profiles" owns the
+# schema). A ship or scout spawn whose requested harness or model disagrees
+# with the project's pinned profile is refused, never silently substituted,
+# and a raw launch command never satisfies a pin. There is no per-task
+# override. Secondmate spawns are exempt. This runs before any endpoint,
+# worktree, or record exists.
+if [ "$KIND" != secondmate ]; then
+  PIN_PROJECT=$(basename "$PROJ_ABS")
+  if PIN_ROW=$(fm_project_profile_for "$PIN_PROJECT" "$CONFIG"); then
+    PIN_HARNESS=${PIN_ROW%%$'\t'*}
+    PIN_REST=${PIN_ROW#*$'\t'}
+    PIN_MODEL=${PIN_REST%%$'\t'*}
+    if [ "$RAW_LAUNCH" = 1 ]; then
+      echo "error: $ID cannot launch: $PIN_PROJECT is pinned to --harness $PIN_HARNESS${PIN_MODEL:+ --model $PIN_MODEL}, and a raw launch command cannot satisfy that pin; launch with the pinned profile instead" >&2
+      exit 1
+    fi
+    if [ "$HARNESS" != "$PIN_HARNESS" ]; then
+      echo "error: $ID cannot launch: $PIN_PROJECT is pinned to --harness $PIN_HARNESS${PIN_MODEL:+ --model $PIN_MODEL}, but this spawn requested harness '$HARNESS'; pass the pinned profile instead (a project that needs a different worker class is an explicit project-policy change)" >&2
+      exit 1
+    fi
+    if [ -n "$PIN_MODEL" ] && [ "${MODEL:-default}" != "$PIN_MODEL" ]; then
+      echo "error: $ID cannot launch: $PIN_PROJECT is pinned to --model $PIN_MODEL on harness $PIN_HARNESS, but this spawn requested model '${MODEL:-default}'; pass the pinned profile instead" >&2
+      exit 1
+    fi
+  else
+    PIN_RC=$?
+    if [ "$PIN_RC" -eq 2 ]; then
+      exit 1
+    fi
   fi
 fi
 

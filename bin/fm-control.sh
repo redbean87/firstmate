@@ -79,7 +79,10 @@
 #              --note is required for a ship or scout, whose replacement
 #              inherits the local copy but none of the conversation; a
 #              secondmate reconciles its own home's records at startup, so its
-#              standing charter is never rewritten.
+#              standing charter is never rewritten. A ship or scout relaunch
+#              naming a harness or model that contradicts the task's deterministic
+#              project pin is refused before the running agent stops
+#              (docs/configuration.md "Crew dispatch profiles").
 #              Records a durable checkpoint and that note, exits the old agent,
 #              then delegates the launch to its single owner,
 #              bin/fm-spawn.sh --relaunch. A failure before publication keeps
@@ -176,6 +179,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
 . "$SCRIPT_DIR/fm-worker-account-lib.sh"
+# shellcheck source=bin/fm-project-profile-lib.sh
+. "$SCRIPT_DIR/fm-project-profile-lib.sh"
 
 POLL=${FM_CONTROL_POLL:-0.5}
 SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
@@ -850,6 +855,34 @@ resolve_relaunch_profile() {
   fi
   if [ "$TARGET_EFFORT" = ultra ]; then
     "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$TARGET_HARNESS" "$TARGET_MODEL" "$TARGET_EFFORT" || return 1
+  fi
+  # Deterministic project-to-worker-profile binding (bin/fm-project-profile-lib.sh
+  # owns the lookup; docs/configuration.md "Crew dispatch profiles" owns the
+  # schema). A relaunch naming a harness or model that contradicts the task's
+  # project pin is refused here, before the running agent is stopped, so nothing
+  # is mutated on a refused relaunch. There is no per-task override.
+  # Secondmates are exempt from the project pin.
+  if [ "$KIND" != secondmate ]; then
+    PIN_PROJECT=$(fm_meta_get "$META" project)
+    if [ -n "$PIN_PROJECT" ]; then
+      PIN_PROJECT=$(basename "$PIN_PROJECT")
+      if PIN_ROW=$(fm_project_profile_for "$PIN_PROJECT" "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"); then
+        PIN_HARNESS=${PIN_ROW%%$'\t'*}
+        PIN_REST=${PIN_ROW#*$'\t'}
+        PIN_MODEL=${PIN_REST%%$'\t'*}
+        if [ "$TARGET_HARNESS" != "$PIN_HARNESS" ]; then
+          die "task $ID is project $PIN_PROJECT, pinned to --harness $PIN_HARNESS${PIN_MODEL:+ --model $PIN_MODEL}, but this relaunch requested harness '$TARGET_HARNESS'; pass the pinned profile instead (a project that needs a different worker class is an explicit project-policy change)"
+        fi
+        if [ -n "$PIN_MODEL" ] && [ "$TARGET_MODEL" != "$PIN_MODEL" ]; then
+          die "task $ID is project $PIN_PROJECT, pinned to --model $PIN_MODEL on harness $PIN_HARNESS, but this relaunch requested model '$TARGET_MODEL'; pass the pinned profile instead"
+        fi
+      else
+        PIN_RC=$?
+        if [ "$PIN_RC" -eq 2 ]; then
+          die "task $ID cannot relaunch: the deterministic project mapping in config/crew-dispatch.json is malformed"
+        fi
+      fi
+    fi
   fi
   # The launch owner applies this home's worker account pin too, but only after
   # the old agent has been stopped, so a pin that no longer resolves or is

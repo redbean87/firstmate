@@ -1004,6 +1004,7 @@ Firstmate resolves the rule's profile object or array under `AGENTS.md` section 
 **Spawn requirements**
 
 - When the file exists, `fm-spawn.sh` enforces that contract by refusing crewmate and scout spawns that lack an explicit harness (`--harness`, a positional adapter, or a raw launch command).
+- When the file carries a deterministic project mapping, `fm-spawn.sh` additionally refuses any crewmate or scout spawn whose harness or model disagrees with the project's pinned profile, and a raw launch command never satisfies a pin.
 - Batch spawns satisfy the same requirement with a shared `--harness`.
 - Secondmate spawns are exempt and still resolve through `config/secondmate-harness` and its optional model and effort tokens.
 
@@ -1028,9 +1029,22 @@ This section is the single owner of the canonical schema and its per-field seman
   ],
   "default": [
     { "harness": "<adapter>", "model": "<optional model>", "effort": "<optional effort>" }
-  ]
+  ],
+  "projects": {
+    "<exact project name>": { "harness": "<adapter>", "model": "<optional model>", "effort": "<optional effort>" }
+  },
+  "projectDefault": { "harness": "<adapter>", "model": "<optional model>", "effort": "<optional effort>" }
 }
 ```
+
+**Deterministic project mapping**
+
+The `projects` object maps an exact project name to the one profile that project must launch on.
+`projectDefault` is the one profile every other project must launch on.
+Both are exact-match on the project's basename and free of natural-language matching, so the pin cannot be skipped or guessed.
+An absent mapping leaves dispatch on the rules path above; a present mapping is enforced structurally by `bin/fm-spawn.sh` at initial spawn and by `bin/fm-control.sh` at relaunch, which refuse a contradicting harness or model before anything is stopped or launched, never substitute another profile, and never fall back to firstmate executing the work itself.
+There is no per-task override flag: a project that needs a different worker class is an explicit edit to this mapping.
+The standing policy is `projectDefault` on the configured OpenCode profile and a pinned `expo-bowling-journal` entry on Pi with the local Qwen model.
 
 **Required and optional fields**
 
@@ -1039,6 +1053,7 @@ This section is the single owner of the canonical schema and its per-field seman
 | `rules` | May be absent or empty for a default-only configuration. |
 | Rule `when` and `use` | Required for each rule. |
 | `use` and optional top-level `default` | Accept one profile object or a non-empty array of profile objects; the single-object form remains fully backward-compatible. |
+| Optional `projects` and `projectDefault` | Accept one profile object each (`projects` per exact project name); when present they are the enforced deterministic binding. |
 | Profile `harness` | Required in every profile. |
 | Profile `model` and `effort`; rule `why` | Optional. |
 
