@@ -1090,7 +1090,9 @@ crew_dispatch_validate() {
       end;
     def configured_profiles:
       ([(.rules // [])[]? | profiles(.use?)[]?]
-        + (if has("default") then [profiles(.default)[]?] else [] end));
+        + (if has("default") then [profiles(.default)[]?] else [] end)
+        + (if has("projectDefault") then [.projectDefault] else [] end)
+        + ([(.projects // {})[]?]));
     def malformed_optional_fields($items):
       ($items | any(has("model") and (((.model | type) != "string") or (.model | length) == 0)))
       or ($items | any(has("effort") and (((.effort | type) != "string") or (.effort | length) == 0)))
@@ -1142,6 +1144,19 @@ crew_dispatch_validate() {
     elif has("default") and malformed_optional_fields([profiles(.default)[]?]) then
       if $typed then "default profile model and effort must be non-empty strings, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\\z when present"
       else "default profile model and effort must be non-empty strings when present"
+      end
+    elif has("projects") and ((.projects | type) != "object") then "projects must be an object of exact project names to profile objects"
+    elif has("projectDefault") and ((.projectDefault | type) != "object") then "projectDefault must be one profile object"
+    elif has("projectDefault") and (((.projectDefault.harness? | type) != "string") or (.projectDefault.harness | length) == 0) then "projectDefault needs harness"
+    elif has("projectDefault") and malformed_optional_fields([.projectDefault]) then
+      if $typed then "projectDefault profile model and effort must be non-empty strings, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\\z when present"
+      else "projectDefault profile model and effort must be non-empty strings when present"
+      end
+    elif [( .projects // {} | to_entries[] | .value | select(type != "object"))] | length > 0 then "each projects entry must be a profile object"
+    elif [( .projects // {} | to_entries[] | .value | select(((.harness? | type) != "string") or (.harness | length) == 0))] | length > 0 then "each projects entry needs harness"
+    elif malformed_optional_fields([(.projects // {})[]?]) then
+      if $typed then "projects entry model and effort must be non-empty strings, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\\z when present"
+      else "projects entry model and effort must be non-empty strings when present"
       end
     elif $typed and has("default") and malformed_profile_floors([profiles(.default)[]?]) then "default profile floor needs scope and min_percent 0..100"
     else
