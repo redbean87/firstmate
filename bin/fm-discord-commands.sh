@@ -151,12 +151,14 @@ PY
     fi
     itoken=$(jq -r '.token // empty' "$file")
     case "$itoken" in ''|*[$'\n\r']*) echo "fm-discord-commands: interaction has no callback token; wake only" >&2 ;; *)
-      cb_payload=$(mktemp "${TMPDIR:-/tmp}/fm-discord-cb.XXXXXX") && cb_out=$(mktemp "${TMPDIR:-/tmp}/fm-discord-cbout.XXXXXX") && {
+      if cb_payload=$(mktemp "${TMPDIR:-/tmp}/fm-discord-cb.XXXXXX") && cb_out=$(mktemp "${TMPDIR:-/tmp}/fm-discord-cbout.XXXXXX") && {
         jq -n --arg c "$cb_content" '{type:4, data:{content:$c}}' > "$cb_payload" &&
         read -r cb_code _cb_retry < <(discord_api POST "/interactions/$iid/$itoken/callback" "$cb_payload" "$cb_out") &&
         case "$cb_code" in 2[0-9][0-9]) ;; *) echo "fm-discord-commands: interaction callback HTTP $cb_code; wake still queued" >&2 ;; esac
         rm -f "$cb_payload" "$cb_out"
-      } || { echo "fm-discord-commands: interaction callback failed; wake still queued" >&2; rm -f "$cb_payload" "$cb_out"; } ;; esac
+      }; then
+        :
+      else echo "fm-discord-commands: interaction callback failed; wake still queued" >&2; rm -f "${cb_payload-}" "${cb_out-}"; fi ;; esac
     printf 'discord-command %s %s\n' "$iid" "$sub"
     ;;
   handle-message)
