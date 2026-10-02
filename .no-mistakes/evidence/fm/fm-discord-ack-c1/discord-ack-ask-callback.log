@@ -1,0 +1,8 @@
+url=https://discord.com/api/v10/interactions/ack-ask2/tok-a2/callback
+method=POST
+posted={
+  "type": 4,
+  "data": {
+    "content": "Working on your question now - full answer follows."
+  }
+}
