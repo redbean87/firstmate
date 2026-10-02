@@ -3,9 +3,12 @@
 
 Connects to Discord's Gateway with GUILDS + GUILD_MESSAGES intents (the
 latter is the intent that actually delivers MESSAGE_CREATE), dispatches
-MESSAGE_CREATE events to ``bin/fm-discord-poll.sh --event-file`` for
-idempotent routing into Firstmate's existing message pipeline, and
-reconnects with exponential backoff + resume. Message-content intent stays
+MESSAGE_CREATE and INTERACTION_CREATE events to ``bin/fm-discord-poll.sh
+--event-file`` for idempotent routing into Firstmate's existing message
+pipeline, and reconnects with exponential backoff + resume. Slash
+interactions arrive over this same outbound connection already
+authenticated by the gateway session, so no Ed25519 signature check and
+no inbound HTTPS endpoint are involved (Relay-style outbound-only). Message-content intent stays
 opt-in (DISCORD_MESSAGE_CONTENT=1); without it only mentions/replies that
 Discord delivers without privileged intent are routed.
 
@@ -344,7 +347,7 @@ def run_loop(token):
                         session_id = d.get("session_id")
                         resume_url = d.get("resume_gateway_url")
                         backoff = BASE_BACKOFF
-                    elif t == "MESSAGE_CREATE":
+                    elif t in ("MESSAGE_CREATE", "INTERACTION_CREATE"):
                         route_event({"t": t, "d": d})
                 if now >= next_beat:
                     if awaiting_ack and last_beat is not None and now - last_beat > interval:
