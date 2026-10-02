@@ -1,0 +1,16 @@
+Live validation transcript for fm/fm-discord-relay-c1 (target 0f91d15).
+
+1) Full existing suite (behavioral, mocked curl, no ports):
+   bash tests/fm-discord.test.sh -> all ok, including
+   "ok - relay-style outbound-only reply path" and "ok - fm-discord".
+
+2) Manual live checks (disposable FM_HOME + fake curl):
+   - handle-message multiline '!fm ask first line\nsecond line'
+     -> "discord-command cmd-m-multi ask", inbox question='first line\nsecond line' (newline preserved, fix review-2 confirmed)
+   - handle --gateway slash status in allowed channel c1
+     -> "discord-command slash1 status" + REST callback POST interactions/slash1/t1/callback (channel scope fix confirmed)
+   - handle (no --gateway) -> exit 1 "only gateway-delivered interactions are supported" (HTTPS endpoint unsupported, outbound-only confirmed)
+   - handle-message '  !fm status' (leading spaces) -> "discord-command cmd-m-ws status"
+   - handle-message '<@123>  fm status' (double space) -> "discord-command cmd-m-ws2 status"
+   - poll probe: no narrow "'!fm '" pattern remains; poll delegates to handle-message unconditionally (line 98), refusal falls through
+   - gateway: route_event dispatches via threading.Thread daemon (non-blocking heartbeat fix confirmed); INTERACTION_CREATE routed alongside MESSAGE_CREATE
