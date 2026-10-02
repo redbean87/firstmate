@@ -177,7 +177,7 @@ this integration.
   before anything is persisted. `verify` also resolves and persists the bot
   user id; polling refuses until that id is known, so a half-configured
   home can never loop on its own replies.
-- Outbound: `bin/fm-discord-send.sh <channel> [--reply-to <msg>] <text>`.
+- Outbound: `bin/fm-discord-send.sh <channel> [--reply-to <msg>] [--allow-user <user-id>] <text>` (repeat `--allow-user` to let named user mentions parse; without it mentions are suppressed).
   Long responses chunk (never truncate); multi-message replies carry
   ` (k/n)` thread suffixes like the Relay splitter; 429s honor
   Retry-After; 401/403/404 are structured failures.

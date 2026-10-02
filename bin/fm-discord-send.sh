@@ -2,9 +2,9 @@
 # Send a Firstmate response back to Discord (outbound path).
 #
 # Usage:
-#   fm-discord-send.sh <channel-id> [--reply-to <message-id>] <text>
-#   fm-discord-send.sh <channel-id> [--reply-to <message-id>] --text-file <path>
-#   fm-discord-send.sh <channel-id> [--reply-to <message-id>] -
+#   fm-discord-send.sh <channel-id> [--reply-to <message-id>] [--allow-user <user-id>]... <text>
+#   fm-discord-send.sh <channel-id> [--reply-to <message-id>] [--allow-user <user-id>]... --text-file <path>
+#   fm-discord-send.sh <channel-id> [--reply-to <message-id>] [--allow-user <user-id>]... -
 #
 # Chunks long responses to Discord's 2000-unit limit (never silently
 # truncates); a reply that fits in one message goes out unnumbered, while a
@@ -15,6 +15,8 @@
 # exits non-zero with a structured diagnostic on permission or API errors.
 # Text is JSON-encoded with jq; the bot token is never logged. An optional
 # DISCORD_SEND_CHANNEL_IDS allowlist constrains outbound channels when set.
+# Each --allow-user id rides in allowed_mentions.users so that mention
+# pings; without it posts suppress all mention parsing.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
