@@ -379,6 +379,7 @@ import json, sys
 body = json.load(open(sys.argv[1]))
 assert "<@u9>" in body["content"], "owner mention pings the phone"
 assert "nm-1-x" in body["content"], "decision key rides along"
+assert body.get("allowed_mentions", {}).get("users") == ["u9"], "owner mention must parse so the phone pings"
 PY
 FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" --event tap-r1 --wake-line "heartbeat: all quiet" --text "routine progress" >/dev/null || fail "routine wake failed"
 [ "$(find "$FAKE_POST_DIR" -maxdepth 1 -type f -name 'post-*.json' | wc -l | tr -d ' ')" = 1 ] || fail "routine progress must stay silent"

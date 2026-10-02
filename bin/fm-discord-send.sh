@@ -23,7 +23,7 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-discord-lib.sh
 . "$SCRIPT_DIR/fm-discord-lib.sh"
 
-usage() { echo "usage: fm-discord-send.sh <channel-id> [--reply-to <message-id>] <text> | --text-file <path> | -" >&2; }
+usage() { echo "usage: fm-discord-send.sh <channel-id> [--reply-to <message-id>] [--allow-user <user-id>] <text> | --text-file <path> | -" >&2; }
 help() { sed -n '2,/^set -u/p' "$0" | sed 's/^# //;s/^#//'; }
 
 channel=${1:-}
@@ -32,10 +32,12 @@ shift
 case "$channel" in ''|*[!A-Za-z0-9_-]*) echo "fm-discord-send: unsafe channel id" >&2; exit 2 ;; esac
 
 reply_to=
+ALLOWED_USERS=
 ARGS=()
 while [ "$#" -gt 0 ]; do case "$1" in
   --help|-h) help; exit 0 ;;
   --reply-to) shift; reply_to=${1:-}; case "$reply_to" in ''|*[!A-Za-z0-9_-]*) echo "fm-discord-send: unsafe reply-to message id" >&2; exit 2 ;; esac ;;
+  --allow-user) shift; _au=${1:-}; case "$_au" in ''|*[!A-Za-z0-9_-]*) echo "fm-discord-send: unsafe user id" >&2; exit 2 ;; esac; ALLOWED_USERS="${ALLOWED_USERS:+$ALLOWED_USERS }$_au" ;;
   --text-file) shift; [ -n "${1:-}" ] || { usage; exit 2; }; TEXT=$(cat -- "$1") || exit 1; ARGS=(__file) ;;
   -) TEXT=$(cat); ARGS=(__stdin) ;;
   *) TEXT=$1; ARGS=(__arg) ;;
@@ -75,10 +77,18 @@ fi
 [ "$N" -gt 0 ] || { echo "fm-discord-send: empty text" >&2; exit 2; }
 
 post_one() { # <text> <is-first>
-  local text=$1 first=$2 payload out code retry attempt=0 max=4 backoff=1
+  local text=$1 first=$2 payload out code retry attempt=0 max=4 backoff=1 users_json
   payload=$(mktemp "${TMPDIR:-/tmp}/fm-discord-payload.XXXXXX") || return 1
   out=$(mktemp "${TMPDIR:-/tmp}/fm-discord-out.XXXXXX") || { rm -f "$payload"; return 1; }
-  if [ "$first" = 1 ] && [ -n "$reply_to" ]; then
+  if [ -n "$ALLOWED_USERS" ]; then
+    users_json=$(printf '%s\n' $ALLOWED_USERS | jq -R . | jq -s .) || { rm -f "$payload" "$out"; return 1; }
+    if [ "$first" = 1 ] && [ -n "$reply_to" ]; then
+      jq -n --arg c "$text" --arg r "$reply_to" --argjson u "$users_json" \
+        '{content:$c, message_reference:{message_id:$r}, allowed_mentions:{replied_user:false, users:$u}}' > "$payload" || { rm -f "$payload" "$out"; return 1; }
+    else
+      jq -n --arg c "$text" --argjson u "$users_json" '{content:$c, allowed_mentions:{users:$u}}' > "$payload" || { rm -f "$payload" "$out"; return 1; }
+    fi
+  elif [ "$first" = 1 ] && [ -n "$reply_to" ]; then
     jq -n --arg c "$text" --arg r "$reply_to" \
       '{content:$c, message_reference:{message_id:$r}, allowed_mentions:{replied_user:false}}' > "$payload" || { rm -f "$payload" "$out"; return 1; }
   else

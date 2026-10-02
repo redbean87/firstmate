@@ -77,18 +77,23 @@ if [ "$wake_stdin" = 1 ]; then
 fi
 
 notify_classify_wake() {
-  # Print decision|completion|blocker|routine for a wake/outcome reason line.
   local line
   line=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   case "$line" in
     *needs-decision*|*open\ decision*|*awaiting*answer*|*answer*needed*|*captain*decision*|*ask-user*|*decision*waiting*)
-      printf 'decision\n' ;;
-    *blocked*|*blocker*|*fail*)
-      printf 'blocker\n' ;;
-    *review-ready*|*review*ready*|*merge*|*check*green*|*checks-passed*|*complet*|*done*|*landed*|*shipped*|*ready*for*review*)
-      printf 'completion\n' ;;
-    *) printf 'routine\n' ;;
+      printf 'decision\n'; return 0 ;;
   esac
+  if printf '%s' "$line" | grep -Eq '(^|[^a-z0-9])(blocked|blocker|blockers|blocking|fail|failed|failing|failure|failures)([^a-z0-9]|$)'; then
+    printf 'blocker\n'; return 0
+  fi
+  case "$line" in
+    *review-ready*|*review*ready*|*check*green*|*checks-passed*|*ready*for*review*|*landed*|*shipped*)
+      printf 'completion\n'; return 0 ;;
+  esac
+  if printf '%s' "$line" | grep -Eq '(^|[^a-z0-9])(complete|completed|completing|completion|merge|merged|merging)([^a-z0-9]|$)'; then
+    printf 'completion\n'; return 0
+  fi
+  printf 'routine\n'
 }
 
 if [ -z "$class" ]; then
@@ -130,7 +135,7 @@ marker="$notify_dir/$event"
 if [ -e "$marker" ]; then exit 0; fi
 tmp=$(umask 077; mktemp "$notify_dir/.claim.XXXXXX" 2>/dev/null) || exit 1
 if ! printf '%s\n' "$(date +%s)" > "$tmp" || ! chmod 600 "$tmp"; then rm -f "$tmp"; exit 1; fi
-if ln -- "$tmp" "$marker" 2>/dev/null; then rm -f "$tmp"; else rm -f "$tmp"; exit 0; fi
+if ln -- "$tmp" "$marker" 2>/dev/null; then rm -f "$tmp"; else rm -f "$tmp"; if [ -e "$marker" ]; then exit 0; fi; echo "fm-discord-notify: cannot claim event $event" >&2; exit 1; fi
 find "$notify_dir" -type f -mtime +"$DISCORD_SEEN_RETENTION_DAYS" -delete 2>/dev/null || true
 
 body=$(discord_redact "$text")
@@ -142,7 +147,8 @@ case "$decision_key" in ''|*[!A-Za-z0-9._-]*) [ -z "$decision_key" ] || { echo "
 [ -z "$decision_key" ] || body="$body (decision: $decision_key)"
 msg="<@$owner> $body"
 
-if "$SCRIPT_DIR/fm-discord-send.sh" "$channel" "$msg" >/dev/null 2>&1; then
+case "$owner" in ''|*[!A-Za-z0-9_-]*) echo "fm-discord-notify: unsafe owner id" >&2; rm -f "$marker"; exit 2 ;; esac
+if "$SCRIPT_DIR/fm-discord-send.sh" "$channel" --allow-user "$owner" "$msg" >/dev/null 2>&1; then
   printf 'notified %s\n' "$event"
 else
   rc=$?
