@@ -168,10 +168,12 @@ PY
       *) usage; exit 2 ;; esac; shift || true; done
     [ -n "$file" ] && [ -f "$file" ] || { usage; exit 2; }
     content=$(jq -r '.content // empty' "$file")
-    rest=$(printf '%s' "$content" | sed -n -e 's/^[[:space:]]*!fm[[:space:]][[:space:]]*/ /p' -e 's/^[[:space:]]*<@[^>]*>[[:space:]][[:space:]]*fm[[:space:]][[:space:]]*/ /p' | sed 's/^ //' | head -n1)
+    rest=$(jq -rn --arg c "$content" '$c | if test("^[[:space:]]*!fm([[:space:]]|$)") then sub("^[[:space:]]*!fm[[:space:]]*"; "") elif test("^[[:space:]]*<@[^>]*>[[:space:]]+fm([[:space:]]|$)") then sub("^[[:space:]]*<@[^>]*>[[:space:]]+fm[[:space:]]*"; "") else "" end')
     [ -n "$rest" ] || { echo "fm-discord-commands: not a !fm command message" >&2; exit 1; }
-    sub=$(printf '%s' "$rest" | awk '{print $1}')
-    qtext=$(printf '%s' "$rest" | sed 's/^[^[:space:]]\{1,\}[[:space:]]*//')
+    trimmed=${rest#"${rest%%[![:space:]]*}"}
+    sub=${trimmed%%[[:space:]]*}
+    tmp=${trimmed#"$sub"}
+    qtext=${tmp#"${tmp%%[![:space:]]*}"}
     case "$sub" in ask|status) ;; *) echo "fm-discord-commands: unknown !fm subcommand" >&2; exit 1 ;; esac
     [ "$sub" = ask ] && [ -z "$qtext" ] && { echo "fm-discord-commands: !fm ask needs a question" >&2; exit 1; }
     mguild=$(jq -r '.guild_id // empty' "$file")

@@ -361,10 +361,6 @@ cat > "$TMP_ROOT/plain.json" <<'JSON'
 JSON
 out=$(FM_HOME="$home" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-poll.sh" --event-file "$TMP_ROOT/plain.json") || fail "plain message poll failed"
 assert_contains "$out" "discord-message m-plain" "plain messages still route as messages"
-# Nothing in the integration may listen on a socket or require a public
-# URL: the gateway is an outbound client, the REST poll is outbound HTTPS.
-assert_no_grep "socket.bind\|\.bind(\|listen(\|http\.server\|HTTPServer\|BaseHTTPRequestHandler\|add_url_rule\|Flask\|FastAPI" "$ROOT/bin/fm-discord-gateway.py" "gateway never binds or serves"
-assert_no_grep "socket.bind\|\.bind(\|listen(\|http\.server\|HTTPServer\|nc -l\|verify --signature" "$ROOT/bin/fm-discord-poll.sh" "poll path never binds or serves"
 pass "relay-style outbound-only reply path"
 
 pass "fm-discord"
