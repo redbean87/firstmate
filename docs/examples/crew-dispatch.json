@@ -22,5 +22,9 @@
   "default": [
     { "harness": "codex", "model": "gpt-5.5", "effort": "medium" },
     { "harness": "pi", "model": "anthropic/claude-sonnet-5", "effort": "medium", "provider": "claude" }
-  ]
+  ],
+  "projects": {
+    "expo-bowling-journal": { "harness": "pi", "model": "qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs" }
+  },
+  "projectDefault": { "harness": "opencode", "model": "opencode-go/muse-spark-1.3-contributor" }
 }
