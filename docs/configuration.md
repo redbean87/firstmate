@@ -862,7 +862,7 @@ For Claude, `ordinary` unsets `CLAUDE_CONFIG_DIR` rather than pointing it at `~/
 
 A Pi root can hold several provider logins at once, so the root alone does not say which account a launch spends.
 A pinned Pi launch therefore needs `--model <provider>/<id>` naming a declared provider, and Firstmate also passes `--provider <that provider>` so Pi cannot resolve the model under another signed-in provider.
-The ChatGPT Web bridge is one such explicitly selected provider: naming `--model chatgpt-web/gpt-5.6-luna` loads Firstmate's tracked provider extension for that launch only, so the home must also list `chatgpt-web` on line 2 before it may spend it (`bin/fm-pi-chatgpt-web-lib.sh` owns the mapping).
+The ChatGPT Web bridge is one such explicitly selected provider: naming `--model chatgpt-web/gpt-5.6-luna` loads Firstmate's tracked provider extension and the bridge's required turn-metadata extension for that launch only, so the home must also list `chatgpt-web` on line 2 before it may spend it (`bin/fm-pi-chatgpt-web-lib.sh` owns the mapping and bridge prerequisites).
 
 An unqualified model, an undeclared provider, or a raw Pi launch command, which cannot receive that flag, refuses; Firstmate never guesses a provider.
 
