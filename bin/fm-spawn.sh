@@ -641,6 +641,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
 . "$SCRIPT_DIR/fm-worker-account-lib.sh"
+# shellcheck source=bin/fm-pi-chatgpt-web-lib.sh
+. "$SCRIPT_DIR/fm-pi-chatgpt-web-lib.sh"
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
 # a direct report (see bin/fm-gate-refuse-lib.sh).
 fm_refuse_if_gate_agent
@@ -5058,6 +5060,22 @@ sq_worktree=$(shell_quote "$WT")
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 # A pinned Pi launch confines Pi's model lookup to the declared provider.
 [ -z "$WORKER_ACCOUNT_PROVIDER" ] || MODELFLAG="--provider $(shell_quote "$WORKER_ACCOUNT_PROVIDER") $MODELFLAG"
+# An explicitly selected ChatGPT Web model rides an extra -e carrying the
+# provider registration and turn-metadata extension, on crewmate and
+# secondmate Pi launches alike; any other model leaves the launch
+# byte-identical (bin/fm-pi-chatgpt-web-lib.sh owns the mapping).
+PICHATGPTWEBFLAG=
+case "$HARNESS" in
+pi | pi-signed)
+  if PICHATGPTWEBEXT=$(fm_chatgpt_web_extension_path "$MODEL"); then
+    [ -f "$PICHATGPTWEBEXT" ] || {
+      echo "error: --model '$MODEL' selects the ChatGPT Web provider, but its extension is missing at $PICHATGPTWEBEXT" >&2
+      exit 1
+    }
+    PICHATGPTWEBFLAG=" -e $(shell_quote "$PICHATGPTWEBEXT")"
+  fi
+  ;;
+esac
 # OpenCode v2 TUI model carrier (top-level `model` in OPENCODE_CONFIG_CONTENT);
 # empty for every other harness and for a default/unset model.
 OPENCODEMODEL=$(opencode_config_model_flag "$HARNESS" "$MODEL")
@@ -5088,9 +5106,9 @@ if [ "$HARNESS" = rovo ]; then
 fi
 LAUNCH=${LAUNCH//__BRIEF__/$sq_brief}
 LAUNCH=${LAUNCH//__TURNEND__/$sq_turnend}
-LAUNCH=${LAUNCH//__PIEXT__/$sq_piext}
+LAUNCH=${LAUNCH//__PIEXT__/$sq_piext$PICHATGPTWEBFLAG}
 LAUNCH=${LAUNCH//__PITURNEND__/$sq_piturnend}
-LAUNCH=${LAUNCH//__PIWATCH__/$sq_piwatch}
+LAUNCH=${LAUNCH//__PIWATCH__/$sq_piwatch$PICHATGPTWEBFLAG}
 LAUNCH=${LAUNCH//__OMPEXT__/$sq_ompext}
 LAUNCH=${LAUNCH//__OMPWORKERCFG__/$sq_ompcfg}
 LAUNCH=${LAUNCH//__OPINPUT__/$sq_opinput}

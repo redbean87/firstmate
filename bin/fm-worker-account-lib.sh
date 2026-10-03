@@ -55,6 +55,8 @@
 
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-pi-chatgpt-web-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-pi-chatgpt-web-lib.sh"
 
 FM_WORKER_ACCOUNT_CHECK_SECONDS=${FM_WORKER_ACCOUNT_CHECK_SECONDS:-30}
 
@@ -170,7 +172,7 @@ fm_worker_account_pi_provider() {
 # Returns 0 only when the runner's own check says the selected root is signed
 # in for this launch; otherwise prints one error and returns 1.
 fm_worker_account_check() {
-  local harness=$1 declared=$2 root=$3 executable=$4 provider=${5:-} out verdict name
+  local harness=$1 declared=$2 root=$3 executable=$4 provider=${5:-} out verdict name chatgpt_web_check_path probe_status
   local -a clean=(env -i "HOME=${HOME:-}" "PATH=${PATH:-}")
   for name in TMPDIR USER LOGNAME; do
     [ -z "${!name:-}" ] || clean+=("$name=${!name}")
@@ -202,8 +204,20 @@ fm_worker_account_check() {
     case "${verdict:-list}" in
     ready) return 0 ;;
     list)
-      if out=$(fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
-        "$executable" --list-models "$provider" 2>/dev/null </dev/null) &&
+      # An extension-registered provider is invisible to a bare list-models
+      # probe, so carry the registering extension exactly when the launch
+      # itself would (bin/fm-pi-chatgpt-web-lib.sh owns the mapping). The two
+      # probe shapes stay separate because an empty `"${array[@]}"` fails
+      # under `set -u` on stock macOS bash.
+      probe_status=0
+      if chatgpt_web_check_path=$(fm_chatgpt_web_extension_path "$provider"); then
+        out=$(fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
+          "$executable" -e "$chatgpt_web_check_path" --list-models "$provider" 2>/dev/null </dev/null) || probe_status=$?
+      else
+        out=$(fm_run_timed "$FM_WORKER_ACCOUNT_CHECK_SECONDS" "${clean[@]}" \
+          "$executable" --list-models "$provider" 2>/dev/null </dev/null) || probe_status=$?
+      fi
+      if [ "$probe_status" -eq 0 ] &&
         printf '%s\n' "$out" | awk -v p="$provider" 'NR > 1 && $1 == p { found = 1; exit } END { exit !found }'; then
         return 0
       fi
