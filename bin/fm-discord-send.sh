@@ -83,7 +83,7 @@ post_one() { # <text> <is-first>
   payload=$(mktemp "${TMPDIR:-/tmp}/fm-discord-payload.XXXXXX") || return 1
   out=$(mktemp "${TMPDIR:-/tmp}/fm-discord-out.XXXXXX") || { rm -f "$payload"; return 1; }
   if [ -n "$ALLOWED_USERS" ]; then
-    users_json=$(printf '%s\n' $ALLOWED_USERS | jq -R . | jq -s .) || { rm -f "$payload" "$out"; return 1; }
+    users_json=$(printf '%s\n' "$ALLOWED_USERS" | tr ' ' '\n' | jq -R . | jq -s .) || { rm -f "$payload" "$out"; return 1; }
     if [ "$first" = 1 ] && [ -n "$reply_to" ]; then
       jq -n --arg c "$text" --arg r "$reply_to" --argjson u "$users_json" \
         '{content:$c, message_reference:{message_id:$r}, allowed_mentions:{replied_user:false, users:$u}}' > "$payload" || { rm -f "$payload" "$out"; return 1; }
