@@ -29,9 +29,6 @@
 # context and never drives MCP or full-harness local execution.
 
 FM_CHATGPT_WEB_PROVIDER="chatgpt-web"
-FM_CHATGPT_WEB_MODEL_ID="gpt-5.6-luna"
-FM_CHATGPT_WEB_MODEL="chatgpt-web/gpt-5.6-luna"
-FM_CHATGPT_WEB_BASE_URL="http://127.0.0.1:17841/v1"
 FM_CHATGPT_WEB_METADATA_EXTENSION=${FM_CHATGPT_WEB_METADATA_EXTENSION:-"${HOME:?HOME is required}/tools/codex-chatgpt-web/pi-test/extensions/codex-bridge-turn-metadata.ts"}
 
 # fm_chatgpt_web_extension_path [model-or-provider]

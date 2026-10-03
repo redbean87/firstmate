@@ -15,10 +15,16 @@ set -u
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
+TMP_ROOT=$(fm_test_tmproot fm-pi-chatgpt-web)
+FM_CHATGPT_WEB_METADATA_EXTENSION="$TMP_ROOT/codex-bridge-turn-metadata.ts"
+# The bridge extension is an installed prerequisite in production. Keep the
+# fixture local so these launch-wiring tests are independent of the operator's
+# isolated bridge installation.
+printf '%s\n' 'export default function () {}' > "$FM_CHATGPT_WEB_METADATA_EXTENSION"
+
 # shellcheck source=bin/fm-pi-chatgpt-web-lib.sh
 . "$ROOT/bin/fm-pi-chatgpt-web-lib.sh"
 
-TMP_ROOT=$(fm_test_tmproot fm-pi-chatgpt-web)
 unset LAVISH_AXI_HOST PI_CODING_AGENT_DIR
 
 EXT="$ROOT/.pi/extensions/fm-chatgpt-web-provider.ts"
