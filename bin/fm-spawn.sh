@@ -5068,11 +5068,16 @@ PICHATGPTWEBFLAG=
 case "$HARNESS" in
 pi | pi-signed)
   if PICHATGPTWEBEXT=$(fm_chatgpt_web_extension_path "$MODEL"); then
+    PICHATGPTWEBMETADATA=$(fm_chatgpt_web_metadata_extension_path)
+    [ -f "$PICHATGPTWEBMETADATA" ] || {
+      echo "error: --model '$MODEL' requires the bridge metadata extension, but it is missing at $PICHATGPTWEBMETADATA" >&2
+      exit 1
+    }
     [ -f "$PICHATGPTWEBEXT" ] || {
       echo "error: --model '$MODEL' selects the ChatGPT Web provider, but its extension is missing at $PICHATGPTWEBEXT" >&2
       exit 1
     }
-    PICHATGPTWEBFLAG=" -e $(shell_quote "$PICHATGPTWEBEXT")"
+    PICHATGPTWEBFLAG=" -e $(shell_quote "$PICHATGPTWEBEXT") -e $(shell_quote "$PICHATGPTWEBMETADATA")"
   fi
   ;;
 esac

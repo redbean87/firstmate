@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # fm-pi-chatgpt-web-lib.sh - the single owner of Firstmate's ChatGPT Web
 # provider mapping for Pi workers: which model selector names the bridge,
-# which tracked extension registers that provider and stamps its turns, and
-# which loopback endpoint the extension talks to by default.
+# which extensions register the provider and stamp bridge turns, and the
+# fixed loopback endpoint.
 #
 # The bridge is the already-installed codex-chatgpt-web daemon
 # (~/tools/codex-chatgpt-web, loopback only); Firstmate never installs it,
 # authenticates it, or touches its session state. This lib only maps the
-# explicit `--model chatgpt-web/<id>` selection to the extension file below,
-# which bin/fm-spawn.sh loads with an extra `-e` on Pi-family launches and
-# bin/fm-worker-account-lib.sh loads for its `pi --list-models` sign-in
-# fallback. Without that `-e` the provider is unknown to Pi, so ambient
+# explicit `--model chatgpt-web/<id>` selection to the provider extension below
+# and the required bridge metadata extension from the isolated bridge Pi
+# environment. Both launch and pinned-provider probe load them explicitly.
+# Without those extensions the provider is unknown to Pi, so ambient
 # launches, existing providers, and default routing are unchanged.
 #
 # Selection contract: the Pi-level selector is `chatgpt-web/gpt-5.6-luna`,
@@ -21,10 +21,10 @@
 # "Worker account pin" owns that allowlist.
 #
 # Runtime contract (owned here, consumed by
-# .pi/extensions/fm-chatgpt-web-provider.ts): the extension registers the
-# provider against FM_CHATGPT_WEB_BASE_URL unless CHATGPT_WEB_BRIDGE_URL names
-# another loopback URL, sends api `openai-responses`, and stamps every bridge
-# turn with native Codex turn identity. Pi keeps executing all local tools;
+# .pi/extensions/fm-chatgpt-web-provider.ts): the provider extension registers the
+# provider against the fixed loopback URL and sends api `openai-responses`;
+# the required bridge metadata extension stamps every bridge turn with native
+# Codex turn identity. Pi keeps executing all local tools;
 # the bridge runs in browser-only mode, so the web model answers from its own
 # context and never drives MCP or full-harness local execution.
 
@@ -32,6 +32,7 @@ FM_CHATGPT_WEB_PROVIDER="chatgpt-web"
 FM_CHATGPT_WEB_MODEL_ID="gpt-5.6-luna"
 FM_CHATGPT_WEB_MODEL="chatgpt-web/gpt-5.6-luna"
 FM_CHATGPT_WEB_BASE_URL="http://127.0.0.1:17841/v1"
+FM_CHATGPT_WEB_METADATA_EXTENSION=${FM_CHATGPT_WEB_METADATA_EXTENSION:-"${HOME:?HOME is required}/tools/codex-chatgpt-web/pi-test/extensions/codex-bridge-turn-metadata.ts"}
 
 # fm_chatgpt_web_extension_path [model-or-provider]
 # Prints the absolute path of the tracked provider extension when the argument
@@ -49,4 +50,8 @@ fm_chatgpt_web_extension_path() {
   local libdir
   libdir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   printf '%s\n' "$(dirname "$libdir")/.pi/extensions/fm-chatgpt-web-provider.ts"
+}
+
+fm_chatgpt_web_metadata_extension_path() {
+  printf '%s\n' "$FM_CHATGPT_WEB_METADATA_EXTENSION"
 }

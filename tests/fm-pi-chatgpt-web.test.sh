@@ -22,6 +22,7 @@ TMP_ROOT=$(fm_test_tmproot fm-pi-chatgpt-web)
 unset LAVISH_AXI_HOST PI_CODING_AGENT_DIR
 
 EXT="$ROOT/.pi/extensions/fm-chatgpt-web-provider.ts"
+METADATA_EXT=$(fm_chatgpt_web_metadata_extension_path)
 
 # make_bridge_fakes <fakebin> <case-dir>
 make_bridge_fakes() {
@@ -29,18 +30,22 @@ make_bridge_fakes() {
   cat > "$fakebin/pi" <<SH
 #!/usr/bin/env bash
 root=\${PI_CODING_AGENT_DIR:-\$HOME/.pi/agent}
-extarg=
+extargs=
 preve=
 for a in "\$@"; do
-  if [ -n "\$preve" ]; then extarg=\$a; preve=; continue; fi
+  if [ -n "\$preve" ]; then extargs="\${extargs:+\$extargs }\$a"; preve=; continue; fi
   if [ "\$a" = -e ]; then preve=1; fi
 done
-if [ "\${1:-}" = -e ]; then shift 2; fi
+args=()
+while [ "\$#" -gt 0 ]; do
+  if [ "\$1" = -e ]; then shift 2; else args+=("\$1"); shift; fi
+done
+set -- "\${args[@]}"
 case "\${1:-}" in
   --help) printf '%s\n' 'Pi 0.86.1' 'Options: --help --tui-mode <mode>'; exit 0 ;;
   auth)
     provider=\$4
-    printf '%s %s %s\n' "\${PI_CODING_AGENT_DIR-unset}" "\$provider" "\${extarg:-no-ext}" >> '$dir/pi-checks'
+    printf '%s %s %s\n' "\${PI_CODING_AGENT_DIR-unset}" "\$provider" "\${extargs:-no-ext}" >> '$dir/pi-checks'
     if grep -qx "\$provider" "\$root/signed-in" 2>/dev/null; then
       printf '{"status":"ready","provider":"%s","authType":"oauth"}\n' "\$provider"
       exit 0
@@ -50,15 +55,15 @@ case "\${1:-}" in
     ;;
   --list-models)
     provider=\${2:-}
-    printf '%s %s %s\n' "\${PI_CODING_AGENT_DIR-unset}" "\$provider" "\${extarg:-no-ext}" >> '$dir/pi-checks'
+    printf '%s %s %s\n' "\${PI_CODING_AGENT_DIR-unset}" "\$provider" "\${extargs:-no-ext}" >> '$dir/pi-checks'
     printf 'provider  model  context\n'
-    if [ -n "\$extarg" ]; then printf 'chatgpt-web  gpt-5.6-luna  1.1M\n'; fi
+    if [ -n "\$extargs" ]; then printf 'chatgpt-web  gpt-5.6-luna  1.1M\n'; fi
     [ ! -f "\$root/listed" ] || cat "\$root/listed"
     exit 0
     ;;
 esac
 {
-  printf 'EXTARG=%s\n' "\$extarg"
+  printf 'EXTARGS=%s\n' "\$extargs"
   printf 'ARGS=%s\n' "\$*"
 } > '$dir/pi-worker'
 SH
@@ -87,6 +92,7 @@ spawn_ship() {
   : > "$CASE/launch.log"
   rm -f "$CASE/pi-checks"
   FM_FAKE_LAUNCH_LOG="$CASE/launch.log" \
+    FM_CHATGPT_WEB_METADATA_EXTENSION="$METADATA_EXT" \
     fm_test_run_spawn "$HOME_DIR" "$WT" "$FAKEBIN" "$id" "$PROJ" --mode no-mistakes --yolo off "$@"
 }
 
@@ -116,13 +122,14 @@ test_unpinned_bridge_launch_carries_the_extension() {
   expect_code 0 "$rc" "an unpinned bridge spawn should succeed: $out"
   launch=$(cat "$CASE/launch.log")
   assert_contains "$launch" "--model 'chatgpt-web/gpt-5.6-luna'" "the launch must name the bridge model"
-  assert_contains "$launch" "-e '$EXT'" "the bridge launch must carry the provider extension"
+  assert_contains "$launch" "-e '$EXT' -e '$METADATA_EXT'" "the bridge launch must carry provider and required metadata extensions"
   assert_not_contains "$launch" "--provider" "an unpinned launch must not add a provider flag"
   assert_contains "$launch" "-e '$HOME_DIR/state/$id.pi-ext.ts'" "the bridge launch must keep the turn-end extension"
   env -i HOME="$HOME_DIR/user-home" PATH="$FAKEBIN:$PATH" TERM=xterm \
     PI_CODING_AGENT_DIR="$CASE/ambient-pi" \
     bash -c "$launch" || fail "the recorded bridge launch failed in the synthetic pane"
-  assert_grep "EXTARG=$EXT" "$CASE/pi-worker" "the worker must receive the provider extension"
+  assert_grep "$EXT" "$CASE/pi-worker" "the worker must receive the provider extension"
+  assert_grep "$METADATA_EXT" "$CASE/pi-worker" "the worker must receive the required metadata extension"
   assert_grep "chatgpt-web/gpt-5.6-luna" "$CASE/pi-worker" "the worker must receive the bridge model"
   pass "an unpinned bridge-model launch carries the provider extension and keeps the turn-end guard"
 }
@@ -148,13 +155,14 @@ test_pinned_bridge_launch_passes_the_extension_aware_check() {
   assert_contains "$out" "account_provider=chatgpt-web" "the spawn should report the bridge provider"
   launch=$(cat "$CASE/launch.log")
   assert_contains "$launch" "--provider 'chatgpt-web'" "a pinned launch must confine model lookup to the bridge"
-  assert_contains "$launch" "-e '$EXT'" "a pinned bridge launch must carry the provider extension"
+  assert_contains "$launch" "-e '$EXT' -e '$METADATA_EXT'" "a pinned bridge launch must carry provider and required metadata extensions"
   assert_grep "chatgpt-web no-ext" "$CASE/pi-checks" "the auth check must ask about the bridge provider"
-  assert_grep "chatgpt-web $EXT" "$CASE/pi-checks" "the list-models fallback must carry the registering extension"
+  assert_grep "chatgpt-web $EXT $METADATA_EXT" "$CASE/pi-checks" "the list-models fallback must carry provider and required metadata extensions"
   env -i HOME="$HOME_DIR/user-home" PATH="$FAKEBIN:$PATH" TERM=xterm \
     PI_CODING_AGENT_DIR="$CASE/ambient-pi" \
     bash -c "$launch" || fail "the recorded pinned launch failed in the synthetic pane"
-  assert_grep "EXTARG=$EXT" "$CASE/pi-worker" "the pinned worker must receive the provider extension"
+  assert_grep "$EXT" "$CASE/pi-worker" "the pinned worker must receive the provider extension"
+  assert_grep "$METADATA_EXT" "$CASE/pi-worker" "the pinned worker must receive the required metadata extension"
   pass "a pinned bridge-model launch passes the extension-aware sign-in check and carries the extension"
 }
 
@@ -178,7 +186,7 @@ test_real_pi_lists_the_registered_provider() {
   fi
   dir="$TMP_ROOT/real-pi-agent"
   mkdir -p "$dir"
-  listing=$(PI_CODING_AGENT_DIR="$dir" pi -e "$EXT" --list-models chatgpt-web 2>&1) || \
+  listing=$(PI_CODING_AGENT_DIR="$dir" pi -e "$EXT" -e "$METADATA_EXT" --list-models chatgpt-web 2>&1) || \
     fail "real pi --list-models chatgpt-web failed: $listing"
   assert_contains "$listing" "gpt-5.6-luna" "real pi must list the bridge model under the extension"
   printf '%s\n' "$listing" | awk 'NR > 1 && $1 == "chatgpt-web" && $2 == "gpt-5.6-luna" { found = 1 } END { exit !found }' || \
