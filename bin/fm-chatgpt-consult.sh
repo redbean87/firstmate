@@ -49,7 +49,7 @@ case "$MODE" in
   audit|plan) ;;
   *) printf 'fm-chatgpt: --mode must be audit or plan\n' >&2; usage; exit 2 ;;
 esac
-[ -n "$THREAD" ] || { printf 'fm-chatgpt: --thread is required (Firstmate owns the continuation id)\n' >&2; usage; exit 2; }
+[ -n "$THREAD" ] || { printf 'fm-chatgpt: --thread is required (Firstmate owns the turn-identity id)\n' >&2; usage; exit 2; }
 command -v curl >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs curl\n' >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs jq\n' >&2; exit 1; }
 
