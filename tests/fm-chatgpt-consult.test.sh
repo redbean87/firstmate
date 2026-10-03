@@ -113,9 +113,9 @@ test_model_slug() {
   mkdir -p "$dir"
   new_prompt
   pid=$(start_stub "$dir")
-  bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" --mode audit --thread t1 --model gpt-5.6-luna >/dev/null 2>&1
+  bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" --mode audit --thread t1 >/dev/null 2>&1
   stop_stub "$pid"
-  [ "$(jq -r '.model' "$dir/request.json")" = "chatgpt-web/gpt-5.6-luna" ] || fail "a bare model id must ride the qualified slug"
+  [ "$(jq -r '.model' "$dir/request.json")" = "chatgpt-web/gpt-5.6-luna" ] || fail "the request must ride the default qualified Luna slug"
   local slug rc
   slug=$(fm_chatgpt_model_slug "gpt-5.6-luna"); rc=$?
   expect_code 0 "$rc" "the lib should accept a bare model id"
@@ -126,7 +126,7 @@ test_model_slug() {
 }
 
 test_thread_propagation() {
-  local dir=$TMP_ROOT/thread pid out
+  local dir=$TMP_ROOT/thread pid out rc
   mkdir -p "$dir"
   new_prompt
   pid=$(start_stub "$dir")
@@ -134,18 +134,10 @@ test_thread_propagation() {
   stop_stub "$pid"
   [ "$(request_meta thread | cut -d' ' -f1)" = "thread-keep-7" ] || fail "the request must propagate the supplied thread id"
   [ ! -s "$dir/stderr.txt" ] || fail "a supplied thread must not be re-reported, got: $(cat "$dir/stderr.txt")"
-  pid=$(start_stub "$dir")
-  bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" --mode plan >"$dir/out.txt" 2>"$dir/gen.txt"
-  stop_stub "$pid"
-  grep -Eq "^thread=.+" "$dir/gen.txt" || fail "a generated thread id must be reported for Firstmate to persist"
-  local generated
-  generated=$(sed 's/^thread=//' "$dir/gen.txt")
-  rm -f "$dir/request.json"
-  pid=$(start_stub "$dir")
-  bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" --mode plan --thread "$generated" >/dev/null 2>&1
-  stop_stub "$pid"
-  [ "$(request_meta thread | cut -d' ' -f1)" = "$generated" ] || fail "a re-supplied thread id must reproduce the continuation key"
-  pass "supplied thread ids propagate and generated ones round-trip"
+  out=$(bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" --mode plan 2>&1); rc=$?
+  expect_code 2 "$rc" "a missing --thread must fail closed"
+  assert_contains "$out" "--thread" "the failure must name the missing option"
+  pass "supplied thread ids propagate and a missing thread fails closed"
 }
 
 test_bridge_unavailable_fails_closed() {

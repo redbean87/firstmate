@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # fm-chatgpt-consult.sh - Firstmate-owned ChatGPT consultation client.
 # Usage: fm-chatgpt-consult.sh --prompt-file FILE --mode audit|plan
-#          [--thread THREAD-ID] [--model MODEL]
+#          --thread THREAD-ID
 #
 # Builds one openai-responses request from the prompt file, stamps it with the
 # Codex turn identity the local bridge requires (bin/fm-chatgpt-bridge-lib.sh
 # owns that contract), POSTs it to the already-running loopback bridge, and
 # prints ChatGPT's response text to stdout and nothing else.
 #
-# --thread names the Firstmate-owned continuation id; multi-round continuity
-# is keyed by that id alone, so Firstmate persists it per task and reuses it
-# across calls. Without --thread a fresh id is generated and reported as
-# `thread=<id>` on stderr for Firstmate to persist.
+# --thread is required and names the Firstmate-owned turn-identity id stamped
+# into every request. It does not carry conversation continuity by itself:
+# the bridge replays prior turns only via previous_response_id chaining or
+# history inside the request, and this client sends neither (the lib owns the
+# verified details). Each call is one self-contained turn, so Firstmate
+# includes any prior context it needs considered in the prompt file.
 #
 # This is a consultation channel, not a Pi provider: no harness, no model
 # registry, no account pin, no local-tool execution. The bridge lifecycle
@@ -27,7 +29,7 @@ LIBDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$LIBDIR/fm-chatgpt-bridge-lib.sh"
 
 usage() {
-  printf 'usage: %s --prompt-file FILE --mode audit|plan [--thread ID] [--model MODEL]\n' "$(basename "$0")" >&2
+  printf 'usage: %s --prompt-file FILE --mode audit|plan --thread ID\n' "$(basename "$0")" >&2
 }
 
 PROMPT_FILE="" MODE="" THREAD="" MODEL="$FM_CHATGPT_WEB_MODEL"
@@ -36,7 +38,6 @@ while [ $# -gt 0 ]; do
     --prompt-file) PROMPT_FILE=${2:-}; shift 2 ;;
     --mode) MODE=${2:-}; shift 2 ;;
     --thread) THREAD=${2:-}; shift 2 ;;
-    --model) MODEL=${2:-}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'fm-chatgpt: unknown argument %s\n' "$1" >&2; usage; exit 2 ;;
   esac
@@ -48,18 +49,11 @@ case "$MODE" in
   audit|plan) ;;
   *) printf 'fm-chatgpt: --mode must be audit or plan\n' >&2; usage; exit 2 ;;
 esac
+[ -n "$THREAD" ] || { printf 'fm-chatgpt: --thread is required (Firstmate owns the continuation id)\n' >&2; usage; exit 2; }
 command -v curl >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs curl\n' >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs jq\n' >&2; exit 1; }
 
 BRIDGE_URL=$(fm_chatgpt_bridge_url) || exit 1
-if [ -z "$THREAD" ]; then
-  if command -v uuidgen >/dev/null 2>&1; then
-    THREAD=$(uuidgen | tr -d '-' | tr 'A-Z' 'a-z')
-  else
-    THREAD="fm$(date +%s)$$"
-  fi
-  printf 'thread=%s\n' "$THREAD" >&2
-fi
 
 case "$MODE" in
   audit)
@@ -95,9 +89,6 @@ case "$HTTP" in
 esac
 
 TEXT=$(jq -r '[(.output // [])[] | select(.type == "message") | (.content // [])[] | select(.type == "output_text" or .type == "text") | .text] | join("\n")' "$RESPONSE")
-if [ -z "$TEXT" ]; then
-  TEXT=$(jq -r '.output_text // empty' "$RESPONSE")
-fi
 [ -n "$TEXT" ] || {
   printf 'fm-chatgpt: bridge returned no response text (HTTP %s)\n' "$HTTP" >&2
   exit 1

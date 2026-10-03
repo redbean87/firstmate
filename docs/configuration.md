@@ -909,7 +909,7 @@ A low-thinking Pi worker still executes the resulting audit or plan through the 
 `CHATGPT_WEB_BRIDGE_URL` overrides the bridge base URL, and the default is the loopback `http://127.0.0.1:17841/v1`.
 Only loopback overrides are accepted; anything else refuses.
 The bridge lifecycle stays external: Firstmate never installs, authenticates, or repairs the bridge, and an unreachable bridge fails the consultation with a prerequisite report.
-Multi-round continuity is keyed by the Firstmate-owned `--thread` id alone, so Firstmate persists one id per task and reuses it across calls; without `--thread` the script generates an id and reports it as `thread=<id>` on stderr.
+`--thread` is required and is a Firstmate-owned turn-identity id, but it does not by itself carry conversation continuity: the bridge replays prior turns only through `previous_response_id` chaining or history inside the request, and this client sends neither, so every consultation is a self-contained turn and Firstmate includes any prior context it needs considered in the prompt file.
 [`bin/fm-chatgpt-bridge-lib.sh`](../bin/fm-chatgpt-bridge-lib.sh) owns URL resolution, model slug handling, and Codex turn-metadata stamping.
 
 ## Home brief include (config/brief-include.md)

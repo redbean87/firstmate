@@ -20,11 +20,14 @@
 # `chatgpt-web/<id>` slug (a bare id falls into native Codex passthrough and
 # fails against the loopback key), and requires every browser-backed turn to
 # carry body.client_metadata["x-codex-turn-metadata"] plus stable Codex item
-# ids. Multi-round continuity is keyed by the supplied thread id alone: the
-# bridge derives its conversation key from thread_id with the model held
-# stable, so Firstmate persists one thread id per consultation task and the
-# bridge needs no other continuation state beyond the standard optional
-# previous_response_id chaining it already serves from local state.
+# ids. Continuity is NOT keyed by the supplied thread id alone (verified
+# against the bridge source): history replay is keyed solely on
+# previous_response_id, the thread+model conversation key is consumed only on
+# the local-tools retained-conversation path this stateless browser turn never
+# takes, and the Luna checkpoint store requires the prior assistant answer
+# inside the current input. This client sends neither, so every consultation
+# is one self-contained turn; the thread id rides the metadata for turn
+# identity and Firstmate-side task bookkeeping only.
 
 FM_CHATGPT_WEB_PROVIDER="chatgpt-web"
 FM_CHATGPT_WEB_MODEL_ID="gpt-5.6-luna"
