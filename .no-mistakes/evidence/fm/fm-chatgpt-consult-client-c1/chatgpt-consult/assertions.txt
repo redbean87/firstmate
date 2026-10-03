@@ -1,0 +1,27 @@
+PASS: audit request carries auditor/audit-findings instructions
+PASS: audit request carries the prompt file text
+PASS: audit stdout is exactly the bridge's response text
+PASS: audit success writes nothing to stderr
+PASS: plan request carries planner/execution-plan instructions
+PASS: plan request carries the prompt file text
+PASS: request rides the qualified Luna slug chatgpt-web/gpt-5.6-luna
+PASS: turn metadata carries the supplied thread id
+PASS: turn metadata carries a well-formed deterministic turn id
+PASS: input message carries a well-formed stable item id
+PASS: role-only input item gains type=message
+PASS: metadata carries sandbox dangerFullAccess
+PASS: metadata workspace_roots is exactly [cwd] (/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H)
+PASS: identical prompt+mode stamps an identical turn id (turn_f1867525ab050d769e2d46350e055554)
+PASS: different prompt content stamps a different turn id
+PASS: each call stamps its own thread id even for identical content
+PASS: both rounds propagate the same supplied thread id
+PASS: round 2 sends no previous_response_id anywhere in the request
+PASS: round 2 input contains only its own prompt (no replayed round-1 history)
+PASS: unreachable bridge: empty stdout, bridge prerequisite on stderr
+PASS: bridge HTTP 500: empty stdout, status reported on stderr
+PASS: bridge 200-without-text: empty stdout, diagnostic on stderr
+PASS: non-loopback override refused before any request
+PASS: missing --thread error says turn-identity id (fixed wording)
+PASS: invalid mode fails closed naming allowed modes
+
+TOTAL FAILURES: 0

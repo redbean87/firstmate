@@ -1,0 +1,32 @@
+=== LIVE consultation against the real codex-chatgpt-web bridge (127.0.0.1:17841) ===
+$ fm-chatgpt-consult.sh --prompt-file pong.txt --mode audit --thread live-evidence-1
+rc=0; stderr empty; stdout:
+> **Local tools unavailable**
+>
+> `ChatGPT Web Luna` cannot access the local Codex computer in this turn. The accumulated context does not contain local tool results yet: it will see instructions and attachments, but not workspace contents. ChatGPT-native capabilities such as web search remain available when the product provides them.
+>
+> **Action:** Open `MCP` in `Codex Web GPT` and connect the `Full` harness to give the selected ChatGPT Web model access to local tools.
+PONG
+
+=== LIVE continuity probe, SAME thread live-cont-1, round 1 (plan mode) ===
+prompt: 'My favorite animal is the platypus. Reply with just: OK'
+rc=0 stdout:
+> **Local tools unavailable**
+>
+> `ChatGPT Web Luna` cannot access the local Codex computer in this turn. The accumulated context does not contain local tool results yet: it will see instructions and attachments, but not workspace contents. ChatGPT-native capabilities such as web search remain available when the product provides them.
+>
+> **Action:** Open `MCP` in `Codex Web GPT` and connect the `Full` harness to give the selected ChatGPT Web model access to local tools.
+OK
+
+=== LIVE continuity probe, SAME thread live-cont-1, round 2 (plan mode) ===
+prompt: 'What is my favorite animal? Answer in one word.'
+rc=0 stdout:
+> **Local tools unavailable**
+>
+> `ChatGPT Web Luna` cannot access the local Codex computer in this turn. The accumulated context does not contain local tool results yet: it will see instructions and attachments, but not workspace contents. ChatGPT-native capabilities such as web search remain available when the product provides them.
+>
+> **Action:** Open `MCP` in `Codex Web GPT` and connect the `Full` harness to give the selected ChatGPT Web model access to local tools.
+Unknown
+
+Round 2 answered 'Unknown': the bridge kept no thread-id-keyed memory of round 1,
+matching docs/configuration.md: every consultation is a self-contained turn.

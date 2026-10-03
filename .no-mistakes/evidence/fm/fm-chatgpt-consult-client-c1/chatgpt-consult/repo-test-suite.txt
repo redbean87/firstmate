@@ -1,0 +1,9 @@
+$ bash tests/fm-chatgpt-consult.test.sh
+ok - an audit consult posts the auditor framing with the prompt text and prints only the answer
+ok - a plan consult posts the planner framing with the prompt text
+ok - consultation turns carry the Codex turn stamp and stable item ids
+ok - bare model ids ride the bridge slug and doubled selectors refuse
+ok - supplied thread ids propagate and a missing thread fails closed
+ok - an unreachable bridge fails closed with a prerequisite report
+ok - a failing bridge fails closed with its status
+exit=0

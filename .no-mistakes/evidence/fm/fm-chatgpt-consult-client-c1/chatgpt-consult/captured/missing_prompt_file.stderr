@@ -1,0 +1,2 @@
+fm-chatgpt: --prompt-file is required
+usage: fm-chatgpt-consult.sh --prompt-file FILE --mode audit|plan --thread ID

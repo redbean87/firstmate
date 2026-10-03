@@ -1,0 +1,2 @@
+fm-chatgpt: --thread is required (Firstmate owns the turn-identity id)
+usage: fm-chatgpt-consult.sh --prompt-file FILE --mode audit|plan --thread ID

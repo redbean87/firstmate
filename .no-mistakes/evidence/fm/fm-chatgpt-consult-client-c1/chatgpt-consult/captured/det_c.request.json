@@ -1,0 +1,15 @@
+{
+  "model": "chatgpt-web/gpt-5.6-luna",
+  "instructions": "You are a senior code-review auditor. Read the objective and context below and return audit findings: risks, correctness gaps, and missing edge cases, ordered by severity. Return findings only, no execution plan.",
+  "input": [
+    {
+      "role": "user",
+      "content": "Add rate limiting to the login endpoint.\n",
+      "type": "message",
+      "id": "msg_7ee94664345e60ab5a1b69c9cf32745c"
+    }
+  ],
+  "client_metadata": {
+    "x-codex-turn-metadata": "{\"thread_id\":\"thread-det-c\",\"turn_id\":\"turn_d4d2f9d3406db6430a0871bb8144a522\",\"cwd\":\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H\",\"workspace_roots\":[\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H\"],\"sandbox\":\"dangerFullAccess\"}"
+  }
+}

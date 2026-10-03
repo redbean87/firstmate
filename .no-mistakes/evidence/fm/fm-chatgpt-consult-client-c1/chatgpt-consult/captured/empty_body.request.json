@@ -1,0 +1,15 @@
+{
+  "model": "chatgpt-web/gpt-5.6-luna",
+  "instructions": "You are a senior code-review auditor. Read the objective and context below and return audit findings: risks, correctness gaps, and missing edge cases, ordered by severity. Return findings only, no execution plan.",
+  "input": [
+    {
+      "role": "user",
+      "content": "Review the login handler for auth gaps.\n",
+      "type": "message",
+      "id": "msg_919be02afa6abb11718f1e209b29f3b0"
+    }
+  ],
+  "client_metadata": {
+    "x-codex-turn-metadata": "{\"thread_id\":\"t-empty\",\"turn_id\":\"turn_f1867525ab050d769e2d46350e055554\",\"cwd\":\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H\",\"workspace_roots\":[\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H\"],\"sandbox\":\"dangerFullAccess\"}"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "model": "chatgpt-web/gpt-5.6-luna",
+  "instructions": "You are a senior implementation planner. Read the objective, context, and any findings below and return a concrete step-by-step execution plan a junior worker can follow without further design decisions. Return the plan only.",
+  "input": [
+    {
+      "role": "user",
+      "content": "Review the login handler for auth gaps.\n",
+      "type": "message",
+      "id": "msg_919be02afa6abb11718f1e209b29f3b0"
+    }
+  ],
+  "client_metadata": {
+    "x-codex-turn-metadata": "{\"thread_id\":\"thread-evidence-2\",\"turn_id\":\"turn_83b0e0954f090d55f0f004975e9b8743\",\"cwd\":\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H\",\"workspace_roots\":[\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H\"],\"sandbox\":\"dangerFullAccess\"}"
+  }
+}

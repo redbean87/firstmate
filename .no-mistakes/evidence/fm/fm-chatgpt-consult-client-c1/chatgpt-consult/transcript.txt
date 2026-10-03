@@ -1,0 +1,47 @@
+=== S1 audit consultation (disposable bridge on 127.0.0.1:56921) ===
+== audit_ok: rc=0 requests_seen=1
+-- stdout: STUB-CONSULTATION-ANSWER: 1. auth gaps found in login handler
+-- stderr: 
+=== S2 plan consultation ===
+== plan_ok: rc=0 requests_seen=2
+-- stdout: STUB-CONSULTATION-ANSWER: 1. auth gaps found in login handler
+-- stderr: 
+=== S4/S5 turn-id determinism: same content twice, then different content ===
+== det_a: rc=0 requests_seen=3
+-- stdout: STUB-CONSULTATION-ANSWER: 1. auth gaps found in login handler
+-- stderr: 
+== det_b: rc=0 requests_seen=4
+-- stdout: STUB-CONSULTATION-ANSWER: 1. auth gaps found in login handler
+-- stderr: 
+== det_c: rc=0 requests_seen=5
+-- stdout: STUB-CONSULTATION-ANSWER: 1. auth gaps found in login handler
+-- stderr: 
+=== S5 continuity: two self-contained turns on the SAME thread ===
+== cont_1: rc=0 requests_seen=6
+-- stdout: STUB-CONSULTATION-ANSWER: 1. auth gaps found in login handler
+-- stderr: 
+== cont_2: rc=0 requests_seen=7
+-- stdout: STUB-CONSULTATION-ANSWER: 1. auth gaps found in login handler
+-- stderr: 
+=== S6 bridge unreachable ===
+== unreachable: rc=1 stdout_bytes=0 stderr=fm-chatgpt: bridge unreachable at http://127.0.0.1:1/v1; start the codex-chatgpt-web bridge before consulting
+=== S7 bridge HTTP 500 ===
+== http500: rc=1 requests_seen=8
+-- stdout: 
+-- stderr: fm-chatgpt: bridge request failed with HTTP 500: {"error": {"message": "bridge exploded"}}
+=== S8 bridge 200 but no response text ===
+== empty_body: rc=1 requests_seen=9
+-- stdout: 
+-- stderr: fm-chatgpt: bridge returned no response text (HTTP 200)
+=== S9 non-loopback bridge override refused ===
+== nonloopback: rc=1 stdout_bytes=0 stderr=fm-chatgpt: refusing non-loopback bridge URL http://10.255.255.1:9/v1 (loopback-only contract)
+=== S10 argument validation ===
+== missing --thread: rc=2 stderr=fm-chatgpt: --thread is required (Firstmate owns the turn-identity id)
+== missing --prompt-file: rc=2 stderr=fm-chatgpt: --prompt-file is required
+== nonexistent prompt file: rc=2 stderr=fm-chatgpt: prompt file not found: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-chatgpt-evidence.PQEHCV/does-not-exist.txt
+== bad mode: rc=2 stderr=fm-chatgpt: --mode must be audit or plan
+== unknown arg: rc=2 stderr=fm-chatgpt: unknown argument --bogus
+=== S12 assertions over captured requests ===
+{"model":"chatgpt-web/gpt-5.6-luna","instr":"You are a senior code-review auditor. Read the objective and","input0":{"role":"user","content":"Review the login handler for auth gaps.\n","type":"message","id":"msg_919be02afa6abb11718f1e209b29f3b0"},"meta":{"thread_id":"thread-evidence-1","turn_id":"turn_f1867525ab050d769e2d46350e055554","cwd":"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H","workspace_roots":["/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M42004ZXA7X6FB4G6MBNBH0H"],"sandbox":"dangerFullAccess"}}
+"You are a senior implementation planner. Read the objective, context, and any findings below and return a concrete step-by-step execution plan a junior worker can follow without further design decisions. Return the plan only."
+DONE
