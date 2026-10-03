@@ -1,0 +1,9 @@
+$ pi -e <tracked provider extension> -e <isolated bridge metadata extension> --provider chatgpt-web --model chatgpt-web/gpt-5.6-luna --print --no-session --no-context-files --no-skills --no-prompt-templates --no-tools "Reply with exactly: FIRSTMATE_CHATGPT_OK"
+> **Local tools unavailable**
+>
+> `ChatGPT Web Luna` cannot access the local Codex computer in this turn. The accumulated context does not contain local tool results yet: it will see instructions and attachments, but not workspace contents. ChatGPT-native capabilities such as web search remain available when the product provides them.
+>
+> **Action:** Open `MCP` in `Codex Web GPT` and connect the `Full` harness to give the selected ChatGPT Web model access to local tools.
+FIRSTMATE\_CHATGPT\_OK
+
+exit=0

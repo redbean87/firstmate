@@ -1,0 +1,10 @@
+> **Local tools unavailable**
+>
+> `ChatGPT Web Luna` cannot access the local Codex computer in this turn. The accumulated context does not contain local tool results yet: it will see instructions and attachments, but not workspace contents. ChatGPT-native capabilities such as web search remain available when the product provides them.
+>
+> **Action:** Open `MCP` in `Codex Web GPT` and connect the `Full` harness to give the selected ChatGPT Web model access to local tools.
+FIRSTMATE\_CHATGPT\_OK
+
+exit_status=0
+isolated_home=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-chatgpt-pi.vO1Gd8/home
+pi_config_dir=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-chatgpt-pi.vO1Gd8/pi

@@ -1,0 +1,14 @@
+command: pi -e <tracked-provider> -e <installed-metadata-extension> --no-session --no-context-files --model chatgpt-web/gpt-5.6-luna --print <exact-response prompt>
+exit: 0
+
+Pi response:
+> **Local tools unavailable**
+>
+> `ChatGPT Web Luna` cannot access the local Codex computer in this turn. The accumulated context does not contain local tool results yet: it will see instructions and attachments, but not workspace contents. ChatGPT-native capabilities such as web search remain available when the product provides them.
+>
+> **Action:** Open `MCP` in `Codex Web GPT` and connect the `Full` harness to give the selected ChatGPT Web model access to local tools.
+FIRSTMATE\_CHATGPT\_OK
+
+Bridge request structure (content omitted by extension):
+{"label":"before","keys":["model","input","stream","prompt_cache_key","prompt_cache_retention","prompt_cache_options","store","max_output_tokens","tools"],"input":[{"role":"system","hasId":"undefined","contentType":"string"},{"role":"user","hasId":"undefined","contentType":"array:Object"}]}
+{"label":"after","keys":["model","input","stream","prompt_cache_key","prompt_cache_retention","prompt_cache_options","store","max_output_tokens","tools","client_metadata"],"input":[{"type":"message","role":"system","hasId":"string","contentType":"string"},{"type":"message","role":"user","hasId":"string","contentType":"array:Object"}]}

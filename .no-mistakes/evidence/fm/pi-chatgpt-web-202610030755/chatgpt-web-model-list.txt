@@ -1,0 +1,2 @@
+provider     model         context  max-out  thinking  images
+chatgpt-web  gpt-5.6-luna  1.1M     100K     no        yes   

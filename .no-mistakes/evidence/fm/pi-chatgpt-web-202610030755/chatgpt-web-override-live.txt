@@ -1,0 +1,9 @@
+command: CHATGPT_WEB_BRIDGE_URL=http://127.0.0.1:1/v1 pi -e <tracked-provider> -e <installed-metadata-extension> --no-session --no-context-files --model chatgpt-web/gpt-5.6-luna --print <exact-response prompt>
+exit: 0 (request completed through configured bridge; override port 1 was not used)
+
+> **Local tools unavailable**
+>
+> `ChatGPT Web Luna` cannot access the local Codex computer in this turn. The accumulated context does not contain local tool results yet: it will see instructions and attachments, but not workspace contents. ChatGPT-native capabilities such as web search remain available when the product provides them.
+>
+> **Action:** Open `MCP` in `Codex Web GPT` and connect the `Full` harness to give the selected ChatGPT Web model access to local tools.
+FIRSTMATE\_CHATGPT\_OK
