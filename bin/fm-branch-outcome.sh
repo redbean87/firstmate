@@ -481,9 +481,9 @@ processed_init_locked() {
 # key and the tap's own classification stay in step; this caller's only
 # delta is that a captain row the rule leaves routine defaults to
 # completion, so a captain verdict always pings.
-outcome_notify_class() { # <wake> <summary> -> decision|completion|blocker
+outcome_notify_class() { # <summary> -> decision|completion|blocker
   local class
-  class=$(discord_classify_notify_text "$1 $2")
+  class=$(discord_classify_notify_text "$1")
   if [ "$class" = routine ]; then class=completion; fi
   printf '%s\n' "$class"
 }
@@ -516,12 +516,12 @@ outcome_notify_text() { # <summary> -> text on stdout
 # Fire the tap for one stored captain row. Always returns 0: the row is
 # already durable, so a failed send is a stderr warning, never an append
 # failure (failing the append would record a duplicate row on retry).
-outcome_maybe_notify_discord() { # <task> <seq> <summary> <wake>; always 0
-  local task=$1 seq=$2 summary=$3 wake=$4 class event text dkey out rc=0
-  class=$(outcome_notify_class "$wake" "$summary")
+outcome_maybe_notify_discord() { # <task> <seq> <summary>; always 0
+  local task=$1 seq=$2 summary=$3 class event text dkey out rc=0
+  class=$(outcome_notify_class "$summary")
   dkey=
   if [ "$class" = decision ]; then
-    dkey=$(printf '%s %s' "$wake" "$summary" | sed -n -E 's/.*\[key=([A-Za-z0-9._-]+)\].*/\1/p')
+    dkey=$(printf '%s' "$summary" | sed -n -E 's/.*\[key=([A-Za-z0-9._-]+)\].*/\1/p')
     case "$dkey" in ''|*[!A-Za-z0-9._-]*) dkey= ;; esac
   fi
   event=$(outcome_notify_key "$task" "$seq" "$class" "$dkey")
@@ -638,7 +638,7 @@ case "$CMD" in
     fm_lock_release "$LOCK"
     printf '%s\n' "$SEQ"
     if [ "$VERDICT" = captain ]; then
-      outcome_maybe_notify_discord "$TASK" "$SEQ" "$SUMMARY" "$WAKE"
+      outcome_maybe_notify_discord "$TASK" "$SEQ" "$SUMMARY"
     fi
     ;;
   unread)

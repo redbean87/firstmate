@@ -476,6 +476,12 @@ export FAKE_SEND_CODE=200
 wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=wire-retry]: decide now' >/dev/null 2>&1 || fail "retry append failed"
 [ "$(wire_posts)" = "$((before + 2))" ] || fail "retry after failure must deliver"
 [ -e "$wirehome/state/discord-notify/decision-wire-ship-wire-retry" ] || fail "delivered retry must hold its marker"
+wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=wake-axis]: pick the protocol' >/dev/null 2>&1 || fail "wake-axis decision append failed"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-wake-axis" ] || fail "decision row must hold its marker"
+before=$(wire_posts)
+wire_append --task wire-ship --verdict captain --wake 'needs-decision [key=wake-axis]: pick the protocol' --summary 'blocked: release gate is failing on macOS' >/dev/null 2>"$TMP_ROOT/wire-wake.err" || fail "wake-attributed blocker append failed"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "wake decision vocabulary must not swallow the blocker ping"
+assert_grep "[blocker]" "$TMP_ROOT/wire-wake.err" "blocker class derives from the summary alone"
 # An unconfigured home stays inert and green.
 barehome="$TMP_ROOT/bare-home"; mkdir -p "$barehome/state" "$barehome/config"
 before=$(wire_posts)
