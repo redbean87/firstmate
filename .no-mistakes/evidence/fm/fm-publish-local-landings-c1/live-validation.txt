@@ -1,0 +1,53 @@
+=== fm-project-profile-pin.test.sh ===
+ok - the project-to-profile mapping pins bowling to Pi/Qwen and every other project to OpenCode, exact-match only
+ok - a correct spawn succeeds on the pinned profile for normal and bowling projects
+ok - a wrong harness for a pinned project is refused at spawn with no substitution
+ok - a relaunch naming the wrong harness is refused before the running agent stops
+ok - a raw launch command cannot bypass the project profile
+ok - bowling specifically cannot be moved to OpenCode
+ok - a normal project specifically cannot be moved to Pi
+ok - no fallback to firstmate or self-execution on worker startup or dependency failure
+ok - the optional typed classifier receives only the brief intent and spec sections
+ok - the supervision prompt stays project-free
+
+=== fm-pi-fallback-chain.test.sh ===
+ok - a pi crewmate launches with the tracked chain router as a second extension
+ok - a pi-signed crewmate launches with the tracked chain router as a second extension
+ok - a pi secondmate launches with the tracked chain router
+ok - non-Pi harness launches stay byte-identical with no chain router
+chain driver case advance-first: ok
+ok - a first-model retryable failure advances to the second model
+chain driver case advance-each-step: ok
+ok - a retryable failure advances appropriately at each step
+chain driver case terminal-never-advances: ok
+ok - a non-retryable failure does not advance and surfaces the error
+chain driver case terminates-after-third: ok
+ok - the chain terminates after the third model with no fourth attempt
+chain driver case thinking-low-everywhere: ok
+ok - thinking low stays attached to every routed model
+chain driver case sticky-no-backward: ok
+ok - follow-ups stay on the handling model and the chain never skips backward
+chain driver case classification-table: ok
+ok - quota, rate-limit, and transient failures retry while overflow, filter, abort, and task errors end the chain
+chain driver case transport-retryable: ok
+ok - transport failures including the live-observed Connection error. advance the chain
+chain driver case retry-no-failure-detail: ok
+ok - a retry with no failure detail holds the current model without error
+# all fm-pi-fallback-chain tests passed
+
+=== git log 06f799fa..HEAD ===
+71e0e7f574675275ccd3f446e6c94e4a8d22fc8c fix(pi): retry transport failures and hold on detail-less chain retries
+1a0a0c4734030a0069e51f7465f23a2d0f519811 feat(pi): Stage 2 opencode-go fallback chain router for Pi workers
+2b10b4f8e4e21dc1ad170df35e984cba9f2807b2 Pin project-to-worker-profile binding: OpenCode default, Pi/Qwen for bowling
+ .pi/extensions/fm-opencode-go-chain-router.ts | 131 +++++++
+ bin/fm-bootstrap.sh                           |  17 +-
+ bin/fm-control.sh                             |  35 +-
+ bin/fm-dispatch-resolve.sh                    |   8 +
+ bin/fm-project-profile-lib.sh                 |  79 ++++
+ bin/fm-spawn.sh                               |  48 ++-
+ docs/configuration.md                         |  17 +-
+ docs/examples/crew-dispatch.json              |   6 +-
+ tests/fm-pi-fallback-chain.test.sh            | 503 ++++++++++++++++++++++++++
+ tests/fm-project-profile-pin.test.sh          | 395 ++++++++++++++++++++
+ tests/fm-spawn-dispatch-profile.test.sh       |   2 +-
+ 11 files changed, 1233 insertions(+), 8 deletions(-)
