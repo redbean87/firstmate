@@ -1,0 +1,45 @@
+# Scenario: docs-only change names the real slash-command register entry point
+$ env -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE FM_HOME=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-docs-verify.4yvFKp bash bin/fm-discord-commands.sh --help (exit code shown)
+Discord application/slash-command surface for Firstmate.
+
+Reply path is outbound-only (Relay-style): slash interactions arrive over
+the gateway connection this home opens itself (INTERACTION_CREATE routed
+by bin/fm-discord-gateway.py into bin/fm-discord-poll.sh --event-file,
+already authenticated by the gateway session, so no Ed25519 signature
+check applies there) and are answered through the REST interaction
+callback (POST /interactions/{id}/{token}/callback). Message-based
+equivalents (!fm ask <question>, !fm status) need no interaction delivery
+at all and are handled from plain MESSAGE_CREATE content. Nothing here
+listens on a socket or needs a public URL: do NOT set an interactions
+endpoint URL in the Discord Developer Portal; the self-hosted HTTPS
+interaction path is explicitly unsupported by this integration.
+
+Usage:
+  fm-discord-commands.sh register
+  fm-discord-commands.sh verify --signature <hex> --timestamp <ts> --body-file <path>
+  fm-discord-commands.sh handle --gateway --interaction-file <json>
+  fm-discord-commands.sh handle-message --message-file <json>
+
+register installs the minimal command surface (currently: /firstmate with
+subcommands ask and status) via PUT /applications/<id>/commands, reusing
+Firstmate's general command/action model downstream instead of building a
+large command system here. verify keeps the legacy Ed25519 check
+available for tests only; the live path never uses it because gateway
+delivery is already session-authenticated. handle --gateway maps a
+gateway-delivered interaction to a state/discord-inbox record, answers
+the interaction via the REST callback, and prints the wake line; it
+enforces the same owner-only guild/user authorization as the message
+path, refusing closed when the sender, guild, or configuration is
+unknown. handle-message maps a !fm-prefixed plain message to the same
+inbox/wake shape so ask/status work even where slash delivery is
+unavailable.
+set -u
+exit=0
+
+$ ... same isolated env: bash bin/fm-discord-commands.sh register   (recognised subcommand, refuses only for missing Discord config)
+fm-discord-commands: not configured
+exit=1
+
+$ ... same isolated env: bash bin/fm-discord-commands.sh not-a-command   (dispatch rejects unknown verbs with usage)
+usage: fm-discord-commands.sh (register|verify|handle --gateway|handle-message) [options]
+exit=2

@@ -1,0 +1,41 @@
+# Job set for a docs-only PR (detect-changes: success, code=false, shell=false)
+$ ruby job-set-eval.rb ci.yml success false false
+job id                           decision condition family
+detect-changes                   RUN      unconditional
+lint                             RUN      unconditional
+test-coverage                    RUN      unconditional
+tests-portable-parallel-1        SKIP     !cancelled() && (gate)
+tests-portable-parallel-2        SKIP     !cancelled() && (gate)
+tests-portable-serial            SKIP     !cancelled() && (gate)
+tests-herdr                      SKIP     !cancelled() && (gate)
+tests-timing-aggregate           SKIP     always() && (gate)
+macos-stock-bash                 SKIP     !cancelled() && (gate)
+invariants                       RUN      unconditional
+
+# Job set for a code+shell PR (success, code=true, shell=true)
+$ ruby job-set-eval.rb ci.yml success true true
+job id                           decision condition family
+detect-changes                   RUN      unconditional
+lint                             RUN      unconditional
+test-coverage                    RUN      unconditional
+tests-portable-parallel-1        RUN      !cancelled() && (gate)
+tests-portable-parallel-2        RUN      !cancelled() && (gate)
+tests-portable-serial            RUN      !cancelled() && (gate)
+tests-herdr                      RUN      !cancelled() && (gate)
+tests-timing-aggregate           RUN      always() && (gate)
+macos-stock-bash                 RUN      !cancelled() && (gate)
+invariants                       RUN      unconditional
+
+# Job set when the detector fails (result=failure, outputs empty) - fail closed to full rigor
+$ ruby job-set-eval.rb ci.yml failure "" ""
+job id                           decision condition family
+detect-changes                   RUN      unconditional
+lint                             RUN      unconditional
+test-coverage                    RUN      unconditional
+tests-portable-parallel-1        RUN      !cancelled() && (gate)
+tests-portable-parallel-2        RUN      !cancelled() && (gate)
+tests-portable-serial            RUN      !cancelled() && (gate)
+tests-herdr                      RUN      !cancelled() && (gate)
+tests-timing-aggregate           RUN      always() && (gate)
+macos-stock-bash                 RUN      !cancelled() && (gate)
+invariants                       RUN      unconditional

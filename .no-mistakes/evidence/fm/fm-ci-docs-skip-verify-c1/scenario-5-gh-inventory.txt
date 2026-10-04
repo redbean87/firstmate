@@ -1,0 +1,30 @@
+# Does any docs-only PR or CI run exist to observe? (checked in this run)
+$ gh pr list --repo redbean87/firstmate --state all --limit 100 --json number,headRefName,state
+[{"headRefName":"fm/fm-chatgpt-loop-c1","number":8,"state":"MERGED"},{"headRefName":"fm/fm-chatgpt-consult-client-c1","number":7,"state":"MERGED"},{"headRefName":"fm/pi-chatgpt-web-202610030755","number":6,"state":"CLOSED"},{"headRefName":"fm/fm-discord-tap-c1","number":5,"state":"MERGED"},{"headRefName":"fm/fm-ci-trim-c1","number":4,"state":"MERGED"},{"headRefName":"fm/fm-discord-ack-c1","number":3,"state":"MERGED"},{"headRefName":"fm/fm-discord-relay-c1","number":2,"state":"MERGED"},{"headRefName":"fm/fm-discord-harden-c1","number":1,"state":"MERGED"}]
+
+$ gh pr list --repo redbean87/firstmate --state all --head fm/fm-ci-docs-skip-verify-c1
+
+$ git ls-remote origin refs/heads/fm/fm-ci-docs-skip-verify-c1   (branch not pushed)
+exit=0
+
+$ gh run list --repo redbean87/firstmate --workflow=ci.yml --limit 100   (file lists of every run head, see below)
+37203232894 push main f0bdbd73 success
+37202837981 pull_request fm/fm-chatgpt-loop-c1 f3ba11b5 failure
+37201224144 pull_request fm/fm-chatgpt-loop-c1 e4456ecb failure
+37180833437 pull_request fm/fm-chatgpt-loop-c1 9804d0e4 failure
+37179954261 pull_request fm/fm-chatgpt-loop-c1 934f4497 cancelled
+37179807271 pull_request fm/fm-chatgpt-loop-c1 3676356e cancelled
+37178667288 pull_request fm/fm-chatgpt-loop-c1 9cb65863 failure
+37164748039 push main 7474542f failure
+37161536033 pull_request fm/fm-chatgpt-consult-client-c1 45e26053 failure
+37147016268 pull_request fm/pi-chatgpt-web-202610030755 c848c27b failure
+37144705802 pull_request fm/pi-chatgpt-web-202610030755 9907b884 failure
+37085898741 push main 662521ed failure
+37085835213 push main 61bebe09 failure
+37084218651 pull_request fm/fm-discord-tap-c1 f39087d1 failure
+37073383328 push main 87ad80fd failure
+37067667872 pull_request fm/fm-ci-trim-c1 918efd37 failure
+37064189266 pull_request fm/fm-discord-ack-c1 10fda168 failure
+37062936292 push main 642b11ea failure
+37055951254 pull_request fm/fm-discord-relay-c1 626b595d failure
+37034186360 push main 05cc45aa failure

@@ -1,0 +1,20 @@
+# Scenario A: this docs-only change (base f0bdbd73... head 778ec13e) through the real scope step
+$ drive-scope-step.sh pull_request f0bdbd736d7bccccfcad9eff47c427542862ae3f 778ec13e976368effe84f0fa11fef511da32e3a4
+--- scope step exit=0
+--- GITHUB_OUTPUT:
+code=false
+shell=false
+
+# Scenario B (adversarial): a code+shell change (PR #7 -> #8 merge diff touches bin/, docs/, tests/)
+$ drive-scope-step.sh pull_request 7474542f8347c85cee79022857f53d257ad748a8 f0bdbd736d7bccccfcad9eff47c427542862ae3f
+--- scope step exit=0
+--- GITHUB_OUTPUT:
+code=true
+shell=true
+
+# Scenario C (adversarial): unreadable base sha must fail closed to full rigor
+$ drive-scope-step.sh pull_request 0000000000000000000000000000000000000000 778ec13e976368effe84f0fa11fef511da32e3a4
+--- scope step exit=0
+--- GITHUB_OUTPUT:
+code=true
+shell=true
