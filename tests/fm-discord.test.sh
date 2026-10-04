@@ -394,4 +394,71 @@ export FAKE_SEND_CODE=200
 FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" --event tap-retry --class blocker --text "Outage" >/dev/null || fail "retry after failure must send"
 pass "outbound tap send-once owner-mention routine-silent"
 
+# 13. Branch-outcome wiring: the store append is the production tap boundary.
+# Captain rows notify once per logical event through the real caller path;
+# routine rows never do; posture never gates; failures keep the append green.
+wirehome="$TMP_ROOT/wire-home"; make_home "$wirehome" >/dev/null
+printf 'DISCORD_CHANNEL_ID=c1\n' >> "$wirehome/.env"
+export FAKE_SEND_MODE=record FAKE_SEND_CODE=200
+unset FAKE_SEND_CODES FAKE_SEND_HEADERS
+export FAKE_POST_DIR="$TMP_ROOT/wire-posts" FAKE_SEQ_FILE="$TMP_ROOT/wire-seq"
+rm -rf "$FAKE_POST_DIR"; mkdir -p "$FAKE_POST_DIR"; printf '0' > "$FAKE_SEQ_FILE"
+wire_posts() { find "$FAKE_POST_DIR" -maxdepth 1 -type f -name 'post-*.json' | wc -l | tr -d ' '; }
+wire_append() { FM_HOME="$wirehome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-branch-outcome.sh" append "$@"; }
+seq=$(wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=wire-pick]: choose the API shape' 2>"$TMP_ROOT/wire.err") || fail "wired decision append failed"
+case "$seq" in ''|*[!0-9]*) fail "append stdout must stay exactly the seq (got $seq)" ;; esac
+[ "$(wire_posts)" = 1 ] || fail "captain decision must notify exactly once"
+assert_grep "notified decision-wire-ship-wire-pick" "$TMP_ROOT/wire.err" "wiring logs the notified event"
+wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=wire-pick]: still waiting' >/dev/null 2>&1 || fail "repeat decision append failed"
+[ "$(wire_posts)" = 1 ] || fail "re-handled same decision must not resend"
+wire_append --task wire-ship --verdict captain --summary 'done: the fix is complete' >/dev/null 2>&1 || fail "completion append failed"
+wire_append --task wire-ship --verdict captain --summary 'PR ready for review: https://example.com/pr/5' >/dev/null 2>&1 || fail "review-ready append failed"
+wire_append --task wire-ship --verdict captain --summary 'merged PR 5, the fix has landed' >/dev/null 2>&1 || fail "merge-call append failed"
+[ "$(wire_posts)" = 4 ] || fail "completion, review-ready, and merge-call rows must each notify"
+wire_append --task wire-ship --verdict captain --summary 'blocked: CI is failing on lint' >/dev/null 2>&1 || fail "blocker append failed"
+wire_append --task wire-ship --verdict captain --summary 'failed: nightly backup did not finish' >/dev/null 2>&1 || fail "failure append failed"
+[ "$(wire_posts)" = 6 ] || fail "blocker and failure rows must each notify"
+wire_append --task wire-ship --verdict routine --summary 'heartbeat handled, nothing new' >/dev/null 2>&1 || fail "routine append failed"
+wire_append --task wire-ship --verdict routine --silent true --summary 'no-change note' >/dev/null 2>&1 || fail "silent routine append failed"
+[ "$(wire_posts)" = 6 ] || fail "routine rows must never notify"
+python3 - "$FAKE_POST_DIR" <<'PY' || fail "wired message contract violated"
+import glob, json, sys
+posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post-*.json")]
+assert any("<@u9>" in c for c in posts), "owner mention pings the phone"
+assert any("wire-pick" in c for c in posts), "decision key rides along"
+PY
+wire_append --task wire-ship --verdict captain --summary 'done: built under /tmp/scratch/wire/thing, all green' >/dev/null 2>&1 || fail "path summary append failed"
+python3 - "$FAKE_POST_DIR" <<'PY' || fail "wired text must drop scratch paths"
+import glob, json, sys
+posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post-*.json")]
+assert not any("/tmp/scratch" in c for c in posts), "absolute scratch paths stay off the phone"
+assert all(len(c) <= 560 for c in posts), "wired text stays capped"
+PY
+[ "$(wire_posts)" = 7 ] || fail "sanitized completion must still notify"
+printf 'version: 2\nentered: 2026-10-04T00:00:00Z\n' > "$wirehome/state/.afk-contract"
+wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=wire-away]: call it while away' >/dev/null 2>&1 || fail "away decision append failed"
+[ "$(wire_posts)" = 8 ] || fail "away posture must not suppress decisions"
+printf 'version: 2\nmode: quiet\n' > "$wirehome/state/.afk-contract"
+wire_append --task wire-ship --verdict captain --summary 'blocked: outage while quiet' >/dev/null 2>&1 || fail "quiet blocker append failed"
+[ "$(wire_posts)" = 9 ] || fail "quiet posture must not suppress blockers"
+rm -f "$wirehome/state/.afk-contract"
+# A failed send keeps the append green, releases the marker, and retries on
+# the next same-key sighting (the fake records attempts, so count deltas).
+before=$(wire_posts)
+export FAKE_SEND_CODE=403
+seq=$(wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=wire-retry]: decide now' 2>"$TMP_ROOT/wire-fail.err") || fail "append must stay green when the send fails"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "failed send records only its attempt"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-wire-retry" ] && fail "failed send must release the dedup marker"
+assert_grep "failed" "$TMP_ROOT/wire-fail.err" "failed send warns instead of failing the append"
+export FAKE_SEND_CODE=200
+wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=wire-retry]: decide now' >/dev/null 2>&1 || fail "retry append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "retry after failure must deliver"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-wire-retry" ] || fail "delivered retry must hold its marker"
+# An unconfigured home stays inert and green.
+barehome="$TMP_ROOT/bare-home"; mkdir -p "$barehome/state" "$barehome/config"
+before=$(wire_posts)
+FM_HOME="$barehome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-branch-outcome.sh" append --task bare --verdict captain --summary 'done: something finished' >/dev/null 2>&1 || fail "unconfigured append must stay green"
+[ "$(wire_posts)" = "$before" ] || fail "unconfigured home must stay inert"
+pass "branch-outcome wiring notifies three classes once routine-silent posture-free"
+
 pass "fm-discord"

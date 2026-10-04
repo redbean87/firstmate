@@ -71,6 +71,14 @@
 #     start without scanning lifetime history.
 #   - Every mutation runs under $STATE/.branch-outcomes.lock so the branch
 #     extension and a concurrent session-start replay cannot interleave.
+#   - Discord outbound (docs/discord-integration.md "Outbound tap" owns the
+#     tap contract): after a captain-verdict append is durably stored and its
+#     seq printed, the append path invokes bin/fm-discord-notify.sh once with
+#     an explicit class, a stable logical event key, and sanitized text.
+#     Routine verdicts never notify. The notification runs outside the store
+#     lock and never changes the append result: a failed send surfaces as a
+#     stderr warning only, and the tap's own marker release lets a later
+#     same-key sighting retry.
 #   - The store is written BEFORE the outcome is delivered to main
 #     (store-first durability): nothing about a handled event depends on
 #     conversation memory.
@@ -462,6 +470,88 @@ processed_init_locked() {
   fi
 }
 
+# Discord outbound wiring. This script's append path is the production
+# invocation boundary for the outbound tap: every captain-verdict append
+# notifies once, routine verdicts never do, and no posture, presence, or
+# gateway state gates the call, so decisions and blockers still ping while
+# away or quiet. The class mapping below mirrors the tap's wake patterns but
+# never stays silent: a captain row the patterns miss defaults to completion,
+# so a captain verdict always pings. The tap keeps its own classifier for
+# pipe-through callers; the two serve different contracts, so neither quotes
+# the other.
+outcome_notify_class() { # <wake> <summary> -> decision|completion|blocker
+  local text
+  text=$(printf '%s %s' "$1" "$2" | tr '[:upper:]' '[:lower:]')
+  case "$text" in
+    *needs-decision*|*open\ decision*|*awaiting*answer*|*answer*needed*|*captain*decision*|*ask-user*|*decision*waiting*)
+      printf 'decision\n'
+      return 0
+      ;;
+  esac
+  if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])(blocked|blocker|blockers|blocking|fail|failed|failing|failure|failures)([^a-z0-9]|$)'; then
+    printf 'blocker\n'
+    return 0
+  fi
+  printf 'completion\n'
+}
+
+# Stable logical event key for the tap's send-once marker. A decision row
+# carrying a parseable [key=...] token notifies under that decision's key,
+# so re-handled rows for the same still-open decision share one marker and a
+# failed send retries on the next sighting. Every other row notifies under
+# its store seq, which is unique per row and unchanged across re-wakes and
+# re-presentations. Neither form derives from wake ids, polling cycles,
+# timestamps, or process attempts.
+outcome_notify_key() { # <task> <seq> <class> <wake> <summary> -> event key
+  local key
+  if [ "$3" = decision ]; then
+    key=$(printf '%s %s' "$4" "$5" | sed -n -E 's/.*\[key=([A-Za-z0-9._-]+)\].*/\1/p')
+    case "$key" in
+      ''|*[!A-Za-z0-9._-]*) ;;
+      *) printf 'decision-%s-%s\n' "$1" "$key"; return 0 ;;
+    esac
+  fi
+  printf 'branch-outcome-%s\n' "$2"
+}
+
+# Concise phone-safe text: collapse whitespace, drop absolute scratch paths,
+# cap length. Secret shapes are additionally redacted by the tap itself; the
+# branch owns keeping internal wording out of the summary it records.
+outcome_notify_text() { # <summary> -> text on stdout
+  printf '%s' "$1" | tr '\n\t\r' '   ' \
+    | sed -E -e 's:/(Users|tmp|private|var|home|root|opt|srv|etc)/[^ ]*::g' \
+    | sed -e 's/  */ /g; s/^ *//; s/ *$//' \
+    | awk '{ if (length($0) > 500) print substr($0, 1, 497) "..."; else print }'
+}
+
+# Fire the tap for one stored captain row. Always returns 0: the row is
+# already durable, so a failed send is a stderr warning, never an append
+# failure (failing the append would record a duplicate row on retry).
+outcome_maybe_notify_discord() { # <task> <seq> <summary> <wake>; always 0
+  local task=$1 seq=$2 summary=$3 wake=$4 class event text dkey out rc=0
+  class=$(outcome_notify_class "$wake" "$summary")
+  event=$(outcome_notify_key "$task" "$seq" "$class" "$wake" "$summary")
+  text=$(outcome_notify_text "$summary")
+  [ -n "$text" ] || text="update on $task"
+  dkey=$(printf '%s %s' "$wake" "$summary" | sed -n -E 's/.*\[key=([A-Za-z0-9._-]+)\].*/\1/p')
+  case "$dkey" in ''|*[!A-Za-z0-9._-]*) dkey= ;; esac
+  if [ "$class" != decision ]; then dkey=; fi
+  # The || exempts the send from set -e: a failed delivery is a warning,
+  # never an append failure.
+  if [ -n "$dkey" ]; then
+    out=$("$SCRIPT_DIR/fm-discord-notify.sh" --event "$event" --class "$class" --text "$text" --decision-key "$dkey" 2>&1) || rc=$?
+  else
+    out=$("$SCRIPT_DIR/fm-discord-notify.sh" --event "$event" --class "$class" --text "$text" 2>&1) || rc=$?
+  fi
+  if [ "$rc" -eq 0 ]; then
+    [ -n "$out" ] || out="silent (already notified, unconfigured, or suppressed)"
+    echo "discord-notify: $event [$class]: $out" >&2
+  else
+    echo "warning: discord-notify: $event [$class] failed (exit $rc): ${out:-no detail}; marker released, a later same-key sighting retries" >&2
+  fi
+  return 0
+}
+
 held_lock_owned_by_ancestor() {
   local owner owner_pid pid parent depth=0
   case "$PPID" in ''|*[!0-9]*|0|1) return 1 ;; esac
@@ -558,6 +648,9 @@ case "$CMD" in
     fi
     fm_lock_release "$LOCK"
     printf '%s\n' "$SEQ"
+    if [ "$VERDICT" = captain ]; then
+      outcome_maybe_notify_discord "$TASK" "$SEQ" "$SUMMARY" "$WAKE"
+    fi
     ;;
   unread)
     [ "$#" -eq 0 ] || usage

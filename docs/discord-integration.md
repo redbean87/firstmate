@@ -186,16 +186,21 @@ this integration.
   [--decision-key <key>]` posts one short plain-language message
   mentioning the owner (`<@owner-id>`) so the phone pings, on exactly
   three event classes: a decision waiting on the captain, finished work
-  (including review and merge calls), and blockers or failures. Routine
-  progress never sends. `--wake-line <line>` (or `--wake` on stdin)
+  (including review and merge calls), and blockers or failures.
+  Routine progress never sends.
+  The production caller is the outcome-store append: `bin/fm-branch-outcome.sh append` invokes the tap once for every `captain`-verdict row with an explicit class, a stable logical event key, and sanitized text, and never for `routine` rows.
+  A decision row carrying a parseable `[key=...]` token notifies under `decision-<task>-<key>` so re-handled rows for one still-open decision share a marker; every other row notifies under `branch-outcome-<seq>`.
+  The append stays green when a send fails: the failure is a stderr warning, the tap releases its marker, and the next same-key sighting retries.
+  Nothing gates on away or quiet posture, presence, or the gateway websocket, so decisions and blockers still ping while the captain is away.
+  The wake-drain `OPEN DECISIONS` and `STATUS OUTCOME BACKSTOP` sections have no tap hook by design: they sight events the branch has not handled yet, so notifying there would ping once before handling and again at the outcome row under a different key.
+  `--wake-line <line>` (or `--wake` on stdin)
   classifies a watcher wake or supervision outcome reason line into one
-  of those classes so the supervision flow can pipe wakes through the
-  script; unrecognized lines stay silent. One message per event key:
+  of those classes for pipe-through callers; unrecognized lines stay silent. One message per event key:
   repeats for the same key (re-wakes for the same open decision) are
-  silent, markers live in `state/discord-notify/`, and a failed send
+  silent, markers live in `state/discord-notify/` with seven-day pruning, and a failed send
   releases its marker so a retry can still deliver. Delivery reuses the
   `fm-discord-send.sh` authenticated path, so 429 Retry-After is
-  honored. Text is redacted for secret shapes before sending.
+  honored. Text is redacted for secret shapes before sending, and the outcome-store caller strips absolute scratch paths and caps length before that.
 - Inbound: `bin/fm-discord-gateway.py` (primary; reconnect + resume +
   dedup + self-filter) routes each MESSAGE_CREATE and each
   INTERACTION_CREATE through `bin/fm-discord-poll.sh --event-file`.
