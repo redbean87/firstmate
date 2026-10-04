@@ -188,10 +188,10 @@ this integration.
   three event classes: a decision waiting on the captain, finished work
   (including review and merge calls), and blockers or failures.
   Routine progress never sends.
-  The production caller is the outcome-store append: `bin/fm-branch-outcome.sh append` invokes the tap once for every `captain`-verdict row with an explicit class, a stable logical event key, and sanitized text, and never for `routine` rows.
+  The production caller is the outcome-store append: `bin/fm-branch-outcome.sh append` invokes the tap once for every `captain`-verdict row with an explicit class, a stable logical event key, and sanitized text, and never for `routine` rows. The append starts that send detached from its exit path — the row and its seq are written first and append exits without waiting on Discord — so caller bookkeeping and queued deliveries never stall on network latency; the run's one result line is appended to `state/.branch-outcome-notify.log`.
   A decision row carrying a stated `[key=...]` token (read by the status fold's own key grammar) notifies under `decision-<task>-<key>` so re-handled rows for one still-open decision share a marker; every other row notifies under the content-derived logical key `branch-outcome-<task>-<class>-<summary-hash>`, so the same recurring event shares one marker across re-wakes and re-reports and never double-pings.
   A `resolved` or `captain-held` status line carrying a decision's key releases that marker when the decision closes (any verdict, including `routine`), so the next keyed decision occurrence for the task pings again.
-  The append stays green when a send fails: the failure is a stderr warning, the tap releases its marker, and the next same-key sighting retries.
+  The append stays green when a send fails: the failure is recorded as a warning in `state/.branch-outcome-notify.log`, the tap releases its marker, and the next same-key sighting retries.
   Nothing gates on away or quiet posture, presence, or the gateway websocket, so decisions and blockers still ping while the captain is away.
   The wake-drain `OPEN DECISIONS` and `STATUS OUTCOME BACKSTOP` sections have no tap hook by design: they sight events the branch has not handled yet, so notifying there would ping once before handling and again at the outcome row under a different key.
   `--wake-line <line>` (or `--wake` on stdin)

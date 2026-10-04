@@ -73,13 +73,16 @@
 #     extension and a concurrent session-start replay cannot interleave.
 #   - Discord outbound (docs/discord-integration.md "Outbound tap" owns the
 #     tap contract): after a captain-verdict append is durably stored and its
-#     seq printed, the append path invokes bin/fm-discord-notify.sh once with
-#     an explicit class, a stable logical event key, and sanitized text.
-#     Routine verdicts never notify. The notification runs outside the store
-#     lock and never changes the append result: a failed send surfaces as a
-#     stderr warning only, and the tap's own marker release lets a later
-#     same-key sighting retry. Non-decision rows notify under a
-#     content-derived logical key (task, class, summary hash), so the same
+#     seq printed, the append path launches bin/fm-discord-notify.sh once
+#     with an explicit class, a stable logical event key, and sanitized
+#     text, detached from the append process: append exits without waiting
+#     on the send, so caller bookkeeping and queued deliveries never stall
+#     on Discord latency, and the run's one result line is appended to
+#     $STATE/.branch-outcome-notify.log. Routine verdicts never notify. The
+#     notification runs outside the store lock and never changes the append
+#     result: a failed send is a logged warning only, and the tap's own
+#     marker release lets a later same-key sighting retry. Non-decision rows
+#     notify under a logical key (task, class, summary hash), so the same
 #     recurring event shares one marker across re-wakes and re-reports; a
 #     keyed decision's marker is released by any later append whose summary
 #     closes that key (resolved/captain-held), routine or captain, so its
@@ -681,7 +684,8 @@ case "$CMD" in
     printf '%s\n' "$SEQ"
     outcome_release_decision_marker "$TASK" "$SUMMARY"
     if [ "$VERDICT" = captain ]; then
-      outcome_maybe_notify_discord "$TASK" "$SUMMARY"
+      ( outcome_maybe_notify_discord "$TASK" "$SUMMARY" ) \
+        >>"$STATE/.branch-outcome-notify.log" 2>&1 </dev/null &
     fi
     ;;
   unread)
