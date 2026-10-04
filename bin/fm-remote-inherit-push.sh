@@ -44,6 +44,21 @@ EMPTY="$TMP/empty"
 EMPTY_HASH=$(sha256_file "$EMPTY") || die "cannot hash empty inheritance payload"
 
 ITEMS=$(fm_config_inherit_items)
+# Push-avoidance manifest: a successful push records the exact per-item payload
+# (command, byte length, digest) beside the generation counter, so a later push
+# whose inheritable material is byte-identical can report every item unchanged
+# without spending one SSH round trip per item. The manifest is a pure sender-side
+# cache: any missing, malformed, or mismatching record falls back to a full push,
+# and a failed push never updates it, so the remote side cannot be left behind.
+# Callers hold the per-route inheritance transaction lock while this runs, which
+# serializes manifest read-modify-write cycles for one route. A remote home
+# mutated outside a parent-driven push is not detected here; every parent-driven
+# mutation (provision, update, rollback, config push, spawn) goes through this
+# script and refreshes the manifest on success.
+STATE_DIR="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+MANIFEST="$STATE_DIR/.remote-inherit-$ID.manifest"
+RECORDS="$TMP/records"
+: > "$RECORDS"
 while IFS= read -r rel; do
   [ -n "$rel" ] || continue
   if [ "${FM_CONFIG_INHERIT_LIVE:-0}" = 1 ]; then
@@ -51,6 +66,7 @@ while IFS= read -r rel; do
       config/*)
         if fm_config_inherit_item_session_scoped "${rel#config/}"; then
           printf 'unchanged: %s\n' "$rel"
+          printf '%s\tskip\n' "$rel" >> "$RECORDS"
           continue
         fi
         ;;
@@ -76,11 +92,70 @@ while IFS= read -r rel; do
     [ -f "$snapshot" ] && [ ! -L "$snapshot" ] || die "inherited source snapshot is unsafe: $source"
     bytes=$(LC_ALL=C wc -c < "$snapshot" | tr -d ' ')
     hash=$(sha256_file "$snapshot") || die "cannot hash inherited source: $source"
-    "$SCRIPT_DIR/fm-on.sh" --stdin "$ID" fm-remote-inherit.sh put "$rel" "$bytes" "$hash" "$GENERATION" < "$snapshot"
+    printf '%s\tput\t%s\t%s\n' "$rel" "$bytes" "$hash" >> "$RECORDS"
   else
-    # This loop's heredoc is its control stream, not remote command input.
-    "$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-inherit.sh absent "$rel" 0 "$EMPTY_HASH" "$GENERATION" < /dev/null
+    printf '%s\tabsent\t0\t%s\n' "$rel" "$EMPTY_HASH" >> "$RECORDS"
   fi
 done <<EOF
 $ITEMS
 EOF
+
+manifest_matches() {
+  local line=0 schema generation
+  [ -f "$MANIFEST" ] && [ ! -L "$MANIFEST" ] || return 1
+  {
+    IFS= read -r schema || return 1
+    IFS= read -r generation || return 1
+    [ "$schema" = schema=fm-remote-inherit-manifest.v1 ] || return 1
+    case "$generation" in generation=*[!0-9]*|'generation=') return 1 ;; esac
+    while IFS= read -r line; do
+      [ -n "$line" ] || return 1
+      case "$line" in *$'\t'*$'\t'*$'\t'*) ;; *) return 1 ;; esac
+    done
+  } < "$MANIFEST" || return 1
+  tail -n +3 -- "$MANIFEST" > "$TMP/manifest-records" || return 1
+  grep -v $'\tskip$' -- "$RECORDS" > "$TMP/desired-records" 2>/dev/null || true
+  cmp -s -- "$TMP/manifest-records" "$TMP/desired-records"
+}
+
+write_manifest() {
+  local tmp_manifest
+  [ -d "$STATE_DIR" ] && [ ! -L "$STATE_DIR" ] || return 1
+  tmp_manifest=$(umask 077; mktemp "$STATE_DIR/.remote-inherit-manifest.XXXXXX") || return 1
+  {
+    printf 'schema=fm-remote-inherit-manifest.v1\n'
+    printf 'generation=%s\n' "$GENERATION"
+    grep -v $'\tskip$' -- "$RECORDS"
+  } > "$tmp_manifest" || { rm -f -- "$tmp_manifest"; return 1; }
+  chmod 600 "$tmp_manifest" || { rm -f -- "$tmp_manifest"; return 1; }
+  mv -f -- "$tmp_manifest" "$MANIFEST" || { rm -f -- "$tmp_manifest"; return 1; }
+}
+
+if manifest_matches; then
+  while IFS=$'\t' read -r rel _command _bytes _hash; do
+    [ -n "$rel" ] || continue
+    printf 'unchanged: %s\n' "$rel"
+  done < "$TMP/desired-records"
+  exit 0
+fi
+
+while IFS=$'\t' read -r rel command bytes hash; do
+  [ -n "$rel" ] || continue
+  case "$command" in skip) continue ;; esac
+  snapshot="$TMP/$(printf '%s' "$rel" | tr '/' '_')"
+  case "$command" in
+    put)
+      [ -f "$snapshot" ] && [ ! -L "$snapshot" ] || die "inherited source snapshot is unsafe: $rel"
+      "$SCRIPT_DIR/fm-on.sh" --stdin "$ID" fm-remote-inherit.sh put "$rel" "$bytes" "$hash" "$GENERATION" < "$snapshot"
+      ;;
+    absent)
+      # This loop's heredoc is its control stream, not remote command input.
+      "$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-inherit.sh absent "$rel" 0 "$EMPTY_HASH" "$GENERATION" < /dev/null
+      ;;
+    *) die "inherited record is malformed: $rel" ;;
+  esac
+done < "$RECORDS"
+
+# A cache write must never fail a successful transfer: without it the next push
+# simply transfers again. It stays silent so machine-read output is unaffected.
+write_manifest || true

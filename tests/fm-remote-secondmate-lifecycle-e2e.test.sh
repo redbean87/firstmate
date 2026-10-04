@@ -1268,7 +1268,10 @@ cp "$PARENT/state/ios.meta" "$WATCH_STATE/ios.meta"
 # The remote spawn path mints its inheritance generation from a counter that
 # lives beside the task record, so the dedicated watch state needs the real
 # one; otherwise the pushed payload reads as superseded on the remote home.
+# It likewise needs the push-avoidance manifest or the relaunch would re-push
+# material the remote home already holds, which the real state never does.
 cp "$PARENT/state/.remote-inherit-ios.generation" "$WATCH_STATE/" 2>/dev/null || true
+cp "$PARENT/state/.remote-inherit-ios.manifest" "$WATCH_STATE/" 2>/dev/null || true
 touch "$WATCH_STATE/home-summary.json"
 
 # A graceful agent exit leaves the pane with no registered agent - the exact
@@ -1296,7 +1299,7 @@ while kill -0 "$watch_pid" 2>/dev/null && [ "$watch_wait" -lt 1500 ]; do
 done
 if kill -0 "$watch_pid" 2>/dev/null; then
   kill "$watch_pid" 2>/dev/null || true
-  fail "the watcher did not exit on its auto-relaunch wake within the bound"
+  fail "the watcher did not exit on its auto-relaunch wake within the bound"$'\nwatch stdout:\n'"$(cat "$TMP_ROOT/watch-liveness.out" 2>/dev/null)"$'\nwatch stderr:\n'"$(cat "$TMP_ROOT/watch-liveness.err" 2>/dev/null)"
 fi
 wait "$watch_pid" \
   || fail "the liveness watcher leg exited non-zero: $(cat "$TMP_ROOT/watch-liveness.err")"

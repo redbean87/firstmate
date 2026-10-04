@@ -18,6 +18,21 @@ WATCH_EXT="$ROOT/.pi/extensions/fm-primary-pi-watch.ts"
 OPERATIONAL_INPUT="$ROOT/bin/fm-operational-input.sh"
 PI_OPERATIONAL_INPUT="$ROOT/.pi/extensions/lib/fm-operational-input.ts"
 PI_PACKAGE_DIR=${FM_PI_PACKAGE_DIR:-"$(npm root -g 2>/dev/null)/@earendil-works/pi-coding-agent"}
+# Pi 1.x hoists shared dependencies to the install root instead of nesting them
+# under pi-coding-agent/node_modules, so resolve each fixture dependency from
+# whichever layout the installed Pi actually uses.
+pi_fixture_dep() {
+  local nested hoisted
+  nested="$PI_PACKAGE_DIR/node_modules/$1"
+  hoisted="$(dirname "$(dirname "$PI_PACKAGE_DIR")")/$1"
+  if [ -e "$nested" ]; then
+    printf '%s\n' "$nested"
+  else
+    printf '%s\n' "$hoisted"
+  fi
+}
+# Resolved once: every fixture below links or imports the same installed Pi.
+PI_TUI_DIR=$(pi_fixture_dep @earendil-works/pi-tui)
 TMUX_SOCKET="fm-calm-$$"
 TMUX_SESSION="fm-calm-e2e"
 # Verified against Pi 0.81.1 and 0.82.0 (docs/calm-mode-feasibility.md). This is
@@ -208,8 +223,8 @@ test_home_resolution() {
   cp "$WORKING_SHIP_SPRITE" "$fixture/project/.pi/extensions/lib/fm-calm-working-ship-sprite.ts"
   cp "$PI_OPERATIONAL_INPUT" "$fixture/project/.pi/extensions/lib/fm-operational-input.ts"
   ln -s "$PI_PACKAGE_DIR" "$fixture/project/node_modules/@earendil-works/pi-coding-agent"
-  ln -s "$PI_PACKAGE_DIR/node_modules/@earendil-works/pi-tui" "$fixture/project/node_modules/@earendil-works/pi-tui"
-  ln -s "$PI_PACKAGE_DIR/node_modules/typebox" "$fixture/project/node_modules/typebox"
+  ln -s "$(pi_fixture_dep @earendil-works/pi-tui)" "$fixture/project/node_modules/@earendil-works/pi-tui"
+  ln -s "$(pi_fixture_dep typebox)" "$fixture/project/node_modules/typebox"
   printf '%s\n' '{"type":"module"}' >"$fixture/project/package.json"
 
   out=$(cd "$fixture/launch-cwd" && \
@@ -333,8 +348,8 @@ test_pi_compat_degraded_adapter() {
   cp "$WORKING_SHIP_SPRITE" "$fixture/project/.pi/extensions/lib/fm-calm-working-ship-sprite.ts"
   cp "$PI_OPERATIONAL_INPUT" "$fixture/project/.pi/extensions/lib/fm-operational-input.ts"
   ln -s "$PI_PACKAGE_DIR" "$fixture/project/node_modules/@earendil-works/pi-coding-agent"
-  ln -s "$PI_PACKAGE_DIR/node_modules/@earendil-works/pi-tui" "$fixture/project/node_modules/@earendil-works/pi-tui"
-  ln -s "$PI_PACKAGE_DIR/node_modules/typebox" "$fixture/project/node_modules/typebox"
+  ln -s "$(pi_fixture_dep @earendil-works/pi-tui)" "$fixture/project/node_modules/@earendil-works/pi-tui"
+  ln -s "$(pi_fixture_dep typebox)" "$fixture/project/node_modules/typebox"
   printf '%s\n' '{"type":"module"}' >"$fixture/project/package.json"
 
   out=$(cd "$fixture/project" && \
@@ -494,8 +509,8 @@ test_queued_operational_rows() {
   cp "$VISIBILITY" "$fixture/lib/fm-calm-visibility.ts"
   cp "$PI_OPERATIONAL_INPUT" "$fixture/lib/fm-operational-input.ts"
   ln -s "$PI_PACKAGE_DIR" "$fixture/node_modules/@earendil-works/pi-coding-agent"
-  ln -s "$PI_PACKAGE_DIR/node_modules/@earendil-works/pi-tui" "$fixture/node_modules/@earendil-works/pi-tui"
-  ln -s "$PI_PACKAGE_DIR/node_modules/typebox" "$fixture/node_modules/typebox"
+  ln -s "$(pi_fixture_dep @earendil-works/pi-tui)" "$fixture/node_modules/@earendil-works/pi-tui"
+  ln -s "$(pi_fixture_dep typebox)" "$fixture/node_modules/typebox"
   printf '%s\n' '{"type":"module"}' >"$fixture/package.json"
   # Lets the fixture take the classifier away mid-run, the way a missing or broken
   # bin/fm-operational-input.sh would.
@@ -815,8 +830,8 @@ test_builtin_gate_load_time() {
   cp "$WORKING_SHIP_SPRITE" "$fixture/project/.pi/extensions/lib/fm-calm-working-ship-sprite.ts"
   cp "$PI_OPERATIONAL_INPUT" "$fixture/project/.pi/extensions/lib/fm-operational-input.ts"
   ln -s "$PI_PACKAGE_DIR" "$fixture/project/node_modules/@earendil-works/pi-coding-agent"
-  ln -s "$PI_PACKAGE_DIR/node_modules/@earendil-works/pi-tui" "$fixture/project/node_modules/@earendil-works/pi-tui"
-  ln -s "$PI_PACKAGE_DIR/node_modules/typebox" "$fixture/project/node_modules/typebox"
+  ln -s "$(pi_fixture_dep @earendil-works/pi-tui)" "$fixture/project/node_modules/@earendil-works/pi-tui"
+  ln -s "$(pi_fixture_dep typebox)" "$fixture/project/node_modules/typebox"
   printf '%s\n' '{"type":"module"}' >"$fixture/project/package.json"
   printf '%s\n' on >"$fixture/home-on/config/calm"
 
@@ -904,8 +919,8 @@ test_calm_activation_collision_and_regression_bound() {
   cp "$WORKING_SHIP_SPRITE" "$fixture/project/.pi/extensions/lib/fm-calm-working-ship-sprite.ts"
   cp "$PI_OPERATIONAL_INPUT" "$fixture/project/.pi/extensions/lib/fm-operational-input.ts"
   ln -s "$PI_PACKAGE_DIR" "$fixture/project/node_modules/@earendil-works/pi-coding-agent"
-  ln -s "$PI_PACKAGE_DIR/node_modules/@earendil-works/pi-tui" "$fixture/project/node_modules/@earendil-works/pi-tui"
-  ln -s "$PI_PACKAGE_DIR/node_modules/typebox" "$fixture/project/node_modules/typebox"
+  ln -s "$(pi_fixture_dep @earendil-works/pi-tui)" "$fixture/project/node_modules/@earendil-works/pi-tui"
+  ln -s "$(pi_fixture_dep typebox)" "$fixture/project/node_modules/typebox"
   printf '%s\n' '{"type":"module"}' >"$fixture/project/package.json"
   printf '%s\n' 'export default function () {}' >"$fixture/project/foreign-bash-extension.ts"
 
@@ -915,6 +930,7 @@ test_calm_activation_collision_and_regression_bound() {
     FOREIGN_EXT="$fixture/project/foreign-bash-extension.ts" \
     FM_HOME="$fixture/home" \
     PI_PACKAGE_DIR="$PI_PACKAGE_DIR" \
+    PI_TUI_DIR="$PI_TUI_DIR" \
     node --input-type=module) >"$output_file" 2>&1 <<'JS'
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -924,7 +940,7 @@ const { ToolExecutionComponent } = await import(
 );
 const { initTheme } = await import(pathToFileURL(`${packageRoot}/dist/modes/interactive/theme/theme.js`).href);
 const { setCapabilities } = await import(
-  pathToFileURL(`${packageRoot}/node_modules/@earendil-works/pi-tui/dist/index.js`).href
+  pathToFileURL(`${process.env.PI_TUI_DIR}/dist/index.js`).href
 );
 initTheme("dark");
 setCapabilities({ images: null, trueColor: true, hyperlinks: false });
@@ -1125,8 +1141,8 @@ test_rendering_and_session_lifecycle() {
   cp "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$fixture/lib/fm-async-exec.ts"
   cp "$WATCH_EXT" "$fixture/fm-primary-pi-watch.ts"
   ln -s "$PI_PACKAGE_DIR" "$fixture/node_modules/@earendil-works/pi-coding-agent"
-  ln -s "$PI_PACKAGE_DIR/node_modules/@earendil-works/pi-tui" "$fixture/node_modules/@earendil-works/pi-tui"
-  ln -s "$PI_PACKAGE_DIR/node_modules/typebox" "$fixture/node_modules/typebox"
+  ln -s "$(pi_fixture_dep @earendil-works/pi-tui)" "$fixture/node_modules/@earendil-works/pi-tui"
+  ln -s "$(pi_fixture_dep typebox)" "$fixture/node_modules/typebox"
   printf '%s\n' '{"type":"module"}' >"$fixture/package.json"
   cat >"$fixture/operational-input-probe.sh" <<'SH'
 #!/usr/bin/env bash
@@ -1136,7 +1152,7 @@ SH
   chmod +x "$fixture/operational-input-probe.sh"
 
   output_file="$fixture/node-output"
-  (cd "$fixture" && EXT="$fixture/fm-calm.ts" WATCH_EXT="$fixture/fm-primary-pi-watch.ts" FM_HOME="$fixture/home" FM_OPERATIONAL_INPUT_SCRIPT="$fixture/operational-input-probe.sh" FM_OPERATIONAL_INPUT_OWNER="$OPERATIONAL_INPUT" FM_OPERATIONAL_INPUT_CALLS="$fixture/operational-input-calls" PI_PACKAGE_DIR="$PI_PACKAGE_DIR" node --input-type=module) >"$output_file" 2>&1 <<'JS'
+  (cd "$fixture" && EXT="$fixture/fm-calm.ts" WATCH_EXT="$fixture/fm-primary-pi-watch.ts" FM_HOME="$fixture/home" FM_OPERATIONAL_INPUT_SCRIPT="$fixture/operational-input-probe.sh" FM_OPERATIONAL_INPUT_OWNER="$OPERATIONAL_INPUT" FM_OPERATIONAL_INPUT_CALLS="$fixture/operational-input-calls" PI_PACKAGE_DIR="$PI_PACKAGE_DIR" PI_TUI_DIR="$PI_TUI_DIR" node --input-type=module) >"$output_file" 2>&1 <<'JS'
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -1154,7 +1170,7 @@ const [{ AssistantMessageComponent }, { CustomEntryComponent }, { ToolExecutionC
   import(pathToFileURL(`${packageRoot}/dist/modes/interactive/components/user-message.js`).href),
   import(pathToFileURL(`${packageRoot}/dist/modes/interactive/interactive-mode.js`).href),
   import(pathToFileURL(`${packageRoot}/dist/modes/interactive/theme/theme.js`).href),
-  import(pathToFileURL(`${packageRoot}/node_modules/@earendil-works/pi-tui/dist/index.js`).href),
+  import(pathToFileURL(`${process.env.PI_TUI_DIR}/dist/index.js`).href),
   import(pathToFileURL(`${packageRoot}/dist/core/export-html/tool-renderer.js`).href),
   // The calm-off equivalence baseline needs each built-in's REAL stock renderers.
   // Pi 0.84 and older silently substituted the built-in definition when a
@@ -1847,12 +1863,12 @@ test_calm_mid_turn_working_notes() {
   cp "$WORKING_SHIP_SPRITE" "$fixture/lib/fm-calm-working-ship-sprite.ts"
   cp "$PI_OPERATIONAL_INPUT" "$fixture/lib/fm-operational-input.ts"
   ln -s "$PI_PACKAGE_DIR" "$fixture/node_modules/@earendil-works/pi-coding-agent"
-  ln -s "$PI_PACKAGE_DIR/node_modules/@earendil-works/pi-tui" "$fixture/node_modules/@earendil-works/pi-tui"
-  ln -s "$PI_PACKAGE_DIR/node_modules/typebox" "$fixture/node_modules/typebox"
+  ln -s "$(pi_fixture_dep @earendil-works/pi-tui)" "$fixture/node_modules/@earendil-works/pi-tui"
+  ln -s "$(pi_fixture_dep typebox)" "$fixture/node_modules/typebox"
   printf '%s\n' '{"type":"module"}' >"$fixture/package.json"
 
   output_file="$fixture/node-output"
-  (cd "$fixture" && EXT="$fixture/fm-calm.ts" FM_HOME="$fixture/home" PI_PACKAGE_DIR="$PI_PACKAGE_DIR" node --input-type=module) >"$output_file" 2>&1 <<'JS'
+  (cd "$fixture" && EXT="$fixture/fm-calm.ts" FM_HOME="$fixture/home" PI_PACKAGE_DIR="$PI_PACKAGE_DIR" PI_TUI_DIR="$PI_TUI_DIR" node --input-type=module) >"$output_file" 2>&1 <<'JS'
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -1860,7 +1876,7 @@ const packageRoot = process.env.PI_PACKAGE_DIR;
 const [{ AssistantMessageComponent }, { initTheme }, { setCapabilities }] = await Promise.all([
   import(pathToFileURL(`${packageRoot}/dist/modes/interactive/components/assistant-message.js`).href),
   import(pathToFileURL(`${packageRoot}/dist/modes/interactive/theme/theme.js`).href),
-  import(pathToFileURL(`${packageRoot}/node_modules/@earendil-works/pi-tui/dist/index.js`).href),
+  import(pathToFileURL(`${process.env.PI_TUI_DIR}/dist/index.js`).href),
 ]);
 initTheme("dark");
 setCapabilities({ images: null, trueColor: true, hyperlinks: false });
@@ -2977,17 +2993,17 @@ test_working_ship_geometry_and_lifecycle() {
   cp "$WORKING_SHIP_SPRITE" "$fixture/lib/fm-calm-working-ship-sprite.ts"
   cp "$PI_OPERATIONAL_INPUT" "$fixture/lib/fm-operational-input.ts"
   ln -s "$PI_PACKAGE_DIR" "$fixture/node_modules/@earendil-works/pi-coding-agent"
-  ln -s "$PI_PACKAGE_DIR/node_modules/@earendil-works/pi-tui" "$fixture/node_modules/@earendil-works/pi-tui"
-  ln -s "$PI_PACKAGE_DIR/node_modules/typebox" "$fixture/node_modules/typebox"
+  ln -s "$(pi_fixture_dep @earendil-works/pi-tui)" "$fixture/node_modules/@earendil-works/pi-tui"
+  ln -s "$(pi_fixture_dep typebox)" "$fixture/node_modules/typebox"
   printf '%s\n' '{"type":"module"}' >"$fixture/package.json"
 
-  out=$(cd "$fixture" && EXT="$fixture/fm-calm.ts" FM_HOME="$fixture/home" PI_PACKAGE_DIR="$PI_PACKAGE_DIR" node --input-type=module 2>&1 <<'JS'
+  out=$(cd "$fixture" && EXT="$fixture/fm-calm.ts" FM_HOME="$fixture/home" PI_PACKAGE_DIR="$PI_PACKAGE_DIR" PI_TUI_DIR="$PI_TUI_DIR" node --input-type=module 2>&1 <<'JS'
 import { pathToFileURL } from "node:url";
 
 const packageRoot = process.env.PI_PACKAGE_DIR;
 const [{ initTheme, theme }, { visibleWidth, setCapabilities }] = await Promise.all([
   import(pathToFileURL(`${packageRoot}/dist/modes/interactive/theme/theme.js`).href),
-  import(pathToFileURL(`${packageRoot}/node_modules/@earendil-works/pi-tui/dist/index.js`).href),
+  import(pathToFileURL(`${process.env.PI_TUI_DIR}/dist/index.js`).href),
 ]);
 initTheme("dark");
 setCapabilities({ images: null, trueColor: true, hyperlinks: false });
