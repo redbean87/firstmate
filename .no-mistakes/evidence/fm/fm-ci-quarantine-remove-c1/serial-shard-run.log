@@ -1,0 +1,827 @@
+=== shard 5 start 2026-10-04T22:16:52Z ===
+FM_TEST_BEGIN 2026-10-04T22:16:53Z tests/fm-remote-secondmate-lifecycle-e2e.test.sh family=secondmate expected_gate_skip=none
+ok - overlapping remote home provisioning serializes through publication and rollback
+ok - competing cleanup of the public home cannot reach a live provisioning clone
+ok - a home that appears mid-provision makes the provision die without touching it
+ok - remote seed rollback preserves serialized competing routes
+ok - unknown readiness preserves its route and brief for reconciliation
+ok - remote seeding checks, repairs, and re-checks readiness, then stops on a remaining gap
+ok - remote seeding proceeds once the repair closes every gap
+ok - remote seeding provisions a supplied origin without touching the primary project tree
+ok - remote provisioning re-validates a supplied origin at the receiving host
+ok - seeding carries bitbucket, self-hosted, and scp-like origins through to the remote clone
+ok - remote seed registers the route and provisions the whole home and project clone on that host
+ok - remote inheritance rejects incomplete and superseded payload generations
+ok - mixed local and remote routes validate without migration
+ok - remote spawn launches on the remote-local backend and records a host-qualified route
+ok - legacy and mismatched remote endpoints fail closed before backend access
+ok - non-herdr remote endpoints are refused without changing either route
+ok - remote spawn serializes inheritance through launch publication
+ok - marked send and routed reply complete through the existing parent correlation owner
+ok - partial remote inheritance retains reread intent through bootstrap convergence
+ok - config push and bootstrap serialize remote inheritance convergence
+WARNING: watcher still down (same stale episode; last beat: 142s ago, grace 300s) - full banner already printed this episode.
+ok - remote inherited config retains and retries a failed live reread nudge
+ok - fleet snapshot projects mixed local and remote structured state
+ok - remote update imports and fast-forwards the persistent home on its configured host
+ok - the remote restart verb delegates to the host-local control plane and refuses before stopping anything
+ok - startup repairs remote readiness before probing without relaunching
+ok - watch liveness: a dead remote secondmate is auto-relaunched on its own host with one wake
+ok - watch liveness: an unreachable remote secondmate is probed, preserved, and never failed over
+ok - the host-local state read steps around a stale shadowing herdr client
+ok - startup reports alive legacy backends without changing their routes
+ok - unreachable no-ledger remote state remains explicit with no local respawn or failover
+ok - remote retirement refuses child work, then removes only its own endpoint while a shared-session sibling survives
+ALL TESTS PASSED
+FM_TEST_END 2026-10-04T22:28:18Z tests/fm-remote-secondmate-lifecycle-e2e.test.sh exit=0 duration_ms=684721 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:28:18Z tests/fm-contributions.test.sh family=snapshot-bearings expected_gate_skip=optional-binary
+rm: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-remote-secondmate-e2e.D8tB4h: Directory not empty
+ok - only required-captain contributions are rows; other actors are counted
+ok - replaced-head verdict is stale and cannot create a captain requirement
+ok - unchecked ownership is disclosed and cannot prove silence
+ok - newest check with no verdict is distinct from passing and pending
+ok - new maintainer comment wakes once and stays pending until acknowledged
+ok - new maintainer review wakes once and stays pending until acknowledged
+ok - new maintainer inline wakes once and stays pending until acknowledged
+ok - ready-for-pr on a filed issue becomes a planning wake
+ok - a fresh open issue remains measured maintainer triage
+ok - an absent check lane remains missing across repeated observations
+ok - mixed freshness retains measured captain work and discloses the gap
+ok - malformed durable evidence cannot prove silence
+ok - a transient ready-for-pr label wakes and its exact acknowledgement survives replay
+ok - recorded judgment keeps its exact head and is stale immediately on a published replacement
+ok - verdict help and refusal name exactly the actors the command accepts
+ok - a current forge observation refreshes a verdict after a replacement
+ok - an unavailable current head leaves verdict freshness unknown
+ok - away yolo delivery is fleet work without granting merge authority
+actionable: PR https://github.com/o/r/pull/8 is registered but its ready line did not reach the parent channel (rc=3)
+ok - cross-home away yolo delivery is fleet work
+ok - retired ownership persists and unsupported forge remains visibly unmeasured
+ok - unsupported forge coverage is disclosed without inventing fleet work
+ok - held unsupported forge coverage remains unmeasured
+ok - shared contribution signal wakes once while retaining both acknowledgements
+ok - watcher keeps observer diagnostics separate from contribution wakes
+ok - expired child unsupported-forge coverage remains unmeasured
+ok - watcher surfaces one newly durable contribution signal without re-ringing it
+ok - parent consumes measured child coverage and refuses expired child silence
+ok - unreadable pending signals refuse an empty-inbox claim
+ok - record task identity is the directory dirname/basename named
+ok - snapshot and pending create nothing in a home without state
+ok - budget exhausted mid-observation (exhaust) keeps the prior record and stays silent
+ok - budget exhausted mid-observation (hang) keeps the prior record and stays silent
+ok - a genuine forge failure inside the budget still records the error and wakes
+ok - a URL owned by two tasks is observed once and every owner receives the result
+ok - a merged or closed contribution settles once, is not re-read, and never wakes again
+ok - a late owner inherits a terminal observation without a forge read or wake
+ok - a retry converges every owner whose saved row is not terminal, keeping its own acknowledgement state
+ok - an open PR linked from a done task keeps being observed
+ok - a later URL waits when fewer than fifteen seconds remain for its observation
+ok - eight 3-second PR reads complete fresh within one 20-second poll cycle
+ok - a read killed at the five-second bound is budget refusal and stays silent
+ok - rotation preserves timed-out records and refreshes every slow PR on successive cycles
+ok - the effective budget is cut down to the watcher per-check bound with margin
+ok - generated checks enforce configured and inherited budgets at runtime
+ok - a genuinely unavailable forge records an error and wakes once per failure episode
+ok - a late owner does not restart a shared forge failure episode
+FM_TEST_END 2026-10-04T22:31:10Z tests/fm-contributions.test.sh exit=0 duration_ms=171626 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:31:10Z tests/fm-live-lab.test.sh family=unclassified expected_gate_skip=none
+ok - a ready Claude lab passes every readiness check
+ok - primary fails when session start never took the lab lock
+ok - primary fails when the primary runs in a linked worktree instead of the lab's primary checkout
+ok - probe fails when the primary never answered its nonce
+ok - trust fails when the lab home has no registered Claude trust
+ok - mirror fails when the feed is unwired or has not recorded a whole turn
+ok - host passes and fails according to --expect-host
+ok - watcher fails on a stale beacon
+ok - mate fails when its window is gone or it never reached its charter
+ok - mate off readiness requires inherited material and a disabled home gate
+ok - worker readiness follows current crew state and the recorded accessible gate
+ok - treehouse fails when a pool lands in ~/.treehouse
+ok - extensions fail when the Pi lab lacks the branch extension or loads a stale build
+ok - down refuses anything up did not build
+ok - down stops only recorded lab processes, removes trust entries and task temp dirs
+ok - check and down use the recorded Claude store and keep a symlinked store linked
+tests/fm-live-lab.test.sh: line 424: 56271 Killed: 9                  perl -e 'setpgrp(0,0); exec @ARGV' "$@" > /dev/null 2>&1
+ok - down waits for TERM handlers and escalates before removing trust
+ok - down waits for captured descendants after their root exits
+ok - down tracks descendants spawned during TERM
+ok - down ignores roots with mismatched start times
+tests/fm-live-lab.test.sh: line 531: 60808 Killed: 9                  perl -e 'setpgrp(0,0); exec @ARGV' "$@" > /dev/null 2>&1
+tests/fm-live-lab.test.sh: line 531: 60809 Killed: 9                  perl -e 'setpgrp(0,0); exec @ARGV' "$@" > /dev/null 2>&1
+ok - down drops empty groups permanently before their ids can be reused
+ok - down revalidates process identity during its bounded wait
+ok - trust fails on Pi when the lab wrote the persistent Pi trust store
+ok - down removes the lab but reports, without reverting, a written Pi trust store
+ok - up refuses an existing root and an unsupported harness
+ok - up gives both task IDs a long nonce and down cleans partial setup
+ok - up launches primary after worker status without weakening final parked readiness
+ok - up fails immediately when a spawned worker has no pane PID
+ok - up re-registers primary trust after a concurrent Claude write
+ok - fm-claude-trust.sh --lab-home trusts only a marked lab primary checkout
+FM_TEST_END 2026-10-04T22:32:52Z tests/fm-live-lab.test.sh exit=0 duration_ms=101998 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:32:52Z tests/fm-cursor-primary.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - fm-turnend-guard: Cursor payload is inert without --cursor and blocks with it
+ok - fm-turnend-guard: a non-Cursor payload keeps blocking
+ok - fm-claude-stop-autoarm: inert on a Cursor-delivered payload
+ok - fm-sessionstart-run: inert on a Cursor payload, unchanged otherwise
+ok - fm-arm-pretool-check: Cursor duplicate allows, --cursor denies in Cursor's own shape
+ok - fm-cd-pretool-check: Cursor duplicate allows, --cursor denies in Cursor's own shape
+ok - cursor park: silent no-op when no supervision is needed
+ok - cursor park: an actionable close is delivered as one watcher-kind follow-up
+ok - cursor park: always exits 0, even when supervision is genuinely down
+ok - cursor park: the repair nag is bounded and then goes quiet
+ok - cursor park: a repair nag is emitted only after its budget persists
+ok - cursor park: a delivered wake resets the bounded repair budget
+ok - cursor park: the loop_count ceiling warns exactly once, then stops the loop
+ok - cursor park: an older park stands down after a newer stop claim
+ok - cursor park: the newest stop exclusively owns a concurrent commit
+ok - cursor park: a superseded park cannot consume repair budget
+ok - cursor park: inert while away mode is active
+ok - cursor park: an opted-in home parks on the supervision host and relays every host line
+ok - cursor park: the host's boundary wakes, its stand-down is silent, and a host that died is retried
+ok - cursor park: inert when PI_CODING_AGENT marks a Pi host session
+ok - cursor park: parks when PI_CODING_AGENT leaks alongside Cursor identity
+ok - cursor park: an away-mode transition wins before follow-up commit
+ok - cursor park: inert when this session does not hold the home lock
+ok - cursor park: session takeover stops polling without output or state mutation
+warning: re-init: ignored --initial-branch=main
+ok - cursor park: inert inside a child crewmate worktree
+ok - cursor park: malformed payloads fail open without arming
+ok - fm-sessionstart-cursor: sessionStart injects context
+warning: re-init: ignored --initial-branch=main
+ok - fm-sessionstart-cursor: silent inside a child crewmate worktree
+ok - cursor registration: covers every primary event with a bounded stop loop
+ok - cursor bounds nest: firstmate's default ceiling stops the loop before Cursor's loop_limit does
+FM_TEST_END 2026-10-04T22:34:16Z tests/fm-cursor-primary.test.sh exit=0 duration_ms=84299 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:34:16Z tests/fm-watch-recovery-loop.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - a resurfacing handling successor stays alive and supervises instead of going blind
+ok - unacknowledged recovery is announced at most once per generation and the successor stays alive
+FM_TEST_END 2026-10-04T22:35:16Z tests/fm-watch-recovery-loop.test.sh exit=0 duration_ms=60042 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:35:16Z tests/fm-secondmate-restart.test.sh family=secondmate expected_gate_skip=none
+ok - T1 persist is a gate, and asks for open records and task status only
+ok - T2 the mate persists before anything is stopped
+ok - T2b an arrived persist answer is resolved before timeout
+ok - T2c a reply between the preliminary scan and timeout decision wins
+ok - T3 a runtime that cannot prove a restart falls back to the re-read message
+ok - T4 every named mate is accounted for, including one this home does not know
+ok - T5 a refused restart leaves the mate running and reports an unknown outcome
+ok - T8 a local restart re-resolves this home's pin and reports the runtime that came up
+ok - native Ultra survives local restart and the remote restart transport
+ok - T6 a remote mate restarts through the host-local control plane over the fm-on hop
+ok - T7 an unreachable host is reported honestly instead of claimed as reloaded
+ok - T9 the persist gate retains its explicitly allocated correlation
+ok - T10 pending persist answers are polled as one fleet
+ok - T11 post-stop restart failure is never misreported as a nudge
+ok - T12 relaunch waits do not block fleet persistence polling
+ok - T13 a dead restart worker cannot hang the parent
+ok - T14 a result published during reaping is honored
+ok - T15 an already-current live mate is named by the update pass and genuinely restarted
+ok - T16 an already-current mate with an unprovable runtime keeps the honest nudge path
+# all fm-secondmate-restart tests passed
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state/sm1.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/native-local-17920: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state/sm1.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/unknown-1429: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state/sm1.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/already-current-14344: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state/sm1.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/answer-at-timeout-decision-22895: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state/sm2.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/concurrent-waits-16096: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state/sm1.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/order-7135: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state/sm1.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/arrived-at-bound-29843: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state/sm1.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/post-stop-6506: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state/sm1.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/pin-26375: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state/sm2.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG/relaunch-polling-30394: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-secondmate-restart.xp0RBG: Directory not empty
+FM_TEST_END 2026-10-04T22:36:22Z tests/fm-secondmate-restart.test.sh exit=0 duration_ms=65300 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:36:22Z tests/fm-wake-drain-outcome-backstop.test.sh family=standalone expected_gate_skip=none
+ok - a newest keyless done, blocked, or needs-decision event with no newer branch outcome surfaces on the next main drain
+ok - a newer task-matching branch outcome suppresses the backstop and routine latest events stay silent
+ok - only a strictly newer outcome for the same task can suppress its latest captain event
+ok - a branch annotation and queue acknowledgement cannot consume the main drain's loss backstop
+ok - status byte position distinguishes handled and later same-second events
+ok - drain cost and suppression are independent of append-only outcome history
+ok - backstop receipts prevent repeats without consuming delayed signal annotations
+ok - a failed output consumer leaves the backstop unacknowledged for retry
+ok - receipt failure may repeat a presented backstop but cannot lose it
+ok - captain-facing decisions rejected by the fold surface once
+ok - a missing outcome index self-heals on the first drain and suppresses its handled status
+ok - a fresh home with a status log and no index surfaces the backstop on its first drain
+ok - a genuine outcome-store fault fails closed without Pi-specific restart advice
+ok - held-lock initialization rejects callers outside the lock owner's process tree
+ok - held-lock initialization accepts a descendant of the outcome lock owner
+ok - index self-heal runs only while the outcome lock is held
+ok - an over-bound unclassifiable routine event stays silent
+ok - the outcome backstop caps each item and its total task output deterministically
+FM_TEST_END 2026-10-04T22:37:09Z tests/fm-wake-drain-outcome-backstop.test.sh exit=0 duration_ms=47336 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:37:09Z tests/fm-remote-secondmate-parent-binding.test.sh family=standalone expected_gate_skip=none
+ok - remote provisioning publishes durable parent state before its completion marker
+ok - a remote secondmate's finished worker cleans up when the remote code root's own .env looked relay-active
+ok - a remote secondmate's finished worker cleans up when only an ambient exported token looked relay-active
+ok - a remote secondmate's finished worker cleans up with no relay signal anywhere
+ok - a remote secondmate's own committed relay token still refuses cleanup
+ok - remote secondmate publication refuses targets outside its home
+ALL TESTS PASSED
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route/ios.git-hooks: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state/parent-route: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR/remote-home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-remote-parent-binding.9fkaDR: Directory not empty
+FM_TEST_END 2026-10-04T22:38:44Z tests/fm-remote-secondmate-parent-binding.test.sh exit=0 duration_ms=94952 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:38:44Z tests/fm-home-summary-refresh.test.sh family=snapshot-bearings expected_gate_skip=optional-binary
+ok - watcher-carried status append publishes the real home summary
+ok - large backlog snapshots and home-summary publication stay within exec limits
+ok - fleet snapshot transport does not require or mutate operational state
+ok - parent snapshot consumes large child ledgers without argument transport
+ok - live watcher cadence bounds publication staleness without signals
+ok - fleet snapshot consumes the published local ledger by default
+ok - writer kill and replacement preserve an atomic JSON ledger
+ok - best-effort publication logs and continues
+Terminated: 15             sleep 0.1
+Terminated: 15             sleep 0.1
+ok - best-effort refresh bounds publication lock acquisition
+Terminated: 15             jq -e --arg home "$FM_HOME" '
+    .schema == "fm-secondmate-home-summary.v1"
+    and .hold_classifier_schema == "fm-captain-hold-buckets.v1"
+    and .home == $home
+    and (.generated | type) == "string"
+    and (.generated | length) > 0
+    and (.generated_epoch | type) == "number"
+    and .generated_epoch >= 0
+    and (.generated_epoch | floor) == .generated_epoch
+    and (.valid | type) == "boolean"
+    and (.state | type) == "string"
+    and (.invalidity | type) == "object"
+    and (.active_children | type) == "array"
+    and (.decisions_open | type) == "array"
+    and (.holds | type) == "array"
+    and (.queued | type) == "array"
+    and (.landed | type) == "array"
+    and (.endpoints | type) == "array"
+    and (.counts | type) == "object"
+    and (.omitted | type) == "array"
+  ' "$HOME_SUMMARY_TMP" > /dev/null 2>&1
+ok - best-effort refresh bounds validation and publication
+ok - best-effort refresh bounds state initialization
+ok - best-effort refresh logs worker termination
+ok - best-effort refresh bounds failure reporting fallback
+ok - valid publication ignores an unavailable failure record
+ok - publication completes on a home carrying accumulated status history
+ok - producer skips remote per-task state probes
+ok - a stalled publication does not delay the watcher liveness beacon
+ok - publication remains single-flight across watcher restart
+ok - bootstrap scopes retained failures to the current publication
+Terminated: 15             sleep 0.1
+ok - failure records preserve refresh attempt ordering
+ok - repeated publication failure is reported at session start until it clears
+FM_TEST_END 2026-10-04T22:39:28Z tests/fm-home-summary-refresh.test.sh exit=0 duration_ms=43746 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:39:28Z tests/fm-voice-relay.test.sh family=standalone expected_gate_skip=none
+ok - wire format round trips and rejects a desynchronised stream
+ok - the relay refuses a desynchronised uplink header instead of waiting for its payload
+ok - the relay reads whose account to use from this home and refuses to guess
+ok - an unconfigured home can still read how to configure the relay
+ok - the model-backed subcommands refuse by name while note keeps working
+ok - fm-inbox.sh --help prints its whole header, privacy paragraph included
+ok - the relay and the reader agree on the tool names and the handover argument
+ok - credentials are resolved once per relay, refreshed before expiry, off the event loop
+ok - a turn the model refuses is announced and costs one turn, not the relay
+ok - audio that arrives with no turn open is dropped, not turned into a turn
+ok - a failure inside the model reader costs one turn, not every later one
+ok - a reader failure is named to the captain, a clean end and a close are not
+usage: fm-voice-client.py [-h] [--host HOST] [--local] [--relay RELAY]
+                          [--relay-python RELAY_PYTHON]
+                          [--relay-arg RELAY_ARG]
+                          [--listen {push-to-talk,open-mic}] [--runs RUNS]
+                          [--talk-seconds TALK_SECONDS] [--in-file IN_FILE]
+                          [--out-file OUT_FILE] [--input-device INPUT_DEVICE]
+                          [--output-device OUTPUT_DEVICE] [--timeout TIMEOUT]
+                          [--wait-for-reply | --no-wait-for-reply]
+                          [--gap-seconds GAP_SECONDS]
+                          [--audio-idle AUDIO_IDLE] [--verbose]
+fm-voice-client.py: error: say where the relay is: --relay <path to fm-voice-relay.py on the desktop>, or set FM_VOICE_RELAY
+usage: fm-voice-client.py [-h] [--host HOST] [--local] [--relay RELAY]
+                          [--relay-python RELAY_PYTHON]
+                          [--relay-arg RELAY_ARG]
+                          [--listen {push-to-talk,open-mic}] [--runs RUNS]
+                          [--talk-seconds TALK_SECONDS] [--in-file IN_FILE]
+                          [--out-file OUT_FILE] [--input-device INPUT_DEVICE]
+                          [--output-device OUTPUT_DEVICE] [--timeout TIMEOUT]
+                          [--wait-for-reply | --no-wait-for-reply]
+                          [--gap-seconds GAP_SECONDS]
+                          [--audio-idle AUDIO_IDLE] [--verbose]
+fm-voice-client.py: error: --listen open-mic is not built yet: it needs end-of-speech detection to know when a turn ended, which lands with session continuity across turns, so it would stream forever and never end a turn. Use the default --listen push-to-talk.
+client: connection lost: stream ended after 2 of the 5 bytes of a frame header
+client: connection lost: [Errno 104] Connection reset by peer
+client: discarded 15 bytes your login shell printed before the relay started: b'You have mail.\n'
+ok - the laptop client builds the right remote command and survives a chatty login shell
+ok - the client runs from a laptop holding only the two files the guide names
+ok - --listen open-mic refuses at startup, before it opens anything
+ok - the narrow scope answers how much is waiting without saying what it is
+ok - the wide scope names open work and reports state without quoting event lines
+ok - an absent read-scope setting means the narrowest answer, not the widest
+ok - a home widens its own read scope by writing the setting
+ok - finished work and note bodies never reach a spoken answer at any scope
+ok - excluding a note body does not distort the counts
+ok - a denied item becomes a withheld count without hiding that work exists
+ok - the deny list matches regardless of case
+ok - an item denied in more than one list is counted as withheld once
+ok - one deny decision per item covers every list that item could appear in
+ok - the state verb is a closed vocabulary, so free text cannot ride out on it
+ok - the reader scans back through the tail for the newest status event
+ok - an unrecognised declaration cannot hide behind trailing prose either
+ok - the backlog and the state directory always come from the same home
+ok - a finished task's pull request is neither counted nor named
+ok - a deny substring on an open title removes its pull request and says so
+ok - an unknown read scope refuses instead of widening
+ok - the configured read scope is honoured
+ok - handover queues the request for firstmate and wakes it exactly once
+ok - the reader and the queue resolve the state directory the same way
+ok - an empty request is refused rather than queued as a blank note
+ok - a home with no records answers nothing rather than failing
+ok - a spoken turn goes out and comes back: the records answer, firstmate gets the work
+ok - a model session that ends mid-conversation costs one turn, not the relay
+ok - a desynchronised uplink is named to the client before the goodbye, not only to stderr
+ok - the desktop's own check answers from the records and times it from the talk end
+ok - a reply that arrives before the end of the clip is named as an unusable clock
+all voice relay cases passed
+FM_TEST_END 2026-10-04T22:40:06Z tests/fm-voice-relay.test.sh exit=0 duration_ms=38412 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:40:06Z tests/fm-classify-corr-token.test.sh family=standalone expected_gate_skip=none
+ok - captain regex overrides preserve timed and legacy relevance and event bytes
+ok - malformed event times stay ordinary line bytes without hiding the event
+ok - malformed event times never open or close a decision
+ok - optional event time preserves parsing and legacy unknown time
+ok - a correlation token between the verb and the key breaks neither opening nor closing
+ok - the token is read through before the key, after it, doubled, bracketed, and unkeyed
+ok - the untokened opener/closer pair behaves exactly as before
+ok - prose, malformed, wrong-length and unknown name=value tokens stay non-transitions
+ok - a token-first line cannot impersonate any opening or closing verb
+ok - untokened captain-relevance, pause, terminal-verb and captain-held verdicts are unchanged
+ok - captain-relevance, terminal-verb, pause and captain-held all read through the token
+ok - the daemon and crew-state verb case arms read through the token
+ok - reading through the token does not weaken the reserved-key namespace rule
+ok - the cursor-backed fold and the whole-file fold agree on every correlated transition
+ok - a cursor persisted under the previous reading is discarded and refolded
+ok - both real correlation-token writers produce lines this classifier reads through
+FM_TEST_END 2026-10-04T22:40:32Z tests/fm-classify-corr-token.test.sh exit=0 duration_ms=25659 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:40:32Z tests/fm-remote-doctor.test.sh family=secondmate expected_gate_skip=none
+ok - a missing herdr CLI is a human gap that --fix never claims to close
+ok - an absent launch agent is a fixable gap and the read-only run changes nothing
+not ok - --fix left a repairable host unready: expected exit 0, got 1
+FM_TEST_END 2026-10-04T22:40:36Z tests/fm-remote-doctor.test.sh exit=1 duration_ms=4488 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:40:36Z tests/fm-host-mirror.test.sh family=afk expected_gate_skip=none
+ok - mirror: the Claude and Cursor registrations each write the captain's prompt and main's reply
+ok - mirror: writers stay silent and write nothing on a home that opted out or has no state
+ok - only Claude and Cursor, the primaries with proven writers, have a verified dialog mirror
+ok - mirror: a home opted out by config/supervision-host-off is untouched by every tracked mirror registration
+ok - mirror: without config/supervision-host the Claude registrations write the mirror and Cursor's stay inert
+ok - mirror: operational input, a harness-started turn, a foreign host's payload, other events, and a session without the lock are never mirrored
+ok - mirror: a captain prompt and a main reply keep their internal whitespace and newlines verbatim
+ok - mirror: a repeated entry is recorded once, and a long entry keeps its head and tail within the cap
+ok - mirror: a later different reply under the same id is recorded, while an identical repeat is recorded once
+ok - mirror: an entry id already recorded by an earlier main session does not drop a later session's dialog
+ok - mirror: a failed append leaves the mirror valid, prints nothing, and later dialog still lands
+ok - mirror: the captain's dialog lands only in an owner-only mirror, even when the file already existed readable by others
+ok - mirror: captain prompts and main replies reach the mirror without ever entering a process argument list
+ok - mirror: the feed resumes from its committed cursor, re-anchors on a new conversation or session, and is bounded
+ok - mirror: the feed's bound includes the note naming how many earlier entries it left out
+ok - mirror: a later lock holder with a recycled pid is a new main session
+ok - mirror: the feed refuses a mirror with a zero, fractional, or non-rising sequence, or an unterminated final record
+ok - mirror: a recreated mirror continues past the committed and staged cursors, so a resumed conversation still gets new dialog
+FM_TEST_END 2026-10-04T22:40:49Z tests/fm-host-mirror.test.sh exit=0 duration_ms=12085 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:40:49Z tests/fm-dispatch-resolve.test.sh family=standalone expected_gate_skip=none
+ok - absent key is off: one stderr line, exit 0, no network call
+ok - TYPESAFE_API_KEY= in .env activates the tool; environment and config overrides work
+ok - clear: one rule Choice request, key on the fd header only, spendPriority argmax over every candidate
+ok - never-send list withholds the request on a match or a bad list, and never prints the value
+ok - rules snapshots and shell quoting preserve the profile protocol
+ok - no-rule fallback, Agy, Gemini, and documented configurations resolve
+ok - ambiguous: confidence below the fixed floor hands the decision back
+ok - per-rule confidence floors fall to the most probable runner-up that clears its own floor
+ok - only the brief's task sections and scout tag reach the model, with a whole-brief fallback
+ok - escalate: a rule declared approval: captain never yields a profile
+ok - rule floor: known shortfall falls through while unavailable evidence escalates
+ok - declared provider and profile floor evidence are applied in code
+ok - nonnumeric spendPriority evidence is never ranked
+ok - partial and missing quota evidence remain eligible but unranked
+ok - provider-wide and exact quota rows combine into one limiting candidate
+ok - default: no rule matched resolves among the default profiles
+ok - tie: equal spendPriority never breaks by array order
+ok - no rankable candidate: the tool escalates instead of guessing
+ok - native Codex binds to codex-home before default, independently of Pi accounts and row order
+ok - Pi native adapters bind to codex-home with existing fallbacks and schema 5 compatibility
+ok - schema 6: each candidate binds to its account row; schema 5 is unchanged
+ok - quota evidence comes from one quota-axi --json read, and its failure is an error outcome
+ok - API, transport, and response failures are error outcomes with exit 0
+ok - configuration errors exit 2 before any network call
+# all fm-dispatch-resolve tests passed
+FM_TEST_END 2026-10-04T22:41:03Z tests/fm-dispatch-resolve.test.sh exit=0 duration_ms=14038 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:03Z tests/fm-wake-daemon-lifecycle-e2e.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - lifecycle: routine self-handles, terminal survives a watcher restart, buffers once, no dup, injects once
+ok - lifecycle: stale pane transient self-handles, persistent escalates once and clears, resumed clears quietly
+FM_TEST_END 2026-10-04T22:41:12Z tests/fm-wake-daemon-lifecycle-e2e.test.sh exit=0 duration_ms=9262 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:12Z tests/fm-classify-decision-key.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - a stated [key=X] opens X whether it precedes or follows the verb colon
+ok - a keyless needs-decision still opens and closes the default key
+ok - a resolution closes its decision regardless of either line's key position
+ok - blocked [key=X] opens X in both key positions
+ok - two colon-form keyed decisions never collapse into one shared bucket
+ok - a [key=x] mentioned mid-note is prose, never an opened or closed key
+ok - a malformed stated key is rejected in both positions, never folded as default
+ok - status_line_verb strips every bracket tag before the colon, in any order, and recovers the bare verb
+ok - a [corr=...] tag ahead of [key=...] no longer swallows the verb: opens and closes under the stated key
+ok - a [corr=...] tag with no stated key opens under 'default', exactly like a bare needs-decision line
+ok - a [key=x] tag alone (no corr tag) still opens x - no regression from the tag-stripping fix
+ok - blocked/resolved parse their bare verb with any bracket-tag order preceding the colon
+ok - the incremental fold matches the full fold across appends in both key positions
+ok - status_key_closing_verb separates resolution, durable transfer, and still-open
+ok - status_key_closing_verb reports the last real transition, in either key position
+ok - per-key reads retain resolutions without subprocess work growing with unrelated history
+ok - overridden resolve and durable-transfer verbs still close keys behind unrelated history
+ok - per-key filtering retains ship/scout terminals, reopenings, and secondmate blockers
+ok - prose without a colon cannot impersonate a ship or scout terminal declaration
+ok - a stated default retraction closes its decision and leaves an unrelated keyless wait standing
+ok - a declared wait outlives answers for other keys beyond the event window, and its own resolved line retracts it
+ok - only a colon-bearing or keyed line is a decision transition in the fold
+FM_TEST_END 2026-10-04T22:41:16Z tests/fm-classify-decision-key.test.sh exit=0 duration_ms=3979 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:16Z tests/fm-stow-cascade.test.sh family=secondmate expected_gate_skip=none
+ok - each home is accounted against its own allowance instead of a fleet total
+ok - the cascade emits one stanza per registered home and refuses a double-counted registry
+ok - transport follows placement and live-agent state, and a remote home without an agent defers
+ok - each stanza carries the facts a per-home receipt needs, before and after curation
+ok - one slow or unreachable home is bounded and every other home still reports
+ok - the cascade stays silent with no secondmates and never runs from a secondmate home
+FM_TEST_END 2026-10-04T22:41:21Z tests/fm-stow-cascade.test.sh exit=0 duration_ms=4886 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:21Z tests/fm-operational-input.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - operational input: every current generic envelope retains its exact structured kind
+ok - operational input: the established from-firstmate carrier remains structurally typed and byte-compatible
+ok - operational input: untyped landed FIRSTMATE_OP transcripts are explicit legacy-operational input
+ok - operational input: historical prose compatibility is isolated from current parsing
+ok - operational input: quoted, ASCII-only, arbitrary-U+2063, altered-legacy, and label-only near misses stay genuine
+ok - operational input: the OpenCode adapter constructs through the canonical owner
+ok - operational input: current construction rejects legacy kinds and empty bodies
+ok - record-backed carrier: Claude-only selection, an ASCII doorbell naming an exact envelope record, home-bound open, and no recognition without the record
+ok - record pruning: expired records past one argument list are all pruned on a write
+FM_TEST_END 2026-10-04T22:41:25Z tests/fm-operational-input.test.sh exit=0 duration_ms=4451 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:25Z tests/fm-harness-liveness-drift-live-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
+# claude 2.1.289 (Claude Code): title='2.1.289' foreground=[/Users/cortezashley/.local/bin/claude ]
+ok - harness liveness: claude 2.1.289 (Claude Code) classifies alive
+# claude 2.1.289 (Claude Code): ancestry verdicts=[comm claude]
+ok - harness detection: claude 2.1.289 (Claude Code) is identified by the ancestry walk at comm strength
+# skip: codex is not installed on this machine, so its classification is unverified here
+# opencode opencode v2.0.20: title='opencode' foreground=[/opt/homebrew/bin/opencode ]
+ok - harness liveness: opencode opencode v2.0.20 classifies alive
+# opencode opencode v2.0.20: ancestry verdicts=[comm opencode]
+ok - harness detection: opencode opencode v2.0.20 is identified by the ancestry walk at comm strength
+# pi 1.0.2: title='volta-shim' foreground=[/Users/cortezashley/.volta/bin/pi node ]
+ok - harness liveness: pi 1.0.2 classifies alive
+# pi 1.0.2: ancestry verdicts=[comm pi]
+ok - harness detection: pi 1.0.2 is identified by the ancestry walk at comm strength
+# skip: pi-signed is not installed on this machine, so its classification is unverified here
+# skip: grok is not installed on this machine, so its classification is unverified here
+# skip: kimi is not installed on this machine, so its classification is unverified here
+# skip: cursor is not installed on this machine, so its classification is unverified here
+# skip: muse is not installed on this machine, so its classification is unverified here
+# unverified on this machine (not installed): codex pi-signed grok kimi cursor muse
+# checked 3 installed harness(es)
+FM_TEST_END 2026-10-04T22:41:27Z tests/fm-harness-liveness-drift-live-e2e.test.sh exit=0 duration_ms=1315 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:27Z tests/fm-pr-state.test.sh family=pr-forge expected_gate_skip=none
+ok - a passing required check and a skipped one leave nothing to report
+ok - a terminal pull request reports that state and nothing else
+ok - draft state blocks readiness
+ok - stale changes-requested verdicts explain a blocking review decision
+ok - approved PR ignores stale changes-requested history
+ok - current changes-requested review blocks readiness
+ok - a CHANGES_REQUESTED decision is always reported
+ok - the author's own review is never listed as a blocker
+ok - a pending approval is not reported as a blocker
+ok - required failure blocks readiness
+ok - given gh's sentence, an unreported required check is unconfirmed, other check lookup failures refuse
+ok - given gh's sentence, a head with no reported checks is unverified rather than ready
+ok - help states what empty output means and what is out of scope
+ok - unknown and conflicting mergeability block readiness
+ok - argument and lookup refusals exit nonzero
+FM_TEST_END 2026-10-04T22:41:28Z tests/fm-pr-state.test.sh exit=0 duration_ms=1298 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:28Z tests/fm-trace-context-lib.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - fm_trace_context_valid accepts a conformant W3C traceparent
+ok - fm_trace_context_valid rejects all-zero ids, ff version, uppercase, wrong length, missing field, shell metacharacters, and empty
+ok - a command-substitution-shaped value is rejected as inert data, never executed
+ok - fm_trace_context_hex yields exact-length lowercase hex, distinct per call
+ok - fm_trace_context_mint starts a valid sampled root trace
+ok - every mint is an unrelated fresh root - one trace per task, no parent adoption
+ok - a minted root is the fixed 55-char W3C form (hex and hyphens only), so firstmate originates no free-form content in the carrier
+ok - enablement is default-off; FM_TRACE_CONTEXT overrides with truthy/other precedence, and unset or empty defers to config/trace-context
+ok - session start normalizes config and environment precedence into frozen on/off state
+ok - session state is atomically published through a same-directory replacement
+ok - a stale on record is inactive when publication fails in a new locked session
+ok - missing or invalid frozen session state defaults off
+ok - resolve omits the carrier and returns success when the capability is off (byte-identical default)
+ok - resolve mints a valid traceparent when enabled
+ok - Secondmate home-session state stays off or on despite later file state; ambient TRACEPARENT is never adopted, so each routed task roots its own trace
+ok - resolve reuses a valid recorded traceparent verbatim on relaunch (stable identity across restarts)
+ok - disabling the capability omits the carrier even for a task with a recorded identity
+ok - a corrupt recorded traceparent is re-minted rather than propagated
+ok - resolve yields exactly one carrier per logical task, so the recorded and injected values are identical by construction
+ok - entropy failure omits telemetry safely: mint reports failure, resolve returns success with no carrier
+ok - the resolver has no sleep/timeout/command hang source and always returns success
+ok - the carrier is minted identically for every harness, backend, and spawn kind (no such branching in the lib code)
+ok - the lib code never reads a brief, prompt, report, or status - it cannot leak content
+ok - config/trace-context is inherited into secondmate homes, keeping the nested chain enabled end to end
+# fm-trace-context-lib.test.sh: all assertions passed
+FM_TEST_END 2026-10-04T22:41:28Z tests/fm-trace-context-lib.test.sh exit=0 duration_ms=281 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:28Z tests/fm-codex-hook-layer-live-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
+skip: live: codex absent
+fm-test-run: gate skip: tests/fm-codex-hook-layer-live-e2e.test.sh: live: codex absent
+FM_TEST_END 2026-10-04T22:41:29Z tests/fm-codex-hook-layer-live-e2e.test.sh exit=0 duration_ms=71 gate_skip=true
+FM_TEST_BEGIN 2026-10-04T22:41:29Z tests/fm-pi-codex-native.test.sh family=live-harness-optin expected_gate_skip=live-capability
+skip: native Pi adapter not installed (PI_CODEX_NATIVE_PACKAGE to select it)
+fm-test-run: gate skip: tests/fm-pi-codex-native.test.sh: native Pi adapter not installed (PI_CODEX_NATIVE_PACKAGE to select it)
+FM_TEST_END 2026-10-04T22:41:29Z tests/fm-pi-codex-native.test.sh exit=0 duration_ms=69 gate_skip=true
+FM_TEST_BEGIN 2026-10-04T22:41:29Z tests/fm-gitignore-config.test.sh family=standalone expected_gate_skip=none
+ok - config/ is ignored as a directory, covering unlisted and nested paths
+ok - an unrelated path outside config/ remains visible to git
+ok - names starting with scratchpad are gitignored
+ok - no currently tracked path starts with scratchpad
+ok - scratchpad2/ does not make git status --porcelain dirty
+FM_TEST_END 2026-10-04T22:41:29Z tests/fm-gitignore-config.test.sh exit=0 duration_ms=241 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:29Z tests/fm-herdr-version-floor-live-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
+ok - installed herdr 0.9.3 protocol 22 classifies above the presentation floor
+ok - herdr v0.7.5: version 0.7.5 protocol 17 classifies below the presentation floor (sha256 37350546b0012555943b92eaf962665de4e264395baeb44227b8015e8ff5b0d6)
+ok - herdr preview-2026-07-29-44b3adb12552: version 0.7.5-preview.2026-07-29-44b3adb12552 protocol 18 classifies below the presentation floor (sha256 99941b4a40e852c8f21694c7ec1e96f85abd4f764d9f667757c65fae6e4b065b)
+ok - herdr v0.8.0: version 0.8.0 protocol 19 classifies above the presentation floor (sha256 d53a9f93fccfdfcc55632927bf51002f5add0aa7990bcdf508ffbd84ac658178)
+evidence: asset=herdr-macos-aarch64 releases_checked=4 installed=0.9.3 protocol=22
+FM_TEST_END 2026-10-04T22:41:33Z tests/fm-herdr-version-floor-live-e2e.test.sh exit=0 duration_ms=4062 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:41:33Z tests/fm-pi-branch-live-e2e.test.sh family=live-harness-optin expected_gate_skip=live-capability
+skip: live: opt-in; set FM_PI_BRANCH_LIVE_E2E=1 to run
+fm-test-run: gate skip: tests/fm-pi-branch-live-e2e.test.sh: live: opt-in; set FM_PI_BRANCH_LIVE_E2E=1 to run
+FM_TEST_END 2026-10-04T22:41:33Z tests/fm-pi-branch-live-e2e.test.sh exit=0 duration_ms=74 gate_skip=true
+FM_TEST_SUMMARY total=26 failed=1 skipped_gate=3 duration_ms=1480945
+FM_TEST_SUMMARY_FAMILY family=afk count=1 duration_ms=12085 failed=0
+FM_TEST_SUMMARY_FAMILY family=live-harness-optin count=5 duration_ms=5591 failed=0
+FM_TEST_SUMMARY_FAMILY family=pr-forge count=1 duration_ms=1298 failed=0
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=3 duration_ms=8711 failed=0
+FM_TEST_SUMMARY_FAMILY family=secondmate count=4 duration_ms=759395 failed=1
+FM_TEST_SUMMARY_FAMILY family=snapshot-bearings count=2 duration_ms=215372 failed=0
+FM_TEST_SUMMARY_FAMILY family=standalone count=6 duration_ms=220638 failed=0
+FM_TEST_SUMMARY_FAMILY family=unclassified count=1 duration_ms=101998 failed=0
+FM_TEST_SUMMARY_FAMILY family=watcher-wake-lock count=3 duration_ms=153603 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-remote-secondmate-lifecycle-e2e.test.sh duration_ms=684721
+FM_TEST_SLOWEST rank=2 script=tests/fm-contributions.test.sh duration_ms=171626
+FM_TEST_SLOWEST rank=3 script=tests/fm-live-lab.test.sh duration_ms=101998
+FM_TEST_SLOWEST rank=4 script=tests/fm-remote-secondmate-parent-binding.test.sh duration_ms=94952
+FM_TEST_SLOWEST rank=5 script=tests/fm-cursor-primary.test.sh duration_ms=84299
+FM_TEST_SLOWEST rank=6 script=tests/fm-secondmate-restart.test.sh duration_ms=65300
+FM_TEST_SLOWEST rank=7 script=tests/fm-watch-recovery-loop.test.sh duration_ms=60042
+FM_TEST_SLOWEST rank=8 script=tests/fm-wake-drain-outcome-backstop.test.sh duration_ms=47336
+FM_TEST_SLOWEST rank=9 script=tests/fm-home-summary-refresh.test.sh duration_ms=43746
+FM_TEST_SLOWEST rank=10 script=tests/fm-voice-relay.test.sh duration_ms=38412
+FM_TEST_SLOWEST rank=11 script=tests/fm-classify-corr-token.test.sh duration_ms=25659
+FM_TEST_SLOWEST rank=12 script=tests/fm-dispatch-resolve.test.sh duration_ms=14038
+FM_TEST_SLOWEST rank=13 script=tests/fm-host-mirror.test.sh duration_ms=12085
+FM_TEST_SLOWEST rank=14 script=tests/fm-wake-daemon-lifecycle-e2e.test.sh duration_ms=9262
+FM_TEST_SLOWEST rank=15 script=tests/fm-stow-cascade.test.sh duration_ms=4886
+fm-test-run: wrote timing artifact: /Users/cortezashley/.no-mistakes/evidence/01M44FJG8W65Y6ESGBP92DGCE9/fm-test-timing-portable-serial-5.json
+=== shard 5 end 2026-10-04T22:41:33Z exit=1 ===
+=== shard 6 start 2026-10-04T22:41:33Z ===
+FM_TEST_BEGIN 2026-10-04T22:41:35Z tests/fm-pr-check-security.test.sh family=pr-forge expected_gate_skip=none
+ok - raw-byte parser accepts canonical URLs and rejects the complete adversarial matrix
+ok - GitLab merge requests are followed on any instance and never wake falsely
+ok - the Gerrit watch wakes only on an explicit merged status and never on submittability
+ok - Gerrit arming records no patch set revision and the merge path refuses to submit
+ok - Gerrit arming accepts a published HEAD only by the change's current patch set tree
+ok - a no-mistakes Gerrit ready report requires the pipeline's fixes recovered into the published copy
+ok - validated merged polls notify once and retire before the next watcher cycle
+ok - a repeat identical merged poll for an already-notified task is absorbed, never queued as a main-blocking row
+ok - a failed upward merge report keeps its poll armed for repair and retry
+ok - staged self-merge and poll interleavings are never silent
+ok - queued merges retain their away authority after captain return
+ok - poll distinguishes attended authorization from external landing
+ok - accepted merge authority refuses rebound task metadata
+ok - accepted merge authority persists under the lifecycle lock
+ok - teardown cannot race merged-poll authority consumption
+ok - poll retirement preserves a replacement authority record
+ok - a merge detected by the poll is reported upward from a secondmate home exactly once
+ok - a different merged PR for the same task gets its own first notification
+ok - a merged poll on a persistent secondmate retires silently: no outcome, marker, or wake, and every lifecycle artifact preserved
+ok - queue, receipt, and every fixed-path removal crash point recover without loss or repeated execution
+ok - open/red, closed-unmerged, malformed, and forge errors remain armed until an exact merged transition
+ok - replacement, nonterminal, tampered, and custom results receive no deletion authority
+ok - queue failure and untrusted receipts preserve canonical poll evidence
+ok - GitHub and GitLab exact merged results share one retirement path
+ok - PR and teardown entrypoints reject invalid arguments before every side effect
+ok - arming refuses a draft pull request, naming it, and arms a ready or unreadable one
+ok - fm-pr-check refuses to record a PR or arm a merge watch on a secondmate record
+ok - fm-pr-check refuses to register a PR whose named head is only in the worker copy
+ok - fm-pr-check refuses a direct-PR registration while a later commit is only in the copy
+ok - valid direct and merge flows record exact metadata and reject multiline head metadata
+ok - rejected metacharacter bytes remain inert at generation and watcher time
+ok - static poll is silent except for one merged line and remains watcher-bounded
+ok - interrupted atomic preparation cleans private temporaries and publishes nothing
+ok - concurrent watchers observe only complete private poll publications
+ok - poll publication paths refuse symlinks and directories
+ok - live poll and custom-check artifacts require private single-link files
+ok - a poll armed before a volume renumber is re-recorded under the control lock and keeps detecting merges
+ok - a renumbered registration is never re-recorded around a tampered artifact: swapped-check altered-check swapped-sidecar altered-sidecar altered-template-hash wrong-mode hardlinked-check split-device (foreign-device not exercisable on Darwin), or a pending retirement
+ok - direct re-arm publication waits without replacing an armed poll
+ok - device re-record publication waits without rewriting its registration
+ok - post-rename poll validation faults revoke both names and allow a clean retry
+ok - bootstrap does not rewrite unauthenticated checks or emit retired migration diagnostics
+ok - watcher signals promptly stop custom checks and clean private state
+ok - returned custom check descendants are drained on installed and fallback timeout paths
+ok - teardown removes safe poll artifacts and refuses directory-shaped check files without traversal
+FM_TEST_END 2026-10-04T22:46:40Z tests/fm-pr-check-security.test.sh exit=0 duration_ms=305436 gate_skip=false
+FM_TEST_BEGIN 2026-10-04T22:46:40Z tests/fm-wake-queue.test.sh family=watcher-wake-lock expected_gate_skip=none
+ok - an abandoned same-process lock hold is reclaimed; a parent's live hold is not
+ok - without BASHPID a subshell cannot release or reclaim its parent lock and owns its own hold
+ok - bounded acquire hands ownership to the waiting caller after contention
+ok - presentation lock waits are bounded and retriable without weakening acknowledgement atomicity

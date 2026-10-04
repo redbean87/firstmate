@@ -1,0 +1,29 @@
+== continue-on-error per serial shard job (resolved against matrix context) ==
+base 06f799fa shard 1: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+base 06f799fa shard 2: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+base 06f799fa shard 3: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+base 06f799fa shard 4: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+base 06f799fa shard 5: continue-on-error=true  failed-job=>run conclusion: success (NON-BLOCKING)
+base 06f799fa shard 6: continue-on-error=true  failed-job=>run conclusion: success (NON-BLOCKING)
+base 06f799fa shard 7: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+base 06f799fa shard 8: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+base 06f799fa shard 9: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 1: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 2: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 3: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 4: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 5: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 6: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 7: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 8: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+target fe2bf66c shard 9: continue-on-error=false failed-job=>run conclusion: failure (BLOCKING)
+
+== simulated failing shard 5 and 6 jobs ==
+base: run conclusion with shards 5+6 failed = success
+target: run conclusion with shards 5+6 failed = failure
+
+== semantic diff base -> target ==
+/jobs/tests-portable-serial/continue-on-error: removed (was "${{ matrix.shard == 5 || matrix.shard == 6 }}")
+
+PASS: the only semantic change is removal of the shard 5/6 continue-on-error quarantine;
+      all nine serial shards are now unconditionally blocking.
