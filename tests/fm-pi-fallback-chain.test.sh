@@ -17,7 +17,6 @@ set -u
 # shellcheck source=tests/fixtures.sh
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
-SPAWN="$ROOT/bin/fm-spawn.sh"
 ROUTER="$ROOT/.pi/extensions/fm-opencode-go-chain-router.ts"
 TMP_ROOT=$(fm_test_tmproot fm-pi-fallback-chain)
 
