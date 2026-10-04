@@ -149,6 +149,8 @@ SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
+# shellcheck source=bin/fm-discord-lib.sh
+. "$SCRIPT_DIR/fm-discord-lib.sh"
 
 STORE="$STATE/branch-outcomes.jsonl"
 CURSOR="$STATE/.branch-outcomes-cursor"
@@ -474,25 +476,16 @@ processed_init_locked() {
 # invocation boundary for the outbound tap: every captain-verdict append
 # notifies once, routine verdicts never do, and no posture, presence, or
 # gateway state gates the call, so decisions and blockers still ping while
-# away or quiet. The class mapping below mirrors the tap's wake patterns but
-# never stays silent: a captain row the patterns miss defaults to completion,
-# so a captain verdict always pings. The tap keeps its own classifier for
-# pipe-through callers; the two serve different contracts, so neither quotes
-# the other.
+# away or quiet. Classification runs the tap's shared rule
+# (discord_classify_notify_text in bin/fm-discord-lib.sh), so the marker
+# key and the tap's own classification stay in step; this caller's only
+# delta is that a captain row the rule leaves routine defaults to
+# completion, so a captain verdict always pings.
 outcome_notify_class() { # <wake> <summary> -> decision|completion|blocker
-  local text
-  text=$(printf '%s %s' "$1" "$2" | tr '[:upper:]' '[:lower:]')
-  case "$text" in
-    *needs-decision*|*open\ decision*|*awaiting*answer*|*answer*needed*|*captain*decision*|*ask-user*|*decision*waiting*)
-      printf 'decision\n'
-      return 0
-      ;;
-  esac
-  if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])(blocked|blocker|blockers|blocking|fail|failed|failing|failure|failures)([^a-z0-9]|$)'; then
-    printf 'blocker\n'
-    return 0
-  fi
-  printf 'completion\n'
+  local class
+  class=$(discord_classify_notify_text "$1 $2")
+  if [ "$class" = routine ]; then class=completion; fi
+  printf '%s\n' "$class"
 }
 
 # Stable logical event key for the tap's send-once marker. A decision row
