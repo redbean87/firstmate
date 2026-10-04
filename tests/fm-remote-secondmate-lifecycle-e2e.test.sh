@@ -1290,6 +1290,9 @@ FM_STATE_OVERRIDE="$WATCH_STATE" FM_SECONDMATE_LIVENESS_SECS=1 FM_POLL=1 \
   > "$TMP_ROOT/watch-liveness.out" 2> "$TMP_ROOT/watch-liveness.err" &
 watch_pid=$!
 watch_wait=0
+# 4500 x 0.02s = 90s of loaded-runner grace: this relaunch re-pushes every
+# inherited item over the remote transport, which alone exceeded the 30s
+# bound the blocked-write waits above allow.
 while kill -0 "$watch_pid" 2>/dev/null && [ "$watch_wait" -lt 4500 ]; do
   sleep 0.02
   watch_wait=$((watch_wait + 1))
