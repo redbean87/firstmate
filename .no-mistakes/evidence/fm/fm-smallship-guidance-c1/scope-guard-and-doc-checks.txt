@@ -1,0 +1,23 @@
+# Scope guard: change vs base commit f0bdbd73
+
+$ git diff f0bdbd73..ce87fb22 --name-only
+AGENTS.md
+
+$ git diff f0bdbd73..ce87fb22 -- .no-mistakes.yaml .github skills bin tests (empty output = untouched)
+(end)
+
+# Operator no-mistakes config (read-only) - auto_fix.review stays 0, review_agent_timeout unchanged
+135:auto_fix:
+136-  rebase: 3
+137-  lint: 3
+138-  test: 3
+139-  review: 0
+47:review_agent_timeout: "30m"
+
+$ bin/fm-doc-audience-check.sh
+fm-doc-audience-check: ok surfaces=118 local_links=714
+$ tests/fm-documentation-audiences.test.sh
+ok - documentation inventory classifies every maintained prose surface exactly once
+ok - classification, setup routing, and maintained-prose scope fail safely
+ok - required documentation owner pointers cannot silently disappear
+ok - local links resolve while dates, versions, commands, and incident prose remain semantically reviewed

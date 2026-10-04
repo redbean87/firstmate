@@ -1,0 +1,33 @@
+# Live lab session transcript (opencode primary in disposable FM_HOME lab, gate worktree cwd)
+## Scenario 1: loaded instructions state the smaller-ships sizing guidance
+TMUX_TMPDIR=$LAB/tmux tmux -L fm-lab capture-pane -p -t primary
+  ┃  Read your loaded project instructions (AGENTS.md) and answer in one short paragraph: what guidance do they give about sizing ship tasks and how many       guidance because no `AGENTS.md`
+  ┃  findings a review round should normally land with? Also state whether it is a hard gate.                                                                   content was provided.
+  ┃
+                                                                                                                                                                Context
+     Your sizing question is noted — pulling the exact guidance.                                                                                                33,446 tokens
+                                                                                                                                                                3% used
+     → Explored: 1 read                                                                                                                                         $0.00 spent
+     Captain, AGENTS.md guides sizing ship tasks so review rounds normally land with roughly 5 findings or fewer, and states explicitly it is operating         MCP
+     guidance rather than a hard gate — because piles of 6+ findings feed the 30-minute-capped fix agent and risk a timeout death plus full restart.            • robinhood-trading          Disabled
+     Build · Muse Spark 1.3 Contributor · 4.4s · 102.3 tok/s
+  ┃
+  ┃  Adversarial check: suppose a ship task's review round came back with 7 findings. Under your loaded instructions, is the first mate forbidden from
+  ┃  dispatching/continuing that task because of the sizing guidance, or is it still operating guidance you weigh rather than a blocking rule? Answer
+  ┃  briefly.
+  ┃
+     Captain, it is still operating guidance you weigh rather than a blocking rule — the 7 findings do not forbid dispatching/continuing, they only signal
+     elevated timeout-restart risk to manage.
+     Build · Muse Spark 1.3 Contributor · 2.0s · 113.8 tok/s
+  ┃
+  ┃  One more: does this sizing guidance change your merge rule - can anything new merge without the captain's eyes now? Answer in one sentence.
+  ┃
+     Captain, no — the sizing guidance changes nothing about merge authority, so nothing new may merge without your explicit word except green in-scope work
+     under an already-approved yolo posture.
+     Build · Muse Spark 1.3 Contributor · 4.1s · 73.8 tok/s
+  ┃
+  ┃
+  ┃
+  ┃  Build · Muse Spark 1.3 Contributor OpenCode Go
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ~/.no-mistakes/worktrees/26772a06f146/01M449Y00T9KX080T8RB7PN486                                                       33.4K (3%) · $0.00  ctrl+p commands    …/26772a06…/01M449Y00T9KX080T8RB7PN486
