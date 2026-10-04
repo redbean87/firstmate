@@ -1,0 +1,28 @@
+== positive: lint all workflows with pinned actionlint ==
+fm-lint-workflows.sh: actionlint 1.7.12 (pinned 1.7.12)
+fm-lint-workflows.sh: 3 workflow files valid
+
+== negative control: break a cache-step expression in a COPY and re-lint ==
+fm-lint-workflows.sh: actionlint 1.7.12 (pinned 1.7.12)
+../../../../../../var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-al-copy.elXhv0/.github/workflows/ci.yml:174:52: property "npm-cache-typo" is not defined in object type {npm-cache-node: {conclusion: string; outcome: string; outputs: {string => string}}} [expression]
+    |
+174 |           key: npm-global-${{ runner.os }}-node${{ steps.npm-cache-typo.outputs.major }}-${{ steps.npm-cache-node.outputs.day }}
+    |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+../../../../../../var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-al-copy.elXhv0/.github/workflows/ci.yml:175:61: property "npm-cache-typo" is not defined in object type {npm-cache-node: {conclusion: string; outcome: string; outputs: {string => string}}} [expression]
+../../../../../../var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-al-copy.elXhv0/.github/workflows/ci.yml:239:52: property "npm-cache-typo" is not defined in object type {npm-cache-node: {conclusion: string; outcome: string; outputs: {string => string}}} [expression]
+    |
+239 |           key: npm-global-${{ runner.os }}-node${{ steps.npm-cache-typo.outputs.major }}-${{ steps.npm-cache-node.outputs.day }}
+    |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+../../../../../../var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-al-copy.elXhv0/.github/workflows/ci.yml:240:61: property "npm-cache-typo" is not defined in object type {npm-cache-node: {conclusion: string; outcome: string; outputs: {string => string}}} [expression]
+../../../../../../var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-al-copy.elXhv0/.github/workflows/ci.yml:317:52: property "npm-cache-typo" is not defined in object type {npm-cache-node: {conclusion: string; outcome: string; outputs: {string => string}}} [expression]
+    |
+317 |           key: npm-global-${{ runner.os }}-node${{ steps.npm-cache-typo.outputs.major }}-${{ steps.npm-cache-node.outputs.day }}
+    |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+../../../../../../var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-al-copy.elXhv0/.github/workflows/ci.yml:318:61: property "npm-cache-typo" is not defined in object type {npm-cache-node: {conclusion: string; outcome: string; outputs: {string => string}}} [expression]
+../../../../../../var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-al-copy.elXhv0/.github/workflows/ci.yml:553:52: property "npm-cache-typo" is not defined in object type {npm-cache-node: {conclusion: string; outcome: string; outputs: {string => string}}} [expression]
+    |
+553 |           key: npm-global-${{ runner.os }}-node${{ steps.npm-cache-typo.outputs.major }}-${{ steps.npm-cache-node.outputs.day }}
+    |                                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+../../../../../../var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-al-copy.elXhv0/.github/workflows/ci.yml:554:61: property "npm-cache-typo" is not defined in object type {npm-cache-node: {conclusion: string; outcome: string; outputs: {string => string}}} [expression]
+negative-control exit code: 1 (non-zero expected)
+OK: actionlint rejects the broken cache-step expression, so the positive result is meaningful

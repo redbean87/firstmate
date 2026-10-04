@@ -1,0 +1,26 @@
+== 1. cold run: empty cache, plain 'npm install -g' (today's uncached flow / cache miss) ==
+cold: exit=0 wall=7s tarball-fetch-lines=248
+cold: tasks-axi runs from the fresh global install
+
+== 2. warm run: same cache, FRESH prefix, same plain command (what a cache-hit CI run does) ==
+warm: exit=0 wall=2s tarball-fetch-lines=124
+npm http cache @toon-format/toon@https://registry.npmjs.org/@toon-format/toon/-/toon-2.3.1.tgz 0ms (cache hit)
+npm http cache isexe@https://registry.npmjs.org/isexe/-/isexe-2.0.0.tgz 0ms (cache hit)
+npm http cache @stablelib/base64@https://registry.npmjs.org/@stablelib/base64/-/base64-1.0.1.tgz 0ms (cache hit)
+npm http cache undici-types@https://registry.npmjs.org/undici-types/-/undici-types-8.9.0.tgz 0ms (cache hit)
+npm http cache fast-sha256@https://registry.npmjs.org/fast-sha256/-/fast-sha256-1.3.0.tgz 0ms (cache hit)
+warm: tasks-axi runs from the warm-cache global install
+
+== 3. adversarial: --offline with the WARM cache must succeed (zero network) ==
+offline+warm cache: exit=0 - the cache fully holds what the installs need
+
+== 4. adversarial: --offline with an EMPTY cache must FAIL (proves #3 came from the cache) ==
+offline+empty cache: exit=1 as expected (ENOTCACHED / cache miss needs network)
+npm error code ENOTCACHED
+
+== summary ==
+cold(warm-miss) tarball fetches: 248
+warm        tarball fetches: 124
+warm-run tarball lines served FROM CACHE (no network): 124
+warm-run tarball lines fetched from NETWORK:          0
+PASS: warm cache serves the global installs without fresh tarball downloads; miss behaves like today
