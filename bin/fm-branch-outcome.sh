@@ -502,16 +502,12 @@ outcome_notify_class() { # <wake> <summary> -> decision|completion|blocker
 # its store seq, which is unique per row and unchanged across re-wakes and
 # re-presentations. Neither form derives from wake ids, polling cycles,
 # timestamps, or process attempts.
-outcome_notify_key() { # <task> <seq> <class> <wake> <summary> -> event key
-  local key
-  if [ "$3" = decision ]; then
-    key=$(printf '%s %s' "$4" "$5" | sed -n -E 's/.*\[key=([A-Za-z0-9._-]+)\].*/\1/p')
-    case "$key" in
-      ''|*[!A-Za-z0-9._-]*) ;;
-      *) printf 'decision-%s-%s\n' "$1" "$key"; return 0 ;;
-    esac
+outcome_notify_key() { # <task> <seq> <class> <decision-key> -> event key
+  if [ "$3" = decision ] && [ -n "$4" ]; then
+    printf 'decision-%s-%s\n' "$1" "$4"
+  else
+    printf 'branch-outcome-%s\n' "$2"
   fi
-  printf 'branch-outcome-%s\n' "$2"
 }
 
 # Concise phone-safe text: collapse whitespace, drop absolute scratch paths,
@@ -519,9 +515,9 @@ outcome_notify_key() { # <task> <seq> <class> <wake> <summary> -> event key
 # branch owns keeping internal wording out of the summary it records.
 outcome_notify_text() { # <summary> -> text on stdout
   printf '%s' "$1" | tr '\n\t\r' '   ' \
-    | sed -E -e 's:/(Users|tmp|private|var|home|root|opt|srv|etc)/[^ ]*::g' \
+    | sed -E -e 's:(^| )/(Users|tmp|private|var|home|root|opt|srv|etc)/[^ ]*::g' \
     | sed -e 's/  */ /g; s/^ *//; s/ *$//' \
-    | awk '{ if (length($0) > 500) print substr($0, 1, 497) "..."; else print }'
+    | jq -Rr 'if length > 500 then .[0:497] + "..." else . end'
 }
 
 # Fire the tap for one stored captain row. Always returns 0: the row is
@@ -530,19 +526,19 @@ outcome_notify_text() { # <summary> -> text on stdout
 outcome_maybe_notify_discord() { # <task> <seq> <summary> <wake>; always 0
   local task=$1 seq=$2 summary=$3 wake=$4 class event text dkey out rc=0
   class=$(outcome_notify_class "$wake" "$summary")
-  event=$(outcome_notify_key "$task" "$seq" "$class" "$wake" "$summary")
+  dkey=
+  if [ "$class" = decision ]; then
+    dkey=$(printf '%s %s' "$wake" "$summary" | sed -n -E 's/.*\[key=([A-Za-z0-9._-]+)\].*/\1/p')
+    case "$dkey" in ''|*[!A-Za-z0-9._-]*) dkey= ;; esac
+  fi
+  event=$(outcome_notify_key "$task" "$seq" "$class" "$dkey")
   text=$(outcome_notify_text "$summary")
   [ -n "$text" ] || text="update on $task"
-  dkey=$(printf '%s %s' "$wake" "$summary" | sed -n -E 's/.*\[key=([A-Za-z0-9._-]+)\].*/\1/p')
-  case "$dkey" in ''|*[!A-Za-z0-9._-]*) dkey= ;; esac
-  if [ "$class" != decision ]; then dkey=; fi
+  set -- --event "$event" --class "$class" --text "$text"
+  [ -z "$dkey" ] || set -- "$@" --decision-key "$dkey"
   # The || exempts the send from set -e: a failed delivery is a warning,
   # never an append failure.
-  if [ -n "$dkey" ]; then
-    out=$("$SCRIPT_DIR/fm-discord-notify.sh" --event "$event" --class "$class" --text "$text" --decision-key "$dkey" 2>&1) || rc=$?
-  else
-    out=$("$SCRIPT_DIR/fm-discord-notify.sh" --event "$event" --class "$class" --text "$text" 2>&1) || rc=$?
-  fi
+  out=$("$SCRIPT_DIR/fm-discord-notify.sh" "$@" 2>&1) || rc=$?
   if [ "$rc" -eq 0 ]; then
     [ -n "$out" ] || out="silent (already notified, unconfigured, or suppressed)"
     echo "discord-notify: $event [$class]: $out" >&2

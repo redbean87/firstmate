@@ -442,6 +442,28 @@ printf 'version: 2\nmode: quiet\n' > "$wirehome/state/.afk-contract"
 wire_append --task wire-ship --verdict captain --summary 'blocked: outage while quiet' >/dev/null 2>&1 || fail "quiet blocker append failed"
 [ "$(wire_posts)" = 9 ] || fail "quiet posture must not suppress blockers"
 rm -f "$wirehome/state/.afk-contract"
+wire_append --task wire-ship --verdict captain --summary 'done: added assets/tmp/preview.png to the gallery' >/dev/null 2>&1 || fail "word-internal path append failed"
+wire_append --task wire-ship --verdict captain --summary 'failed: see https://ci.example.com/tmp/build9/log' >/dev/null 2>&1 || fail "ci URL summary append failed"
+[ "$(wire_posts)" = 11 ] || fail "word-internal and URL path rows must still notify"
+mb=''
+mi=0
+while [ "$mi" -lt 600 ]; do mb="${mb}語"; mi=$((mi + 1)); done
+wire_append --task wire-ship --verdict captain --summary "done: ${mb}END" >/dev/null 2>&1 || fail "multibyte summary append failed"
+[ "$(wire_posts)" = 12 ] || fail "over-cap multibyte summary must still notify"
+python3 - "$FAKE_POST_DIR" <<'PY' || fail "phone text must keep word-internal paths and cap on character boundaries"
+import glob, json, sys
+posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post-*.json")]
+rel = [c for c in posts if "assets/tmp/preview.png" in c]
+assert len(rel) == 1, "word-internal path segment stays in the phone text"
+url = [c for c in posts if "https://ci.example.com/tmp/build9/log" in c]
+assert len(url) == 1, "URL path segment stays linkable in the phone text"
+mb_posts = [c for c in posts if "語" in c or "\ufffd" in c]
+assert len(mb_posts) == 1, "multibyte summary must send exactly once"
+c = mb_posts[0]
+assert "\ufffd" not in c, "the cap must not split a multibyte character"
+assert c.endswith("..."), "over-cap text keeps its ellipsis after a whole character"
+assert len(c) <= 560, "multibyte text stays capped"
+PY
 # A failed send keeps the append green, releases the marker, and retries on
 # the next same-key sighting (the fake records attempts, so count deltas).
 before=$(wire_posts)
