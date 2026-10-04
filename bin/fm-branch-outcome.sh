@@ -78,7 +78,12 @@
 #     Routine verdicts never notify. The notification runs outside the store
 #     lock and never changes the append result: a failed send surfaces as a
 #     stderr warning only, and the tap's own marker release lets a later
-#     same-key sighting retry.
+#     same-key sighting retry. Non-decision rows notify under a
+#     content-derived logical key (task, class, summary hash), so the same
+#     recurring event shares one marker across re-wakes and re-reports; a
+#     keyed decision's marker is released by any later append whose summary
+#     closes that key (resolved/captain-held), routine or captain, so its
+#     next occurrence pings again.
 #   - The store is written BEFORE the outcome is delivered to main
 #     (store-first durability): nothing about a handled event depends on
 #     conversation memory.
@@ -488,18 +493,56 @@ outcome_notify_class() { # <summary> -> decision|completion|blocker
   printf '%s\n' "$class"
 }
 
+# The decision-key grammar shared by marker creation and release: the
+# status fold's own key parse (a stated [key=...] token in a documented
+# position, valid slug, namespace transition allowed), so a marker is
+# created and released under exactly one identity.
+outcome_notify_dkey() { # <summary> -> decision key slug, or nothing
+  local key
+  key=$(_fm_decision_key "$1" "") || return 0
+  [ -n "$key" ] || return 0
+  _fm_decision_key_transition_allowed "$key" "$(status_line_note "$1")" || return 0
+  printf '%s\n' "$key"
+}
+
+# 0 when the summary closes a keyed decision rather than opening one: the
+# resolve/captain-held verbs, with the classify library's overrides.
+outcome_decision_closing() { # <summary>
+  local verb
+  status_line_verb "$1" verb
+  case "$verb" in
+    "${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}"|"${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}") return 0 ;;
+  esac
+  return 1
+}
+
+outcome_release_decision_marker() { # <task> <summary>
+  local key
+  outcome_decision_closing "$2" || return 0
+  key=$(outcome_notify_dkey "$2")
+  [ -n "$key" ] || return 0
+  rm -f -- "$STATE/discord-notify/decision-$1-$key" 2>/dev/null \
+    || echo "warning: discord decision marker decision-$1-$key could not be released" >&2
+  return 0
+}
+
 # Stable logical event key for the tap's send-once marker. A decision row
-# carrying a parseable [key=...] token notifies under that decision's key,
-# so re-handled rows for the same still-open decision share one marker and a
-# failed send retries on the next sighting. Every other row notifies under
-# its store seq, which is unique per row and unchanged across re-wakes and
-# re-presentations. Neither form derives from wake ids, polling cycles,
-# timestamps, or process attempts.
-outcome_notify_key() { # <task> <seq> <class> <decision-key> -> event key
-  if [ "$3" = decision ] && [ -n "$4" ]; then
-    printf 'decision-%s-%s\n' "$1" "$4"
+# for a keyed still-open decision notifies under decision-<task>-<key>, so
+# re-handled rows share one marker; a line closing that decision releases
+# the marker, so its next keyed occurrence pings again. Every other row
+# notifies under branch-outcome-<task>-<class>-<summary-hash>: logical
+# event identity that is stable across re-wakes, re-reports, and
+# re-presentations, so a failed send retries on the next sighting of the
+# same event and identical repeats never double-ping. Neither form derives
+# from wake ids, store seqs, polling cycles, timestamps, or process
+# attempts.
+outcome_notify_key() { # <task> <class> <decision-key> <summary> -> event key
+  local sig
+  if [ "$2" = decision ] && [ -n "$3" ]; then
+    printf 'decision-%s-%s\n' "$1" "$3"
   else
-    printf 'branch-outcome-%s\n' "$2"
+    sig=$(printf '%s' "$4" | cksum)
+    printf 'branch-outcome-%s-%s-%s-%s\n' "$1" "$2" "${sig%% *}" "${sig##* }"
   fi
 }
 
@@ -516,15 +559,14 @@ outcome_notify_text() { # <summary> -> text on stdout
 # Fire the tap for one stored captain row. Always returns 0: the row is
 # already durable, so a failed send is a stderr warning, never an append
 # failure (failing the append would record a duplicate row on retry).
-outcome_maybe_notify_discord() { # <task> <seq> <summary>; always 0
-  local task=$1 seq=$2 summary=$3 class event text dkey out rc=0
+outcome_maybe_notify_discord() { # <task> <summary>; always 0
+  local task=$1 summary=$2 class event text dkey out rc=0
   class=$(outcome_notify_class "$summary")
   dkey=
-  if [ "$class" = decision ]; then
-    dkey=$(printf '%s' "$summary" | sed -n -E 's/.*\[key=([A-Za-z0-9._-]+)\].*/\1/p')
-    case "$dkey" in ''|*[!A-Za-z0-9._-]*) dkey= ;; esac
+  if [ "$class" = decision ] && ! outcome_decision_closing "$summary"; then
+    dkey=$(outcome_notify_dkey "$summary")
   fi
-  event=$(outcome_notify_key "$task" "$seq" "$class" "$dkey")
+  event=$(outcome_notify_key "$task" "$class" "$dkey" "$summary")
   text=$(outcome_notify_text "$summary")
   [ -n "$text" ] || text="update on $task"
   set -- --event "$event" --class "$class" --text "$text"
@@ -637,8 +679,9 @@ case "$CMD" in
     fi
     fm_lock_release "$LOCK"
     printf '%s\n' "$SEQ"
+    outcome_release_decision_marker "$TASK" "$SUMMARY"
     if [ "$VERDICT" = captain ]; then
-      outcome_maybe_notify_discord "$TASK" "$SEQ" "$SUMMARY"
+      outcome_maybe_notify_discord "$TASK" "$SUMMARY"
     fi
     ;;
   unread)

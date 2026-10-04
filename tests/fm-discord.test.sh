@@ -482,6 +482,23 @@ before=$(wire_posts)
 wire_append --task wire-ship --verdict captain --wake 'needs-decision [key=wake-axis]: pick the protocol' --summary 'blocked: release gate is failing on macOS' >/dev/null 2>"$TMP_ROOT/wire-wake.err" || fail "wake-attributed blocker append failed"
 [ "$(wire_posts)" = "$((before + 1))" ] || fail "wake decision vocabulary must not swallow the blocker ping"
 assert_grep "[blocker]" "$TMP_ROOT/wire-wake.err" "blocker class derives from the summary alone"
+wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=round4-key]: pick the transport' >/dev/null 2>&1 || fail "keyed decision append failed"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-round4-key" ] || fail "decision must hold its marker"
+before=$(wire_posts)
+wire_append --task wire-ship --verdict routine --summary 'resolved [key=round4-key]: answered with REST' >/dev/null 2>&1 || fail "closing row append failed"
+[ "$(wire_posts)" = "$before" ] || fail "routine closing row must stay silent"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-round4-key" ] && fail "closing row must release the decision marker"
+wire_append --task wire-ship --verdict captain --summary 'needs-decision [key=round4-key]: pick again' >/dev/null 2>&1 || fail "reopened decision append failed"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "reopened keyed decision must ping again"
+before=$(wire_posts)
+export FAKE_SEND_CODE=403
+wire_append --task wire-ship --verdict captain --summary 'blocked: flaky mirror went dark' >/dev/null 2>"$TMP_ROOT/wire-mirror.err" || fail "failed blocker append must stay green"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "failed blocker records only its attempt"
+export FAKE_SEND_CODE=200
+wire_append --task wire-ship --verdict captain --summary 'blocked: flaky mirror went dark' >/dev/null 2>&1 || fail "blocker retry append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "blocker retry on the same logical event must deliver"
+wire_append --task wire-ship --verdict captain --summary 'blocked: flaky mirror went dark' >/dev/null 2>&1 || fail "duplicate blocker append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "re-sighting the same logical event must not double-ping"
 # An unconfigured home stays inert and green.
 barehome="$TMP_ROOT/bare-home"; mkdir -p "$barehome/state" "$barehome/config"
 before=$(wire_posts)
