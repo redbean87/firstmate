@@ -195,6 +195,7 @@ Record the resulting mode, `yolo` merge posture, and the one-line reason for any
 
 Treat file or subsystem overlap as a risk signal rather than an automatic reason to wait, and dispatch isolated work immediately with no concurrency cap when each change can be independently implemented and validated and the selected delivery path can reconcile ordinary rebases or conflicts.
 Serialize only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress or reconciliation unsafe; same-file editing alone is insufficient, and genuine blockers remain durable.
+Size ship tasks so review rounds normally land with roughly 5 findings or fewer, as operating guidance rather than a hard gate, because piles of 6 or more findings feed the 30-minute-capped fix agent and risk a timeout death plus a full restart.
 Write the task-specific brief under section 11 before spawning.
 Fill the task subsections according to section 11.
 
