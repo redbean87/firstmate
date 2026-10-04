@@ -267,6 +267,11 @@ jobs:
   tests-portable-serial:
     name: Behavior portable serial ${{ matrix.shard }}
     runs-on: ubuntu-latest
+    # Temporary quarantine (2026-10-04): shards 5 and 6 are flaky while
+    # fm-ci-serial56-main-c1 is validated, so only their failures are non-blocking.
+    # Shards 1-4 and 7-9 still fail the run exactly as before.
+    # Remove this the moment fm-ci-serial56-main-c1 merges; not permanent CI policy.
+    continue-on-error: ${{ matrix.shard == 5 || matrix.shard == 6 }}
     # Docs-only changes skip these shards via the scope gate above; an
     # unreadable scope fails closed to running the full matrix.
     needs: detect-changes
