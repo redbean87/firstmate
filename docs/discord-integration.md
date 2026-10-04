@@ -61,8 +61,8 @@ point where broader policies attach later without rewriting the callers.
    `GUILD_MESSAGES` intent below is not privileged.
 7. Install the bot into the target server (administrator), set
    `DISCORD_OWNER_USER_ID` in `.env`, then run
-   `fm-discord-setup.sh callback` + `verify`, then `register` the slash
-   commands. Do NOT set an interactions endpoint URL in the Portal: this
+   `fm-discord-setup.sh callback` + `verify`, then `fm-discord-commands.sh register`
+   to install the slash commands. Do NOT set an interactions endpoint URL in the Portal: this
    integration answers slash commands over the gateway (below), so no
    public HTTPS endpoint is needed or used.
 
@@ -170,7 +170,7 @@ this integration.
 
 - Connect: set `DISCORD_OWNER_USER_ID`, then `init` -> open URL ->
   `callback --code ... --state ... [--guild ...]` -> `verify` (also runs
-  inside callback) -> `register`. The callback exchanges the code with a
+  inside callback) -> `fm-discord-commands.sh register`. The callback exchanges the code with a
   form-encoded POST to the unversioned `https://discord.com/api/oauth2/token`
   endpoint, reads the installed guild from the bot-flow response (or
   `--guild`), and `verify` proves the bot token itself can read that guild
