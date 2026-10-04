@@ -1,0 +1,37 @@
+=== TARGET 6368f0ca ===
+job: Behavior portable serial ${{ matrix.shard }}
+steps that still execute per shard: ["actions/checkout@v6", "Install pinned ShellCheck", "Install pinned actionlint", "Require tmux for e2e tests", "Install tasks-axi for backlog-handoff delegation", "Install the Pi package for the Pi extension tests", "Run portable serial shard ${{ matrix.shard }}", "Upload portable serial shard ${{ matrix.shard }} timing artifact"]
+matrix shards (visible check names): Behavior portable serial 1, Behavior portable serial 2, Behavior portable serial 3, Behavior portable serial 4, Behavior portable serial 5, Behavior portable serial 6, Behavior portable serial 7, Behavior portable serial 8, Behavior portable serial 9
+continue-on-error raw: "${{ matrix.shard == 5 || matrix.shard == 6 }}"
+
+shard | continue-on-error (failure tolerated?)
+1    | false
+2    | false
+3    | false
+4    | false
+5    | true
+6    | true
+7    | false
+8    | false
+9    | false
+
+tolerated shards: [5, 6]
+rc=0
+=== BASELINE f0bdbd73 (before change) ===
+job: Behavior portable serial ${{ matrix.shard }}
+steps that still execute per shard: ["actions/checkout@v6", "Install pinned ShellCheck", "Install pinned actionlint", "Require tmux for e2e tests", "Install tasks-axi for backlog-handoff delegation", "Install the Pi package for the Pi extension tests", "Run portable serial shard ${{ matrix.shard }}", "Upload portable serial shard ${{ matrix.shard }} timing artifact"]
+matrix shards (visible check names): Behavior portable serial 1, Behavior portable serial 2, Behavior portable serial 3, Behavior portable serial 4, Behavior portable serial 5, Behavior portable serial 6, Behavior portable serial 7, Behavior portable serial 8, Behavior portable serial 9
+continue-on-error raw: nil
+
+shard | continue-on-error (failure tolerated?)
+1    | false
+2    | false
+3    | false
+4    | false
+5    | false
+6    | false
+7    | false
+8    | false
+9    | false
+
+tolerated shards: []
