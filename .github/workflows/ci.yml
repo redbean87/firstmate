@@ -157,6 +157,22 @@ jobs:
           set -eu
           bin/fm-install-actionlint.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # Cache the npm download cache so the global installs below reuse
+      # tarballs across runs. The installs still run every time, so a cache
+      # miss behaves identically to today's uncached flow.
+      - name: Record Node.js major version for the npm cache key
+        id: npm-cache-node
+        run: |
+          set -eu
+          echo "major=$(node -p 'process.versions.node.split(".")[0]')" >>"$GITHUB_OUTPUT"
+      - name: Restore npm download cache (parallel shard 1)
+        id: npm-cache-parallel-1
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-global-${{ runner.os }}-node${{ steps.npm-cache-node.outputs.major }}-tasks-axi-pi-coding-agent
+          restore-keys: |
+            npm-global-${{ runner.os }}-node${{ steps.npm-cache-node.outputs.major }}-
       - name: Install tasks-axi
         run: |
           set -eu
@@ -205,6 +221,22 @@ jobs:
           set -eu
           bin/fm-install-actionlint.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # Cache the npm download cache so the global install below reuses
+      # tarballs across runs. The install still runs every time, so a cache
+      # miss behaves identically to today's uncached flow.
+      - name: Record Node.js major version for the npm cache key
+        id: npm-cache-node
+        run: |
+          set -eu
+          echo "major=$(node -p 'process.versions.node.split(".")[0]')" >>"$GITHUB_OUTPUT"
+      - name: Restore npm download cache (parallel shard 2)
+        id: npm-cache-parallel-2
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-global-${{ runner.os }}-node${{ steps.npm-cache-node.outputs.major }}-tasks-axi
+          restore-keys: |
+            npm-global-${{ runner.os }}-node${{ steps.npm-cache-node.outputs.major }}-
       - name: Install tasks-axi
         run: |
           set -eu
@@ -266,6 +298,22 @@ jobs:
             exit 1
           }
           tmux -V
+      # Cache the npm download cache so the global installs below reuse
+      # tarballs across runs. The installs still run every time, so a cache
+      # miss behaves identically to today's uncached flow.
+      - name: Record Node.js major version for the npm cache key
+        id: npm-cache-node
+        run: |
+          set -eu
+          echo "major=$(node -p 'process.versions.node.split(".")[0]')" >>"$GITHUB_OUTPUT"
+      - name: Restore npm download cache (portable serial)
+        id: npm-cache-serial
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-global-${{ runner.os }}-node${{ steps.npm-cache-node.outputs.major }}-tasks-axi-pi-coding-agent
+          restore-keys: |
+            npm-global-${{ runner.os }}-node${{ steps.npm-cache-node.outputs.major }}-
       - name: Install tasks-axi for backlog-handoff delegation
         run: |
           set -eu
@@ -485,6 +533,22 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      # Cache the npm download cache so the pinned tasks-axi install below
+      # reuses tarballs across runs. The install still runs every time, so a
+      # cache miss behaves identically to today's uncached flow.
+      - name: Record Node.js major version for the npm cache key
+        id: npm-cache-node
+        run: |
+          set -eu
+          echo "major=$(node -p 'process.versions.node.split(".")[0]')" >>"$GITHUB_OUTPUT"
+      - name: Restore npm download cache (macOS stock Bash)
+        id: npm-cache-macos
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-global-${{ runner.os }}-node${{ steps.npm-cache-node.outputs.major }}-tasks-axi-0-2-6
+          restore-keys: |
+            npm-global-${{ runner.os }}-node${{ steps.npm-cache-node.outputs.major }}-
       - name: Run snapshot consumers with stock Bash
         shell: /bin/bash {0}
         env:
