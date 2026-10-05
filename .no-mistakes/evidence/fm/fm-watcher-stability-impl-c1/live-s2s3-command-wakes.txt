@@ -1,0 +1,23 @@
+=== S2 gateway !fm receipt ===
+discord-command cmd-live-cmd1 status
+--- pending marker body ---
+discord-command cmd-live-cmd1 status
+=== S2 watcher drain ===
+discord-command cmd-live-cmd1 status
+--- retired? ---
+ls: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-live.upr0bj/home/state/discord-pending-wake/cmd-live-cmd1: No such file or directory
+retired (expected)
+=== S2 duplicate stays silent ===
+(empty=good)
+
+=== S3 gateway interaction receipt ===
+discord-command live-iw1 status
+--- pending marker body ---
+discord-command live-iw1 status
+=== S3 watcher drain ===
+discord-command live-iw1 status
+--- retired? ---
+ls: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-live.upr0bj/home/state/discord-pending-wake/live-iw1: No such file or directory
+retired (expected)
+=== S3 duplicate stays silent ===
+(empty=good)

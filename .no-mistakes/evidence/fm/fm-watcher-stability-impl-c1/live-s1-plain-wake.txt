@@ -1,0 +1,13 @@
+=== S1 gateway receipt ===
+discord-message live-m1
+--- pending marker body ---
+discord-message live-m1
+=== S1 watcher drain (REST empty) ===
+discord-message live-m1
+--- after drain exists? ---
+ls: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-live.upr0bj/home/state/discord-pending-wake/live-m1: No such file or directory
+retired (expected)
+=== S1 second drain must be silent ===
+(empty=good)
+=== S1 duplicate gateway must stay silent ===
+(empty=good)

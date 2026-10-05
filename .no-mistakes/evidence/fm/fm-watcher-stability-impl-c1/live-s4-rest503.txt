@@ -1,0 +1,3 @@
+=== S4a REST 503 is diagnosed, not silent ===
+fm-discord-poll: REST poll failed (HTTP 503) for channel c1; retrying next cycle
+rc=0 (must be 0)

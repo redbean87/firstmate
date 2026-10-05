@@ -1,0 +1,6 @@
+=== S5a down banner self-describes (no-watcher) ===
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  snapshot: model=persistent reason=no-watcher lock=unheld pid=none(absent identity -) beacon=0s extension-ownership=not-proven
+=== S5b live lock holder named, not implied dead ===
+=== S5b live lock holder named, not implied dead (fresh home) ===
+●  snapshot: model=persistent reason=stale-beacon lock=held pid=<live>(alive identity match) beacon=999999s extension-ownership=not-proven

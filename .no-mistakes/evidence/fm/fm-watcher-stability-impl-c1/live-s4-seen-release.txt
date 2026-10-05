@@ -1,0 +1,5 @@
+=== S4b seen-release lets REST retry after record failure (fresh id) ===
+claimed-new
+dup rc=1 (1=absorbed)
+released
+re-claimed after release (retry possible)
