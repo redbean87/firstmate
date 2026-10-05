@@ -180,6 +180,30 @@ out=$(FM_HOME="$nobid" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-poll.sh"
 assert_contains "$(cat "$TMP_ROOT/nobid.err")" "bot user id unknown" "missing bot id gets a diagnostic"
 pass "incoming routing authorization self-filter guild guard"
 
+# 3b. Gateway receipt records a durable pending wake, and the watcher-consumed
+#     path drains it exactly once: the fix for messages dying in the gateway log.
+cat > "$TMP_ROOT/evt-wake.json" <<'JSON'
+{"t":"MESSAGE_CREATE","d":{"id":"m-wake1","guild_id":"g1","channel_id":"c1","author":{"id":"u9","bot":false},"content":"surface me","timestamp":"2026-01-01T00:00:04.000Z"}}
+JSON
+out=$(FM_HOME="$home" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-poll.sh" --event-file "$TMP_ROOT/evt-wake.json") || fail "gateway wake routing failed"
+assert_contains "$out" "discord-message m-wake1" "gateway receipt still prints its log line"
+[ -f "$home/state/discord-pending-wake/m-wake1" ] || fail "gateway receipt must record a pending wake"
+export FAKE_MSGS_BODY='[]' FAKE_MSGS_CODE=200
+out=$(FM_HOME="$home" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-poll.sh" --channel c1 --once) || fail "watcher drain failed"
+assert_contains "$out" "discord-message m-wake1" "watcher path must drain the pending gateway wake"
+[ -e "$home/state/discord-pending-wake/m-wake1" ] && fail "a drained pending wake must be retired"
+out=$(FM_HOME="$home" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-poll.sh" --channel c1 --once) || fail "second drain failed"
+[ -z "$out" ] || fail "a drained pending wake must never re-emit"
+out=$(FM_HOME="$home" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-poll.sh" --event-file "$TMP_ROOT/evt-wake.json") || fail "duplicate gateway event failed"
+[ -z "$out" ] || fail "a duplicate gateway event must stay silent"
+[ -e "$home/state/discord-pending-wake/m-wake1" ] && fail "a duplicate gateway event must not recreate the pending wake"
+# REST transport/5xx failures are observable rather than success-shaped silence.
+export FAKE_MSGS_CODE=503
+FM_HOME="$home" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-poll.sh" --channel c1 --once 2>"$TMP_ROOT/rest503.err" >/dev/null || fail "503 poll must still exit 0"
+assert_contains "$(cat "$TMP_ROOT/rest503.err")" "REST poll failed (HTTP 503)" "5xx failure must be reported, not silent"
+unset FAKE_MSGS_CODE
+pass "gateway wake durability and REST failure visibility"
+
 # 4. Outbound: send + unit-safe chunking + numbering + reply payload
 export FAKE_SEND_MODE=record FAKE_SEND_CODE=200
 unset FAKE_SEND_CODES FAKE_SEND_HEADERS
@@ -292,6 +316,10 @@ printf '{"session_start_limit":{"remaining":999}}' > "$TMP_ROOT/api/gateway/bot"
 out=$(env -u DISCORD_BOT_TOKEN FM_HOME="$home" DISCORD_API_BASE="file://$TMP_ROOT/api" python3 "$ROOT/bin/fm-discord-gateway.py" --once 2>"$TMP_ROOT/fileonce.err") || fail "file-backed gateway lookup failed: $(cat "$TMP_ROOT/fileonce.err")"
 assert_contains "$out" "gateway ok" "--once reports a healthy lookup"
 assert_not_contains "$out" "tok1234567890" "gateway lookup never logs token"
+# Diagnostics carry a UTC timestamp so reconnect churn can be correlated.
+env -u DISCORD_BOT_TOKEN FM_HOME="$home" DISCORD_API_BASE="http://127.0.0.1:1" python3 "$ROOT/bin/fm-discord-gateway.py" --once 2>"$TMP_ROOT/gw-ts.err" >/dev/null || true
+grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z fm-discord-gateway:' "$TMP_ROOT/gw-ts.err" \
+  || fail "gateway diagnostics must carry a UTC timestamp: $(cat "$TMP_ROOT/gw-ts.err")"
 pass "gateway honesty intents dotenv"
 
 # 9. Watcher arming: shim + cadence gated on the token, validated, removed on opt-out

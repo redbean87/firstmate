@@ -18,7 +18,11 @@
 # message-based equivalents needing no interaction delivery at all. New messages are stashed at
 # state/discord-inbox/<message-id>.json with guild, channel, user, message
 # id, timestamps, and reply/thread context preserved, then one wake line
-# "discord-message <message-id>" is printed per new message.
+# "discord-message <message-id>" is printed per new message. The gateway path
+# (--event-file) additionally records a durable pending-wake marker, because
+# its stdout is inherited by the gateway process rather than consumed by the
+# watcher; the next bare poll drains those markers into the watcher's own
+# check output, so a gateway receipt can never die in the gateway log.
 #
 # Routing guards, all fail-closed and checked before any stash or wake:
 # unknown senders are refused (owner-only via DISCORD_OWNER_USER_ID),
@@ -62,8 +66,8 @@ if ! discord_self_known; then
 fi
 inbox=$(discord_private_dir "$STATE/discord-inbox" 700) || exit 0
 
-route_message_file() { # <message.json>
-  local f=$1 mid guild ch author bot ts content ref
+route_message_file() { # <message.json> [gateway|watch]
+  local f=$1 mode=${2:-watch} mid guild ch author bot ts content ref
   mid=$(jq -r '.id // empty' "$f" 2>/dev/null)
   case "$mid" in ''|.*|*[!A-Za-z0-9._-]*) return 0 ;; esac
   guild=$(jq -r '.guild_id // empty' "$f" 2>/dev/null)
@@ -105,7 +109,18 @@ route_message_file() { # <message.json>
   jq --arg guild "$guild" --arg ch "$ch" --arg author "$author" --arg ts "$ts" --argjson ref "$ref" \
     '. + {guild_id:$guild, channel_id:$ch, user_id:$author, received_at:$ts, reply_context:$ref}' "$f" > "$out.tmp" 2>/dev/null || return 0
   chmod 600 "$out.tmp" 2>/dev/null
-  mv -f "$out.tmp" "$out" 2>/dev/null || return 0
+  mv -f "$out.tmp" "$out" 2>/dev/null || { discord_seen_release "$mid" || true; return 0; }
+  # A gateway receipt's stdout is not watcher-consumed, so record a durable
+  # pending wake for the next watcher path to drain. Release the dedup marker
+  # if that record cannot be written, so the REST fallback retries the message.
+  if [ "$mode" = gateway ]; then
+    if ! discord_pending_wake_record "$mid"; then
+      discord_seen_release "$mid" || true
+      discord_diag_throttled "pending-wake" 3600 \
+        "fm-discord-poll: could not record a pending wake for a gateway receipt; releasing dedup so the REST fallback retries" >&2
+      return 0
+    fi
+  fi
   printf 'discord-message %s\n' "$mid"
 }
 
@@ -124,10 +139,15 @@ if [ -n "$event_file" ]; then
     rm -f "$tmp" "$tmp.inter"; trap - EXIT
     exit 0
   fi
-  route_message_file "$tmp"
+  route_message_file "$tmp" gateway
   rm -f "$tmp"; trap - EXIT
   exit 0
 fi
+
+# Drain gateway-recorded wakes into this watcher-consumed stdout before the REST
+# fallback runs, so a gateway receipt still surfaces when the fallback is
+# unconfigured, rate limited, or failing.
+discord_pending_wake_drain
 
 if [ -z "$channel" ]; then
   # Watcher path: resolve the REST channel from configuration. Silent when
@@ -142,12 +162,16 @@ case "$limit" in ''|*[!0-9]*) limit=25 ;; esac
 
 out=$(mktemp "${TMPDIR:-/tmp}/fm-discord-msgs.XXXXXX") || exit 1
 trap 'rm -f "$out"' EXIT
-read -r code _retry < <(discord_api GET "/channels/$channel/messages?limit=$limit" "" "$out") || exit 0
+read -r code _retry < <(discord_api GET "/channels/$channel/messages?limit=$limit" "" "$out") \
+  || { discord_diag_throttled "rest-transport" 3600 \
+        "fm-discord-poll: REST request to Discord failed at the transport level for channel $channel; retrying next cycle" >&2; exit 0; }
 case "$code" in
   2[0-9][0-9]) ;;
   401|403) echo "fm-discord-poll: permission failure HTTP $code for channel $channel" >&2; exit 0 ;;
-  429) exit 0 ;; # rate limited: stay silent, retry next cycle
-  *) exit 0 ;;
+  429) discord_diag_throttled "rest-429" 300 \
+        "fm-discord-poll: REST poll rate limited (HTTP 429) for channel $channel; retrying next cycle" >&2; exit 0 ;;
+  *) discord_diag_throttled "rest-$code" 3600 \
+        "fm-discord-poll: REST poll failed (HTTP $code) for channel $channel; retrying next cycle" >&2; exit 0 ;;
 esac
 jq -c '.[]' "$out" 2>/dev/null | while IFS= read -r msg; do
   tmp=$(mktemp "${TMPDIR:-/tmp}/fm-discord-msg.XXXXXX") || continue

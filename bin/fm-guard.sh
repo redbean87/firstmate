@@ -255,6 +255,29 @@ elif [ "$watcher_healthy" = false ]; then
       else
         printf '●  X-mode relay polling needs supervision, but %s.\n' "$watcher_cause"
       fi
+      # Self-describing snapshot: the reason alone once conflated a live cycle
+      # with a stale health read, so print every input the verdict consulted.
+      # Display-only; it never changes whether or how the alarm fires, and the
+      # extension-ownership probe runs only on an actual down report.
+      snap_pid=$(cat "$STATE/.watch.lock/pid" 2>/dev/null || true)
+      snap_liveness=absent
+      snap_identity=-
+      if [ -n "$snap_pid" ]; then
+        if fm_pid_alive "$snap_pid"; then snap_liveness=alive; else snap_liveness=dead; fi
+        if fm_watcher_lock_matches_pid "$STATE" "$WATCH" "$snap_pid" "$FM_HOME"; then
+          snap_identity=match
+        else
+          snap_identity=mismatch
+        fi
+      else
+        snap_pid=none
+      fi
+      if fm_watcher_lock_unheld "$STATE"; then snap_lock=unheld; else snap_lock=held; fi
+      if fm_extension_owns_supervision "$STATE" "$FM_ROOT"; then snap_ext=proven; else snap_ext=not-proven; fi
+      snap_model=$(fm_supervision_model)
+      printf '●  snapshot: model=%s reason=%s lock=%s pid=%s(%s identity %s) beacon=%ss extension-ownership=%s\n' \
+        "$snap_model" "$watcher_down_reason" "$snap_lock" "$snap_pid" "$snap_liveness" "$snap_identity" \
+        "$(fm_path_age "$STATE/.last-watcher-beat")" "$snap_ext"
       if [ "$READ_ONLY" -eq 1 ]; then
         printf '●  This read-only session should report the lapse, not repair it.\n'
       else

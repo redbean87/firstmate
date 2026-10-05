@@ -942,6 +942,37 @@ test_pi_harness_routes_itself_to_the_extension_model() {
   pass "fm-guard stale banner: Pi and pi-signed primaries route themselves to the extension model"
 }
 
+test_down_banner_self_describes_the_verdict_inputs() {
+  local dir out home
+  dir=$(make_guard_case self-describing-missing)
+  home=$(case_home "$dir")
+  touch "$home/state/.last-watcher-beat"
+  out=$(run_guard_case "$dir")
+  assert_contains "$out" "snapshot: " "down banner must carry a self-describing snapshot"
+  assert_contains "$out" "reason=no-watcher" "snapshot must name the verdict reason"
+  assert_contains "$out" "lock=unheld" "snapshot must name the lock state"
+  assert_contains "$out" "pid=none" "snapshot must name the absent lock pid"
+  assert_contains "$out" "extension-ownership=not-proven" "snapshot must name the extension-ownership result"
+  pass "fm-guard stale banner: the down banner self-describes the verdict inputs"
+}
+
+test_down_banner_names_a_live_lock_holder() {
+  local dir out home pid
+  dir=$(make_guard_case self-describing-held)
+  home=$(case_home "$dir")
+  sleep 60 &
+  pid=$!
+  record_live_watcher "$dir" "$pid" || fail "could not record the live watcher"
+  # No beacon: the verdict is stale-beacon, but the lock holder is live and
+  # identity-matched. The snapshot must say so instead of implying a dead cycle.
+  out=$(run_guard_case "$dir")
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  assert_contains "$out" "reason=stale-beacon" "snapshot must name the stale-beacon reason"
+  assert_contains "$out" "lock=held pid=$pid(alive identity match)" "snapshot must name the live, identity-matched holder"
+  pass "fm-guard stale banner: the down banner names a live identity-matched lock holder"
+}
+
 test_first_stale_call_prints_full_banner
 test_full_banner_names_quiet_mode_when_active
 test_repeated_same_episode_prints_reminder_only
@@ -967,6 +998,8 @@ test_autoarm_long_turn_does_not_silence_other_models
 test_persistent_no_watcher_banner_names_missing_process
 test_persistent_no_watcher_episode_survives_beacon_touch
 test_fresh_beacon_without_live_watcher_stays_alarm
+test_down_banner_self_describes_the_verdict_inputs
+test_down_banner_names_a_live_lock_holder
 test_x_mode_without_live_watcher_stays_alarm
 test_healthy_recovery_rearms_next_stale_episode
 test_concurrent_same_episode_prints_one_full_banner

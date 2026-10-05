@@ -35,6 +35,9 @@
 #   discord_is_self <author-id> - 0 when the author is our own bot user
 #   discord_self_known       - 0 when the bot user id is resolved
 #   discord_seen_claim <event-id> - atomically claim a dedup marker; 0=new
+#   discord_seen_release <event-id> - remove a dedup marker so a failed wake can retry
+#   discord_pending_wake_record <event-id> - durably record a gateway receipt awaiting a watcher wake
+#   discord_pending_wake_drain - print and retire pending gateway wakes (watcher-consumed path)
 #   discord_require_guild <guild-id> - 0 when guild is the configured one
 #   discord_authorize_sender <user> <guild> <channel> - owner-only routing gate
 #   discord_validate_config  - fail-closed configuration check for operators
@@ -450,6 +453,61 @@ discord_seen_claim() {
   if ! printf '%s\n' "$(date +%s)" > "$tmp" || ! chmod 600 "$tmp"; then rm -f "$tmp"; return 2; fi
   if ln -- "$tmp" "$file" 2>/dev/null; then rm -f "$tmp"; else rm -f "$tmp"; [ -e "$file" ] && return 1; return 2; fi
   find "$dir" -type f -mtime +"$DISCORD_SEEN_RETENTION_DAYS" -delete 2>/dev/null || true
+  return 0
+}
+
+discord_seen_release() {
+  # Retract a dedup marker this process just claimed so a later REST sweep can
+  # retry a message whose gateway wake could not be durably recorded. Removing
+  # a marker that no longer exists is already the desired end state.
+  local id=$1 dir
+  case "$id" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  dir=$(discord_state_dir "discord-seen") || return 1
+  rm -f -- "$dir/$id"
+}
+
+# The gateway path's stdout is inherited by the gateway process (it lands in
+# state/discord-gateway.log), so its "discord-message <id>" line reaches no
+# watcher. The receipt therefore also records a durable pending-wake marker,
+# and the next watcher-consumed poll drains it into the wake channel. This is
+# the seen-vs-wake-emitted separation: state/discord-seen/ means the message was
+# stashed, while state/discord-pending-wake/<id> means it still owes a wake.
+discord_pending_wake_record() {
+  # Returns 0 when the marker already existed (the receipt is still safe),
+  # 1 only on a real storage failure.
+  local id=$1 dir tmp
+  case "$id" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  dir=$(discord_state_dir "discord-pending-wake") || return 1
+  [ -e "$dir/$id" ] && return 0
+  tmp=$(umask 077; mktemp "$dir/.rec.XXXXXX" 2>/dev/null) || return 1
+  : > "$tmp" 2>/dev/null || { rm -f -- "$tmp"; return 1; }
+  if ln -- "$tmp" "$dir/$id" 2>/dev/null; then
+    rm -f -- "$tmp"
+    return 0
+  fi
+  rm -f -- "$tmp"
+  [ -e "$dir/$id" ] && return 0
+  return 1
+}
+
+discord_pending_wake_drain() {
+  # Print one "discord-message <id>" per pending gateway receipt and retire it.
+  # Called only on the watcher-consumed path (a bare or --channel poll), never
+  # from --event-file, so a gateway-log write is never mistaken for a wake.
+  # Each marker is claimed by an atomic rename before printing, so concurrent
+  # drains cannot double-emit. Always succeeds.
+  local dir handled f id
+  dir=$(discord_state_dir "discord-pending-wake") || return 0
+  handled="$dir/.handled"
+  discord_private_dir "$handled" 700 >/dev/null 2>&1 || return 0
+  for f in "$dir"/*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    id=${f##*/}
+    case "$id" in ''|.*|*[!A-Za-z0-9._-]*) continue ;; esac
+    mv -f -- "$f" "$handled/$id" 2>/dev/null || continue
+    printf 'discord-message %s\n' "$id"
+    rm -f -- "$handled/$id" 2>/dev/null || true
+  done
   return 0
 }
 
