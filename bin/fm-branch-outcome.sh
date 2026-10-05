@@ -71,6 +71,28 @@
 #     start without scanning lifetime history.
 #   - Every mutation runs under $STATE/.branch-outcomes.lock so the branch
 #     extension and a concurrent session-start replay cannot interleave.
+#   - Discord outbound (docs/discord-integration.md "Outbound tap" owns the
+#     tap contract): after a captain-verdict append whose summary classifies
+#     into decision, completion, or blocker is durably stored and its seq
+#     printed, the append path launches bin/fm-discord-notify.sh once with
+#     an explicit class, a stable logical event key, and sanitized text,
+#     detached from the append process: append exits without waiting on the
+#     send, so caller bookkeeping and queued deliveries never stall on
+#     Discord latency, and the run's one result line is appended to
+#     $STATE/.branch-outcome-notify.log. Routine text never notifies,
+#     whatever the verdict. The notification runs outside the store lock and
+#     never changes the append result: a failed send is a logged warning
+#     only, and the tap's own marker release lets a later same-key sighting
+#     retry. Non-decision rows notify under a logical key (task, class,
+#     summary hash), so the same recurring event shares one marker across
+#     re-wakes and re-reports; a keyed decision notifies under
+#     decision-<task>-<key> and its marker is released by any later close of
+#     that key, whether the closing outcome summary restates the key
+#     (resolved/captain-held) or the task status fold shows it resolved, so
+#     its next occurrence pings again. The detached send reconciles that
+#     marker against the store and the fold before and after delivery, so a
+#     delayed send neither strands a stale marker behind a close nor
+#     double-pings a repeat.
 #   - The store is written BEFORE the outcome is delivered to main
 #     (store-first durability): nothing about a handled event depends on
 #     conversation memory.
@@ -141,6 +163,8 @@ SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
+# shellcheck source=bin/fm-discord-lib.sh
+. "$SCRIPT_DIR/fm-discord-lib.sh"
 
 STORE="$STATE/branch-outcomes.jsonl"
 CURSOR="$STATE/.branch-outcomes-cursor"
@@ -462,6 +486,227 @@ processed_init_locked() {
   fi
 }
 
+# Discord outbound wiring. This script's append path is the production
+# invocation boundary for the outbound tap: every captain-verdict append
+# whose summary classifies into one of the tap's three classes notifies
+# once, routine text never does, and no posture, presence, or gateway state
+# gates the call, so decisions and blockers still ping while away or quiet.
+# Classification runs the tap's shared rule (discord_classify_notify_text
+# in bin/fm-discord-lib.sh), so the marker key and the tap's own
+# classification stay in step.
+outcome_notify_class() { # <summary> -> decision|completion|blocker|routine
+  discord_classify_notify_text "$1"
+}
+
+# The decision-key grammar shared by marker creation and release: the
+# status fold's own key parse (a stated [key=...] token in a documented
+# position, valid slug, namespace transition allowed), so a marker is
+# created and released under exactly one identity.
+outcome_notify_dkey() { # <summary> -> decision key slug, or nothing
+  local key
+  key=$(_fm_decision_key "$1" "") || return 0
+  [ -n "$key" ] || return 0
+  _fm_decision_key_transition_allowed "$key" "$(status_line_note "$1")" || return 0
+  printf '%s\n' "$key"
+}
+
+# 0 when the summary closes a keyed decision rather than opening one: the
+# resolve/captain-held verbs, with the classify library's overrides.
+outcome_decision_closing() { # <summary>
+  local verb
+  status_line_verb "$1" verb
+  case "$verb" in
+    "${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}"|"${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}") return 0 ;;
+  esac
+  return 1
+}
+
+outcome_release_decision_marker() { # <task> <summary>
+  local key
+  outcome_decision_closing "$2" || return 0
+  key=$(outcome_notify_dkey "$2")
+  [ -n "$key" ] || return 0
+  rm -f -- "$STATE/discord-notify/decision-$1-$key" 2>/dev/null \
+    || echo "warning: discord decision marker decision-$1-$key could not be released" >&2
+  return 0
+}
+
+# Stable logical event key for the tap's send-once marker. A decision row
+# for a keyed still-open decision notifies under decision-<task>-<key>, so
+# re-handled rows share one marker; a line closing that decision releases
+# the marker, so its next keyed occurrence pings again. Every other row
+# notifies under branch-outcome-<task>-<class>-<summary-hash>: logical
+# event identity that is stable across re-wakes, re-reports, and
+# re-presentations, so a failed send retries on the next sighting of the
+# same event and identical repeats never double-ping. Neither form derives
+# from wake ids, store seqs, polling cycles, timestamps, or process
+# attempts.
+outcome_notify_key() { # <task> <class> <decision-key> <summary> -> event key
+  local sig
+  if [ "$2" = decision ] && [ -n "$3" ]; then
+    printf 'decision-%s-%s\n' "$1" "$3"
+  else
+    sig=$(printf '%s' "$4" | cksum)
+    printf 'branch-outcome-%s-%s-%s-%s\n' "$1" "$2" "${sig%% *}" "${sig##* }"
+  fi
+}
+
+# Concise phone-safe text: collapse whitespace, drop absolute scratch paths,
+# cap length. Secret shapes are additionally redacted by the tap itself; the
+# branch owns keeping internal wording out of the summary it records.
+outcome_notify_text() { # <summary> -> text on stdout
+  printf '%s' "$1" | tr '\n\t\r' '   ' \
+    | sed -E -e 's:(^| )/(Users|tmp|private|var|home|root|opt|srv|etc)/[^ ]*::g' \
+    | sed -e 's/  */ /g; s/^ *//; s/ *$//' \
+    | jq -Rr 'if length > 500 then .[0:497] + "..." else . end'
+}
+
+# Latest lifecycle state of decision <key> for <task> in the outcome store:
+# close when the most recent keyed row on the <before|after> side of <seq>
+# closes the decision, open when it opens one, none when no keyed row is on
+# that side. Keyed means the summary states [key=<key>] under the status
+# fold's key grammar; closers are the resolve/captain-held verbs and openers
+# are still-open decision or blocker sightings. A completion restating a key
+# is neither: like the fold, it does not move the decision.
+outcome_key_latest() { # <task> <key> <before|after> <seq> -> close|open|none
+  local task=$1 key=$2 dir=$3 seq=$4 state=none line lseq summary k class
+  [ -s "$STORE" ] || { printf 'none\n'; return 0; }
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    lseq=$(printf '%s' "$line" | jq -r '.seq // empty' 2>/dev/null) || continue
+    case "$lseq" in ''|*[!0-9]*) continue ;; esac
+    case "$dir" in
+      before) [ "$lseq" -lt "$seq" ] 2>/dev/null || continue ;;
+      *) [ "$lseq" -gt "$seq" ] 2>/dev/null || continue ;;
+    esac
+    summary=$(printf '%s' "$line" | jq -r '.summary // empty' 2>/dev/null) || continue
+    k=$(outcome_notify_dkey "$summary")
+    [ "$k" = "$key" ] || continue
+    if outcome_decision_closing "$summary"; then state=close; continue; fi
+    class=$(outcome_notify_class "$summary")
+    case "$class" in decision|blocker) state=open ;; esac
+  done <<EOF
+$(jq -c --arg task "$task" 'select(.task == $task)' "$STORE" 2>/dev/null)
+EOF
+  printf '%s\n' "$state"
+}
+
+# 0 when the status fold shows <key> for <task> closed: a resolved or
+# captain-held status line states the key and the fold no longer lists it
+# as open. This is the keyless-close path: the closing outcome summary may
+# never restate the key while the status log carries the resolution.
+outcome_status_key_closed() { # <task> <key>
+  local f="$STATE/$1.status" open line verb k
+  case "$2" in ''|default|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 1
+  open=$(status_open_decisions "$f" 2>/dev/null) || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      "$2"$'\t'*) return 1 ;;
+    esac
+  done <<EOF
+$open
+EOF
+  while IFS= read -r line || [ -n "$line" ]; do
+    status_line_verb "$line" verb 2>/dev/null || continue
+    case "$verb" in
+      "${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}"|"${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}") ;;
+      *) continue ;;
+    esac
+    k=$(_fm_decision_key "$line" "") 2>/dev/null || continue
+    [ "$k" = "$2" ] || continue
+    _fm_decision_key_transition_allowed "$k" "$(status_line_note "$line")" 2>/dev/null || continue
+    return 0
+  done < "$f"
+  return 1
+}
+
+outcome_release_closed_decision_markers() { # <task>
+  local m base key
+  for m in "$STATE/discord-notify/decision-$1-"*; do
+    [ -e "$m" ] || continue
+    [ -f "$m" ] && [ ! -L "$m" ] || continue
+    base=${m##*/}
+    key=${base#"decision-$1-"}
+    case "$key" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+    if outcome_status_key_closed "$1" "$key" 2>/dev/null; then
+      rm -f -- "$m" 2>/dev/null \
+        || echo "warning: discord decision marker decision-$1-$key could not be released" >&2
+    fi
+  done
+  return 0
+}
+
+# Reconcile one decision marker after a detached delivery settles: drop the
+# marker when the episode it pinged is now closed (a keyed close landed past
+# its row, or the fold shows the key closed with no reopen past its row),
+# so the next same-key occurrence pings again. A still-open decision keeps
+# its marker, so repeats stay silent. Always returns 0.
+outcome_reconcile_decision_marker() { # <task> <key> <seq>; always 0
+  local latest
+  latest=$(outcome_key_latest "$1" "$2" after "$3" 2>/dev/null) || return 0
+  case "$latest" in
+    close)
+      rm -f -- "$STATE/discord-notify/decision-$1-$2" 2>/dev/null \
+        || echo "warning: discord decision marker decision-$1-$2 could not be reconciled" >&2
+      return 0
+      ;;
+    open) return 0 ;;
+  esac
+  outcome_status_key_closed "$1" "$2" 2>/dev/null || return 0
+  rm -f -- "$STATE/discord-notify/decision-$1-$2" 2>/dev/null \
+    || echo "warning: discord decision marker decision-$1-$2 could not be reconciled" >&2
+  return 0
+}
+
+# Fire the tap for one stored captain row. Always returns 0: the row is
+# already durable, so a failed send is a stderr warning, never an append
+# failure (failing the append would record a duplicate row on retry).
+outcome_maybe_notify_discord() { # <task> <summary> <seq>; always 0
+  local task=$1 summary=$2 seq=$3 class event text dkey out rc=0 marker had_marker=0 sent=0
+  class=$(outcome_notify_class "$summary")
+  if [ "$class" = routine ]; then
+    echo "discord-notify: $task: silent (routine)" >&2
+    return 0
+  fi
+  dkey=
+  if [ "$class" = decision ] && ! outcome_decision_closing "$summary"; then
+    dkey=$(outcome_notify_dkey "$summary")
+  fi
+  event=$(outcome_notify_key "$task" "$class" "$dkey" "$summary")
+  text=$(outcome_notify_text "$summary")
+  [ -n "$text" ] || text="update on $task"
+  marker="$STATE/discord-notify/$event"
+  if [ -e "$marker" ]; then had_marker=1; fi
+  trap '[ "$had_marker" = 1 ] || [ "$sent" = 1 ] || rm -f -- "$marker"' HUP INT TERM
+  if [ -n "$dkey" ]; then
+    if [ "$(outcome_key_latest "$task" "$dkey" before "$seq" 2>/dev/null)" = close ]; then
+      rm -f -- "$marker" 2>/dev/null \
+        || echo "warning: discord decision marker $event could not be reconciled" >&2
+      had_marker=0
+      if [ -e "$marker" ]; then had_marker=1; fi
+    fi
+  fi
+  set -- --event "$event" --class "$class" --text "$text"
+  [ -z "$dkey" ] || set -- "$@" --decision-key "$dkey"
+  # The || exempts the send from set -e: a failed delivery is a warning,
+  # never an append failure.
+  out=$("$SCRIPT_DIR/fm-discord-notify.sh" "$@" 2>&1) || rc=$?
+  if [ "$rc" -eq 0 ]; then sent=1; fi
+  if [ "$rc" -eq 0 ]; then
+    [ -n "$out" ] || out="silent (already notified, unconfigured, or suppressed)"
+    echo "discord-notify: $event [$class]: $out" >&2
+  else
+    echo "warning: discord-notify: $event [$class] failed (exit $rc): ${out:-no detail}; marker released, a later same-key sighting retries" >&2
+  fi
+  if [ -n "$dkey" ]; then
+    outcome_reconcile_decision_marker "$task" "$dkey" "$seq" || true
+  fi
+  trap - HUP INT TERM
+  return 0
+}
+
 held_lock_owned_by_ancestor() {
   local owner owner_pid pid parent depth=0
   case "$PPID" in ''|*[!0-9]*|0|1) return 1 ;; esac
@@ -558,6 +803,12 @@ case "$CMD" in
     fi
     fm_lock_release "$LOCK"
     printf '%s\n' "$SEQ"
+    outcome_release_decision_marker "$TASK" "$SUMMARY"
+    outcome_release_closed_decision_markers "$TASK"
+    if [ "$VERDICT" = captain ]; then
+      ( outcome_maybe_notify_discord "$TASK" "$SUMMARY" "$SEQ" ) \
+        >>"$STATE/.branch-outcome-notify.log" 2>&1 </dev/null &
+    fi
     ;;
   unread)
     [ "$#" -eq 0 ] || usage

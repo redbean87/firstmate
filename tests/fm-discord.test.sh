@@ -70,6 +70,7 @@ case "$url" in
   */guilds/*) printf '{}' > "$ofile"; printf '%s' "${FAKE_GUILD_CODE:-404}" ;;
   */applications/*/commands) printf '[]' > "$ofile"; printf '%s' "${FAKE_CMDS_CODE:-200}" ;;
   */channels/*/messages*)
+    if [ -n "${FAKE_SEND_SLEEP:-}" ]; then sleep "$FAKE_SEND_SLEEP"; fi
     if [ "${FAKE_SEND_MODE:-}" = record ]; then
       cat "$ofile" >/dev/null 2>&1 || true
       if [ -n "${FAKE_POST_DIR:-}" ]; then
@@ -393,5 +394,190 @@ FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" -
 export FAKE_SEND_CODE=200
 FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" --event tap-retry --class blocker --text "Outage" >/dev/null || fail "retry after failure must send"
 pass "outbound tap send-once owner-mention routine-silent"
+
+# 13. Branch-outcome wiring: the store append is the production tap boundary.
+# Captain rows notify once per logical event through the real caller path;
+# routine rows never do; posture never gates; failures keep the append green.
+wirehome="$TMP_ROOT/wire-home"; make_home "$wirehome" >/dev/null
+printf 'DISCORD_CHANNEL_ID=c1\n' >> "$wirehome/.env"
+export FAKE_SEND_MODE=record FAKE_SEND_CODE=200
+unset FAKE_SEND_CODES FAKE_SEND_HEADERS
+export FAKE_POST_DIR="$TMP_ROOT/wire-posts" FAKE_SEQ_FILE="$TMP_ROOT/wire-seq"
+rm -rf "$FAKE_POST_DIR"; mkdir -p "$FAKE_POST_DIR"; printf '0' > "$FAKE_SEQ_FILE"
+wire_posts() { find "$FAKE_POST_DIR" -maxdepth 1 -type f -name 'post-*.json' | wc -l | tr -d ' '; }
+wire_append() { FM_HOME="$wirehome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-branch-outcome.sh" append "$@"; }
+WIRE_LOG="$wirehome/state/.branch-outcome-notify.log"
+wire_log_lines() { [ -f "$WIRE_LOG" ] && wc -l < "$WIRE_LOG" | tr -d ' ' || printf '0'; }
+wire_wait_log() { # <prev-lines> <delta-out>
+  local i=0
+  while [ "$i" -lt 200 ]; do
+    if [ "$(wire_log_lines)" -gt "$1" ]; then
+      sed -n "$(( $1 + 1 )),\$p" "$WIRE_LOG" > "$2"
+      return 0
+    fi
+    sleep 0.05
+    i=$((i + 1))
+  done
+  echo "timeout: detached tap result never reached $WIRE_LOG" >&2
+  return 2
+}
+wire_append_wait() { # <delta-out> <append args...> -> append's seq on stdout
+  local delta=$1 prev
+  shift
+  prev=$(wire_log_lines)
+  wire_append "$@" || return 1
+  wire_wait_log "$prev" "$delta"
+}
+seq=$(wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=wire-pick]: choose the API shape') || fail "wired decision append failed"
+case "$seq" in ''|*[!0-9]*) fail "append stdout must stay exactly the seq (got $seq)" ;; esac
+[ "$(wire_posts)" = 1 ] || fail "captain decision must notify exactly once"
+assert_grep "notified decision-wire-ship-wire-pick" "$TMP_ROOT/wire.last" "wiring logs the notified event"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=wire-pick]: still waiting' >/dev/null || fail "repeat decision append failed"
+[ "$(wire_posts)" = 1 ] || fail "re-handled same decision must not resend"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'done: the fix is complete' >/dev/null || fail "completion append failed"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'PR ready for review: https://example.com/pr/5' >/dev/null || fail "review-ready append failed"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'merged PR 5, the fix has landed' >/dev/null || fail "merge-call append failed"
+[ "$(wire_posts)" = 4 ] || fail "completion, review-ready, and merge-call rows must each notify"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'blocked: CI is failing on lint' >/dev/null || fail "blocker append failed"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'failed: nightly backup did not finish' >/dev/null || fail "failure append failed"
+[ "$(wire_posts)" = 6 ] || fail "blocker and failure rows must each notify"
+wire_append --task wire-ship --verdict routine --summary 'heartbeat handled, nothing new' >/dev/null 2>&1 || fail "routine append failed"
+wire_append --task wire-ship --verdict routine --silent true --summary 'no-change note' >/dev/null 2>&1 || fail "silent routine append failed"
+[ "$(wire_posts)" = 6 ] || fail "routine rows must never notify"
+python3 - "$FAKE_POST_DIR" <<'PY' || fail "wired message contract violated"
+import glob, json, sys
+posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post-*.json")]
+assert any("<@u9>" in c for c in posts), "owner mention pings the phone"
+assert any("wire-pick" in c for c in posts), "decision key rides along"
+PY
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'done: built under /tmp/scratch/wire/thing, all green' >/dev/null || fail "path summary append failed"
+python3 - "$FAKE_POST_DIR" <<'PY' || fail "wired text must drop scratch paths"
+import glob, json, sys
+posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post-*.json")]
+assert not any("/tmp/scratch" in c for c in posts), "absolute scratch paths stay off the phone"
+assert all(len(c) <= 560 for c in posts), "wired text stays capped"
+PY
+[ "$(wire_posts)" = 7 ] || fail "sanitized completion must still notify"
+printf 'version: 2\nentered: 2026-10-04T00:00:00Z\n' > "$wirehome/state/.afk-contract"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=wire-away]: call it while away' >/dev/null || fail "away decision append failed"
+[ "$(wire_posts)" = 8 ] || fail "away posture must not suppress decisions"
+printf 'version: 2\nmode: quiet\n' > "$wirehome/state/.afk-contract"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'blocked: outage while quiet' >/dev/null || fail "quiet blocker append failed"
+[ "$(wire_posts)" = 9 ] || fail "quiet posture must not suppress blockers"
+rm -f "$wirehome/state/.afk-contract"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'done: added assets/tmp/preview.png to the gallery' >/dev/null || fail "word-internal path append failed"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'failed: see https://ci.example.com/tmp/build9/log' >/dev/null || fail "ci URL summary append failed"
+[ "$(wire_posts)" = 11 ] || fail "word-internal and URL path rows must still notify"
+mb=''
+mi=0
+while [ "$mi" -lt 600 ]; do mb="${mb}語"; mi=$((mi + 1)); done
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary "done: ${mb}END" >/dev/null || fail "multibyte summary append failed"
+[ "$(wire_posts)" = 12 ] || fail "over-cap multibyte summary must still notify"
+python3 - "$FAKE_POST_DIR" <<'PY' || fail "phone text must keep word-internal paths and cap on character boundaries"
+import glob, json, sys
+posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post-*.json")]
+rel = [c for c in posts if "assets/tmp/preview.png" in c]
+assert len(rel) == 1, "word-internal path segment stays in the phone text"
+url = [c for c in posts if "https://ci.example.com/tmp/build9/log" in c]
+assert len(url) == 1, "URL path segment stays linkable in the phone text"
+mb_posts = [c for c in posts if "語" in c or "\ufffd" in c]
+assert len(mb_posts) == 1, "multibyte summary must send exactly once"
+c = mb_posts[0]
+assert "\ufffd" not in c, "the cap must not split a multibyte character"
+assert c.endswith("..."), "over-cap text keeps its ellipsis after a whole character"
+assert len(c) <= 560, "multibyte text stays capped"
+PY
+# A failed send keeps the append green, releases the marker, and retries on
+# the next same-key sighting (the fake records attempts, so count deltas).
+before=$(wire_posts)
+export FAKE_SEND_CODE=403
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=wire-retry]: decide now' >/dev/null || fail "append must stay green when the send fails"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "failed send records only its attempt"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-wire-retry" ] && fail "failed send must release the dedup marker"
+assert_grep "failed" "$TMP_ROOT/wire.last" "failed send warns instead of failing the append"
+export FAKE_SEND_CODE=200
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=wire-retry]: decide now' >/dev/null || fail "retry append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "retry after failure must deliver"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-wire-retry" ] || fail "delivered retry must hold its marker"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=wake-axis]: pick the protocol' >/dev/null || fail "wake-axis decision append failed"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-wake-axis" ] || fail "decision row must hold its marker"
+before=$(wire_posts)
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --wake 'needs-decision [key=wake-axis]: pick the protocol' --summary 'blocked: release gate is failing on macOS' >/dev/null || fail "wake-attributed blocker append failed"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "wake decision vocabulary must not swallow the blocker ping"
+assert_grep "[blocker]" "$TMP_ROOT/wire.last" "blocker class derives from the summary alone"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=round4-key]: pick the transport' >/dev/null || fail "keyed decision append failed"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-round4-key" ] || fail "decision must hold its marker"
+before=$(wire_posts)
+wire_append --task wire-ship --verdict routine --summary 'resolved [key=round4-key]: answered with REST' >/dev/null 2>&1 || fail "closing row append failed"
+[ "$(wire_posts)" = "$before" ] || fail "routine closing row must stay silent"
+[ -e "$wirehome/state/discord-notify/decision-wire-ship-round4-key" ] && fail "closing row must release the decision marker"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=round4-key]: pick again' >/dev/null || fail "reopened decision append failed"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "reopened keyed decision must ping again"
+# A captain verdict carrying routine text stays silent: only the three
+# classified classes ever notify.
+before=$(wire_posts)
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'heartbeat handled, nothing new' >/dev/null || fail "routine-text captain append failed"
+[ "$(wire_posts)" = "$before" ] || fail "captain verdict with routine text must stay silent"
+assert_grep "silent (routine)" "$TMP_ROOT/wire.last" "routine text is skipped at the caller"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'heartbeat handled, nothing new' >/dev/null || fail "repeat routine-text captain append failed"
+[ "$(wire_posts)" = "$before" ] || fail "repeated routine text must stay silent"
+# A close that never restates the key still releases the marker: the
+# resolution lives in the status log, which the release consults.
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-close --verdict captain --summary 'needs-decision [key=close-key]: pick the cache backend' >/dev/null || fail "keyed decision append failed"
+before=$(wire_posts)
+[ -e "$wirehome/state/discord-notify/decision-wire-close-close-key" ] || fail "decision must hold its marker"
+printf 'needs-decision [key=close-key]: pick the cache backend\nresolved [key=close-key]: answered with redis\n' >> "$wirehome/state/wire-close.status"
+wire_append --task wire-close --verdict routine --summary 'done: shipped the cache switch' >/dev/null 2>&1 || fail "keyless closing append failed"
+[ "$(wire_posts)" = "$before" ] || fail "keyless routine closing row must stay silent"
+[ -e "$wirehome/state/discord-notify/decision-wire-close-close-key" ] && fail "keyless close must release the decision marker via the status fold"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-close --verdict captain --summary 'needs-decision [key=close-key]: pick again' >/dev/null || fail "post-close reopen append failed"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "decision reopened after a keyless close must ping again"
+# A send delayed past the close must neither strand a stale marker nor
+# swallow the reopen: the detached job reconciles its marker after delivery.
+REAL_MKTEMP=$(command -v mktemp)
+cat > "$fakebin/mktemp" <<EOF
+#!/usr/bin/env bash
+if ps -o args= -p "\$PPID" 2>/dev/null | grep -q "fm-discord-notify"; then sleep 4; fi
+exec "$REAL_MKTEMP" "\$@"
+EOF
+chmod +x "$fakebin/mktemp"
+prev=$(wire_log_lines)
+before=$(wire_posts)
+wire_append --task wire-race --verdict captain --summary 'needs-decision [key=race-key]: pick the queue' >/dev/null 2>&1 || fail "slow decision append failed"
+wire_append --task wire-race --verdict routine --summary 'resolved [key=race-key]: answered inline' >/dev/null 2>&1 || fail "racing close append failed"
+wire_wait_log "$prev" "$TMP_ROOT/wire.last" || fail "delayed send never recorded its result"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "delayed decision send must still deliver its episode ping"
+[ -e "$wirehome/state/discord-notify/decision-wire-race-race-key" ] && fail "delayed send must not strand a stale marker behind the close"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-race --verdict captain --summary 'needs-decision [key=race-key]: pick again' >/dev/null || fail "post-race reopen append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "reopen after a delayed send must ping again"
+rm -f "$fakebin/mktemp"
+before=$(wire_posts)
+export FAKE_SEND_CODE=403
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'blocked: flaky mirror went dark' >/dev/null || fail "failed blocker append must stay green"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "failed blocker records only its attempt"
+export FAKE_SEND_CODE=200
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'blocked: flaky mirror went dark' >/dev/null || fail "blocker retry append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "blocker retry on the same logical event must deliver"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'blocked: flaky mirror went dark' >/dev/null || fail "duplicate blocker append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "re-sighting the same logical event must not double-ping"
+export FAKE_SEND_SLEEP=3
+before=$(wire_posts)
+prev=$(wire_log_lines)
+t0=$(python3 -c 'import time; print(time.time())')
+wire_append --task wire-ship --verdict captain --summary 'blocked: disk shelf is failing' >/dev/null 2>&1 || fail "slow-send append failed"
+t1=$(python3 -c 'import time; print(time.time())')
+unset FAKE_SEND_SLEEP
+python3 - "$t0" "$t1" <<'PY' || fail "append must exit without waiting for the network send"
+import sys
+assert float(sys.argv[2]) - float(sys.argv[1]) < 2.0, "append blocked until the send finished"
+PY
+wire_wait_log "$prev" "$TMP_ROOT/wire.last" || fail "detached send never recorded its result"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "detached send must still deliver"
+# An unconfigured home stays inert and green.
+barehome="$TMP_ROOT/bare-home"; mkdir -p "$barehome/state" "$barehome/config"
+before=$(wire_posts)
+FM_HOME="$barehome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-branch-outcome.sh" append --task bare --verdict captain --summary 'done: something finished' >/dev/null 2>&1 || fail "unconfigured append must stay green"
+[ "$(wire_posts)" = "$before" ] || fail "unconfigured home must stay inert"
+pass "branch-outcome wiring notifies three classes once routine-silent posture-free"
 
 pass "fm-discord"
