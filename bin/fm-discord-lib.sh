@@ -24,6 +24,7 @@
 # This file is sourced, never executed. Callers set their own shell options;
 # this library must not set -u itself. It defines:
 #   discord_load_config      - resolve DISCORD_* into DISCORD_* vars
+#   discord_classify_notify_text <text> - the outbound-tap class rule: map event text to decision|blocker|completion|routine
 #   discord_redact <text>    - strip token-looking substrings for logs
 #   discord_config_path      - print config/discord.json path for this home
 #   discord_state_dir <name> - ensure state/discord-<name> exists (0700)
@@ -70,6 +71,33 @@ DISCORD_OAUTH_SCOPES="bot applications.commands"
 DISCORD_OAUTH_STATE_TTL=600
 # Dedup marker retention, mirroring the Relay's seven-day offer registry.
 DISCORD_SEEN_RETENTION_DAYS=7
+
+# The outbound-tap class rule: the single copy of the decision/blocker/
+# completion vocabulary that maps an event's text to the tap's classes
+# (docs/discord-integration.md "Outbound tap"). The tap's --wake-line
+# classification and the branch-outcome append caller both classify through
+# here, so a vocabulary edit cannot desynchronize a row's marker key from
+# the tap's own classification. Unmatched text classifies routine; a caller
+# that must never stay silent applies its own default after this returns.
+discord_classify_notify_text() { # <text> -> decision|blocker|completion|routine
+  local text
+  text=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$text" in
+    *needs-decision*|*open\ decision*|*awaiting*answer*|*answer*needed*|*captain*decision*|*ask-user*|*decision*waiting*)
+      printf 'decision\n'; return 0 ;;
+  esac
+  if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])(blocked|blocker|blockers|blocking|fail|failed|failing|failure|failures)([^a-z0-9]|$)'; then
+    printf 'blocker\n'; return 0
+  fi
+  case "$text" in
+    *review-ready*|*review*ready*|*check*green*|*checks-passed*|*ready*for*review*|*landed*|*shipped*)
+      printf 'completion\n'; return 0 ;;
+  esac
+  if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])(complete|completed|completing|completion|merge|merged|merging|done)([^a-z0-9]|$)'; then
+    printf 'completion\n'; return 0
+  fi
+  printf 'routine\n'
+}
 
 discord_env_file() {
   printf '%s\n' "${DISCORD_ENV_FILE:-${FM_HOME:-}/.env}"

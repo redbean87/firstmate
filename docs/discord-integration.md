@@ -186,16 +186,22 @@ this integration.
   [--decision-key <key>]` posts one short plain-language message
   mentioning the owner (`<@owner-id>`) so the phone pings, on exactly
   three event classes: a decision waiting on the captain, finished work
-  (including review and merge calls), and blockers or failures. Routine
-  progress never sends. `--wake-line <line>` (or `--wake` on stdin)
+  (including review and merge calls), and blockers or failures.
+  Routine progress never sends.
+  The production caller is the outcome-store append: `bin/fm-branch-outcome.sh append` invokes the tap once for every `captain`-verdict row whose summary classifies into one of the three classes, with an explicit class, a stable logical event key, and sanitized text; `routine` text never notifies, whatever the verdict. The append starts that send detached from its exit path — the row and its seq are written first and append exits without waiting on Discord — so caller bookkeeping and queued deliveries never stall on network latency; the run's one result line is appended to `state/.branch-outcome-notify.log`.
+  A decision row carrying a stated `[key=...]` token (read by the status fold's own key grammar) notifies under `decision-<task>-<key>` so re-handled rows for one still-open decision share a marker; every other row notifies under the content-derived logical key `branch-outcome-<task>-<class>-<summary-hash>`, so the same recurring event shares one marker across re-wakes and re-reports and never double-pings.
+  A `resolved` or `captain-held` status line carrying a decision's key releases that marker when the decision closes (any verdict, including `routine`), so the next keyed decision occurrence for the task pings again — this also covers a closing outcome summary that never restates the key, since the release consults the status fold, not just that summary. A detached send reconciles its marker against the store and the fold before and after delivery, so a delayed send neither strands a stale marker behind a close nor double-pings a repeat.
+  The append stays green when a send fails: the failure is recorded as a warning in `state/.branch-outcome-notify.log`, the tap releases its marker, and the next same-key sighting retries.
+  Nothing gates on away or quiet posture, presence, or the gateway websocket, so decisions and blockers still ping while the captain is away.
+  The wake-drain `OPEN DECISIONS` and `STATUS OUTCOME BACKSTOP` sections have no tap hook by design: they sight events the branch has not handled yet, so notifying there would ping once before handling and again at the outcome row under a different key.
+  `--wake-line <line>` (or `--wake` on stdin)
   classifies a watcher wake or supervision outcome reason line into one
-  of those classes so the supervision flow can pipe wakes through the
-  script; unrecognized lines stay silent. One message per event key:
+  of those classes for pipe-through callers; unrecognized lines stay silent. One message per event key:
   repeats for the same key (re-wakes for the same open decision) are
-  silent, markers live in `state/discord-notify/`, and a failed send
+  silent, markers live in `state/discord-notify/` with seven-day pruning, and a failed send
   releases its marker so a retry can still deliver. Delivery reuses the
   `fm-discord-send.sh` authenticated path, so 429 Retry-After is
-  honored. Text is redacted for secret shapes before sending.
+  honored. Text is redacted for secret shapes before sending, and the outcome-store caller strips absolute scratch paths and caps length before that.
 - Inbound: `bin/fm-discord-gateway.py` (primary; reconnect + resume +
   dedup + self-filter) routes each MESSAGE_CREATE and each
   INTERACTION_CREATE through `bin/fm-discord-poll.sh --event-file`.

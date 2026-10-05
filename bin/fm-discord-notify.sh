@@ -76,29 +76,9 @@ if [ "$wake_stdin" = 1 ]; then
   wake_line=$(cat)
 fi
 
-notify_classify_wake() {
-  local line
-  line=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-  case "$line" in
-    *needs-decision*|*open\ decision*|*awaiting*answer*|*answer*needed*|*captain*decision*|*ask-user*|*decision*waiting*)
-      printf 'decision\n'; return 0 ;;
-  esac
-  if printf '%s' "$line" | grep -Eq '(^|[^a-z0-9])(blocked|blocker|blockers|blocking|fail|failed|failing|failure|failures)([^a-z0-9]|$)'; then
-    printf 'blocker\n'; return 0
-  fi
-  case "$line" in
-    *review-ready*|*review*ready*|*check*green*|*checks-passed*|*ready*for*review*|*landed*|*shipped*)
-      printf 'completion\n'; return 0 ;;
-  esac
-  if printf '%s' "$line" | grep -Eq '(^|[^a-z0-9])(complete|completed|completing|completion|merge|merged|merging)([^a-z0-9]|$)'; then
-    printf 'completion\n'; return 0
-  fi
-  printf 'routine\n'
-}
-
 if [ -z "$class" ]; then
   [ -n "$wake_line" ] || { usage; exit 2; }
-  class=$(notify_classify_wake "$wake_line")
+  class=$(discord_classify_notify_text "$wake_line")
 fi
 case "$class" in decision|completion|blocker) ;; routine) exit 0 ;; *) usage; exit 2 ;; esac
 

@@ -34,6 +34,7 @@ install_runner() {  # <case-dir>
   # store owner, and the backlog reader with its tasks-axi probe.
   cp "$ROOT/bin/fm-afk-contract.sh" "$dir/bin/"
   cp "$ROOT/bin/fm-branch-outcome.sh" "$dir/bin/"
+  cp "$ROOT/bin/fm-discord-lib.sh" "$ROOT/bin/fm-discord-notify.sh" "$ROOT/bin/fm-discord-send.sh" "$ROOT/bin/fm-env-lib.sh" "$dir/bin/"
   cp "$ROOT/bin/fm-tasks-axi-lib.sh" "$dir/bin/"
   cp "$ROOT/bin/fm-backlog-transition-lib.sh" "$dir/bin/"
   # The merge-notification marker reader behind the brief's landed section.
