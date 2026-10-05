@@ -246,6 +246,11 @@ cmd_consult() {
   if [ "$stage" = audit ]; then
     local audit_text
     audit_text=$(printf '%s\n' "$answer" | strip_local_tools_banner)
+    if [ -z "$(printf '%s' "$audit_text" | tr -d '[:space:]')" ]; then
+      write_field "$file" last_error "audit consultation returned an empty prompt after banner stripping" || return 1
+      printf 'fm-chatgpt-loop: audit consultation returned an empty prompt after banner stripping; phase unchanged at audit-consult\n' >&2
+      return 1
+    fi
     write_field "$file" audit_prompt "$audit_text" || return 1
     write_field "$file" audit_result "$audit_text" || return 1
     write_field "$file" phase audit-dispatch || return 1
@@ -254,7 +259,11 @@ cmd_consult() {
     write_field "$file" phase plan-dispatch || return 1
   fi
   write_field "$file" last_error "" || return 1
-  printf '%s\n' "$answer"
+  if [ "$stage" = audit ]; then
+    printf '%s\n' "$audit_text"
+  else
+    printf '%s\n' "$answer"
+  fi
 }
 
 cmd_dispatch() {
@@ -313,6 +322,11 @@ cmd_dispatch() {
   # workflow's original posture. Bridge lifecycle stays Firstmate-owned: the
   # worker environment never carries the bridge URL, and nothing here starts,
   # stops, or probes it.
+  for a in "${spawn_args[@]}"; do
+    case "$a" in
+      --effort|--effort=*) printf 'fm-chatgpt-loop: refusing dispatch: spawn args must not carry --effort (use dispatch --effort); nothing launched, no state changed\n' >&2; return 2 ;;
+    esac
+  done
   local stage_prompt rc send_err phase_next
   if [ "$stage" = audit ]; then
     stage_prompt=$(read_field "$file" audit_prompt)
