@@ -667,6 +667,7 @@ print_branch_outcomes_section() {
   local text='' used=0 shown=0 held=0 bytes item_bytes=600 captain_bytes=4000 routine_bytes=2000
   local routine_lines='' routine_count=0 routine_shown=0
   local -a captain_tasks=() captain_lines=() captain_line_bytes=()
+  local relay_rows rtask rsummary
   [ "$ACTOR" = main ] || return 0
   config=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}
   fm_supervision_host_outcomes_drained "$config" || return 0
@@ -695,18 +696,6 @@ print_branch_outcomes_section() {
     return 1
   fi
 
-  # Relay every captain row through the tap with the store's own event key.
-  # Append already sent these, so this is the retry/reconciliation seam and
-  # the notifier's marker makes a re-presentation silent.
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    relay_notify_outcome \
-      "$(printf '%s' "$line" | jq -r '.task // empty')" \
-      "$(printf '%s' "$line" | jq -r '.summary // empty')" store
-  done <<ROWS
-$(printf '%s\n' "$rows" | jq -c 'select(.verdict == "captain")' 2>/dev/null)
-ROWS
-
   target=0
   while IFS=$(printf '\t') read -r seq task task_line; do
     case "$seq" in ''|*[!0-9]*) continue ;; esac
@@ -732,6 +721,19 @@ ROWS
   done <<ROWS
 $captain
 ROWS
+  if [ "$target" -gt 0 ]; then
+    relay_rows=$(printf '%s\n' "$rows" | jq -rs --argjson target "$target" '
+      map(select(.verdict == "captain" and (.seq <= $target)))
+      | sort_by(.seq)
+      | .[] | "\(.task)\t\(.summary | gsub("[\t\n\r]"; " "))"' 2>/dev/null) || relay_rows=
+    while IFS=$(printf '\t') read -r rtask rsummary; do
+      [ -n "$rtask" ] || continue
+      [ -n "$rsummary" ] || continue
+      relay_notify_outcome "$rtask" "$rsummary" store
+    done <<ROWS
+$relay_rows
+ROWS
+  fi
   if [ "$shown" -gt 0 ]; then
     text="BRANCH OUTCOMES (captain outcomes the supervision session recorded for you, one line per task, oldest first; each says what was true when it was recorded, so check the task's current state first, including its still-open decisions listed above under OPEN DECISIONS, and sort them into still open and already settled, such as a decision since answered, a PR since merged, or a task since finished - process the still-open ones as firstmate: tell the captain, land or merge what is ready, answer or escalate a decision, or act on a blocker; your reply to the captain covers only those, as if the settled ones had never been listed, and a settled one needs only the acknowledgement):
 "
