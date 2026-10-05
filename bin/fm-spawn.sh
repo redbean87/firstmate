@@ -3233,10 +3233,15 @@ fi
 # refusal above, this is a deterministic count-and-refuse, never a queue: it
 # runs before any endpoint, worktree, or record exists, so a refusal costs
 # nothing to unwind. Secondmates are NOT exempt, because the slot constraint is
-# physical. A relaunch of the same task id must not self-block, so the task's
-# own record is skipped; it is the only exemption.
+# physical. A matching record only blocks while its agent is actually LIVE: a
+# retained row for an exited agent is agent-free and must not deadlock recovery
+# behind a holder that no longer exists. The liveness verdict comes from the
+# same backend agent-state reader supervision uses (bin/fm-backend.sh's
+# fm_backend_agent_alive), never from the record's mere presence. A relaunch of
+# the same task id must not self-block, so the task's own record is skipped; it
+# is the only exemption.
 spawn_refuse_if_qwen_local_slot_taken() {
-  local holder holder_id holder_harness holder_model
+  local holder holder_id holder_harness holder_model holder_backend holder_target
   [ "$HARNESS" = pi ] || return 0
   [ "$MODEL" = "qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs" ] || return 0
   for holder in "$STATE"/*.meta; do
@@ -3247,6 +3252,9 @@ spawn_refuse_if_qwen_local_slot_taken() {
     holder_model=$(fm_meta_get "$holder" model)
     [ "$holder_harness" = pi ] || continue
     [ "$holder_model" = "qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs" ] || continue
+    holder_backend=$(fm_backend_of_meta "$holder")
+    holder_target=$(fm_backend_target_of_meta "$holder")
+    [ "$(fm_backend_agent_alive "$holder_backend" "$holder_target")" = alive ] || continue
     echo "error: $ID cannot launch: the qwen-local server runs a single slot (total_slots=1) and $holder_id is live on that profile; re-dispatch $ID after $holder_id lands" >&2
     exit 1
   done
