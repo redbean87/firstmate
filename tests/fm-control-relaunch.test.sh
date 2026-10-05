@@ -1080,6 +1080,37 @@ test_spawn_relaunch_without_a_harness_reuses_the_recorded_one() {
   pass "fm-spawn --relaunch: with no explicit harness it reuses the task's recorded one, never the crew default"
 }
 
+# The qwen-local single-slot gate (bin/fm-spawn.sh) refuses a second concurrent
+# worker on the canonical local profile without queueing. A relaunch of the same
+# task id must not self-block on the task's own record, so this drives a real
+# --relaunch of a task recorded on that exact profile.
+test_spawn_relaunch_of_a_qwen_local_task_does_not_self_block() {
+  local dir out rc
+  local qwen='qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs'
+  dir=$(new_case qwenrelaunch rlqw)
+  add_ship_task "$dir" rlqw pi
+  # Appending the model wins: fm_meta_get reads the last value of the key.
+  printf 'model=%s\n' "$qwen" >> "$dir/home/state/rlqw.meta"
+  cat > "$dir/fakebin/pi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --help ]; then
+  printf '%s\n' 'Pi 0.84.0' 'Options: --help --tui-mode <mode>'
+fi
+exit 0
+SH
+  chmod +x "$dir/fakebin/pi"
+  printf 'pi' > "$dir/fake/becomes"
+  printf 'zsh' > "$dir/fake/command"
+
+  out=$(run_spawn "$dir" rlqw --relaunch --model "$qwen"); rc=$?
+  expect_code 0 "$rc" "a qwen-local relaunch of its own task must not self-block"$'\n'"$out"
+  assert_not_contains "$out" "cannot launch" "the task's own qwen-local record blocked its relaunch"
+  assert_contains "$out" "spawned rlqw" "the qwen-local relaunch did not complete"
+  [ "$(meta_field "$dir" rlqw model)" = "$qwen" ] \
+    || fail "the qwen-local relaunch lost its recorded model"
+  pass "fm-spawn --relaunch: a qwen-local task's own record never self-blocks its replacement"
+}
+
 # A promoted scout records kind=ship and a custom ship branch in its meta, but
 # its brief is the scout scaffold: it never gained a Ship branch line, and a
 # relaunch cannot regenerate the brief (--branch-prefix is refused there). The
@@ -2414,6 +2445,7 @@ test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop
 test_explicit_secondmate_harness_ignores_configured_profile_axes
 test_ship_relaunch_ignores_the_crew_harness_config
 test_spawn_relaunch_without_a_harness_reuses_the_recorded_one
+test_spawn_relaunch_of_a_qwen_local_task_does_not_self_block
 test_spawn_relaunch_of_promoted_scout_uses_the_recorded_branch
 test_promoted_scout_relaunch_receives_the_current_delivery_contract
 test_prefixed_prior_harness_wiring_is_still_retired

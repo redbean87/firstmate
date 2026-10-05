@@ -1061,6 +1061,8 @@ test_workers_wait_without_spending_turns() {
     assert_grep "Do not poll or list the inbox while waiting; a waiting instruction rings." "$brief" \
       "$id: polling the inbox while waiting is not forbidden"
     assert_grep "natural checkpoint" "$brief" "$id: the flag dropped the natural-checkpoint inbox check"
+    assert_grep "Never re-run checks to force green: report a red result as-is with its evidence." "$brief" \
+      "$id: the wait section must forbid re-running checks to force green"
   done
   brief="$home/data/brief-wait-ship/brief.md"
   assert_grep "issue the same foreground call again" "$brief" \
@@ -1089,6 +1091,7 @@ test_wait_no_turns_absent_keeps_the_previous_brief() {
   assert_no_grep "end your turn at once" "$brief" "an absent flag still added the waiting section"
   assert_grep "natural checkpoint" "$brief" "an absent flag dropped the unprompted inbox check"
   assert_no_grep "Do not poll or list the inbox while waiting" "$brief" "an absent flag still added the no-poll inbox line"
+  assert_no_grep "Never re-run checks to force green" "$brief" "an absent flag still added the rerun prohibition"
   assert_grep "background the drive call" "$brief" "an absent flag replaced the backgrounded drive text"
   assert_no_grep "issue the same foreground call again" "$brief" \
     "an absent flag still asked for the foreground reattach"
