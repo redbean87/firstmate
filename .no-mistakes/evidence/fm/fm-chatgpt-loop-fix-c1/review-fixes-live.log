@@ -1,0 +1,3 @@
+CHECK 1 banner-only fails closed: rc=1, stderr "audit consultation returned an empty prompt after banner stripping; phase unchanged at audit-consult", phase=audit-consult, last_error recorded -> PASS
+CHECK 2 stdout stripped: stdout == stored audit_prompt == "AUDIT-PROMPT-MARKER body text", no "Local tools unavailable" in stdout or send.txt -> PASS
+CHECK 3 duplicate --effort refused: dispatch with spawn args "--effort high" and "--effort=high" both rc=2 "spawn args must not carry --effort (use dispatch --effort)", phase stays audit-dispatch, no argv launched; dispatch --effort high clean path rc=0 argv="w9 proj --mode x --effort high" -> PASS

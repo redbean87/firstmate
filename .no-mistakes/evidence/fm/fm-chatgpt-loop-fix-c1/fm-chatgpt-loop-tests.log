@@ -1,0 +1,15 @@
+ok - objective to audit to worker to plan to worker to completion flows through every phase
+ok - the plan consultation explicitly carries objective, context, audit result, and worker findings
+ok - a ChatGPT bridge failure exits nonzero, records last_error, keeps the phase, and dispatches nothing
+ok - a worker failure returns to dispatch, records last_error, and the stage retries
+ok - a failed spawn records last_error, holds the dispatch phase, and the stage retries
+ok - dispatch refuses option-leading and batch first args, and hands off with an explicit FM_HOME
+ok - wrong-phase calls refuse with no state change
+ok - every subcommand validates the task id before building state paths
+ok - a trailing valueless option refuses with a usage error instead of hanging
+ok - bridge lifecycle stays Firstmate-owned: dispatch refuses a bridge-referencing arg before launch and reports the bridge itself
+ok - bridge start and stop verify the recorded pid against the daemon-dir entrypoints before refusing or killing
+ok - bridge install and setup verbs and any extra start/stop argument refuse
+ok - the audit worker receives the banner-stripped ChatGPT-generated prompt while the objective stays in loop state for the plan packet
+ok - the consult receipt strips only a leading Local-tools-unavailable blockquote and preserves every other byte
+ok - dispatch carries the selected per-stage effort in the worker argv and keeps low as the audit default
