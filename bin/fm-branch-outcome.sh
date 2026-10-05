@@ -156,6 +156,14 @@
 #     row and byte budget and write the copy from them; otherwise read and
 #     change nothing. fm-session-start.sh runs it at every locked session
 #     start, on every harness and away posture, before the drain.
+#   fm-branch-outcome.sh notify-event --task <id> --summary <text>
+#     Read-only derivation for the wake-drain relay (bin/fm-wake-drain.sh):
+#     print the tap's own decision for one captain-facing summary as one
+#     tab-separated "class<TAB>event-key<TAB>text<TAB>decision-key" line, so a
+#     MAIN presentation derives the exact class, logical event key, and
+#     sanitized text the append path uses instead of reimplementing them.
+#     Routine input prints class routine; the caller stays silent. Reads no
+#     store state and writes nothing.
 set -eu
 
 SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd "${d:-/}" && pwd)"
@@ -187,7 +195,7 @@ RECORDED_AGO_JQ='def recorded_ago: ([$now - .epoch, 0] | max) as $s
     else "\($s / 86400 | floor)d" end;'
 
 usage() {
-  echo "usage: fm-branch-outcome.sh append --task <id> --verdict routine|captain --summary <text> [--wake <text>] [--silent true|false] | unread | mark-read --through <seq> | unprocessed | mark-processed --through <seq> | present | processed-init [--held-lock] | list [--recent <n>] | lookup --seqs <n,...> | startup-replay | seed-tail" >&2
+  echo "usage: fm-branch-outcome.sh append --task <id> --verdict routine|captain --summary <text> [--wake <text>] [--silent true|false] | unread | mark-read --through <seq> | unprocessed | mark-processed --through <seq> | present | processed-init [--held-lock] | list [--recent <n>] | lookup --seqs <n,...> | startup-replay | seed-tail | notify-event --task <id> --summary <text>" >&2
   exit 2
 }
 
@@ -948,6 +956,30 @@ case "$CMD" in
     if [ "$HELD_LOCK" -eq 0 ]; then
       fm_lock_release "$LOCK"
     fi
+    ;;
+  notify-event)
+    NOTIFY_TASK=''
+    NOTIFY_SUMMARY=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --task) NOTIFY_TASK=${2:-}; shift 2 || usage ;;
+        --summary) NOTIFY_SUMMARY=${2:-}; shift 2 || usage ;;
+        *) usage ;;
+      esac
+    done
+    [ -n "$NOTIFY_TASK" ] && [ -n "$NOTIFY_SUMMARY" ] || usage
+    NOTIFY_CLASS=$(outcome_notify_class "$NOTIFY_SUMMARY")
+    NOTIFY_DKEY=''
+    if [ "$NOTIFY_CLASS" = decision ] && ! outcome_decision_closing "$NOTIFY_SUMMARY"; then
+      NOTIFY_DKEY=$(outcome_notify_dkey "$NOTIFY_SUMMARY") || NOTIFY_DKEY=''
+    fi
+    if [ "$NOTIFY_CLASS" = routine ]; then
+      printf 'routine\t\t\t\n'
+      exit 0
+    fi
+    NOTIFY_EVENT=$(outcome_notify_key "$NOTIFY_TASK" "$NOTIFY_CLASS" "$NOTIFY_DKEY" "$NOTIFY_SUMMARY")
+    NOTIFY_TEXT=$(outcome_notify_text "$NOTIFY_SUMMARY" 2>/dev/null) || NOTIFY_TEXT=''
+    printf '%s\t%s\t%s\t%s\n' "$NOTIFY_CLASS" "$NOTIFY_EVENT" "$NOTIFY_TEXT" "$NOTIFY_DKEY"
     ;;
   list)
     RECENT=20
