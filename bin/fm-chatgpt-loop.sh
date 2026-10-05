@@ -14,8 +14,9 @@
 # Firstmate owns everything about this workflow: the per-task state file, the
 # ChatGPT consultation lifecycle, worker dispatch, worker results, iteration
 # between audit and planning, and the bridge daemon lifecycle. The worker is
-# an ordinary low-thinking spawn (fm-spawn.sh with --effort low by default;
-# dispatch accepts a per-stage --effort selection) and never
+# an ordinary worker spawn (fm-spawn.sh with a per-stage --effort selection
+# defaulting to low; dispatch refuses before launching when the passthrough
+# spawn args carry their own --effort) and never
 # touches the bridge; nothing in the dispatch path starts, stops, or probes
 # it. The prompt handoff belongs to dispatch: right after a successful spawn,
 # dispatch steers the stored stage prompt (the ChatGPT-generated audit prompt
@@ -48,7 +49,8 @@
 # into the prompt file itself. The audit consult carries the user objective
 # plus Firstmate context and asks ChatGPT to generate a worker audit prompt
 # rather than audit findings; the reply is stripped of any leading
-# Local-tools-unavailable banner before it is stored. The plan prompt carries
+# Local-tools-unavailable banner before it is stored, and a reply left empty
+# by that stripping fails the consult with the phase unchanged. The plan prompt carries
 # the objective, context, stored audit prompt, audit result, and worker
 # findings, all explicitly included. bin/fm-chatgpt-consult.sh owns the
 # transport and its fail-closed contract; this script owns state, prompts, and
