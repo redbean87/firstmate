@@ -93,7 +93,7 @@ discord_classify_notify_text() { # <text> -> decision|blocker|completion|routine
     *review-ready*|*review*ready*|*check*green*|*checks-passed*|*ready*for*review*|*landed*|*shipped*)
       printf 'completion\n'; return 0 ;;
   esac
-  if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])(complete|completed|completing|completion|merge|merged|merging)([^a-z0-9]|$)'; then
+  if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])(complete|completed|completing|completion|merge|merged|merging|done)([^a-z0-9]|$)'; then
     printf 'completion\n'; return 0
   fi
   printf 'routine\n'

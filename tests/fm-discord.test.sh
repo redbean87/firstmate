@@ -513,6 +513,44 @@ wire_append --task wire-ship --verdict routine --summary 'resolved [key=round4-k
 [ -e "$wirehome/state/discord-notify/decision-wire-ship-round4-key" ] && fail "closing row must release the decision marker"
 wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'needs-decision [key=round4-key]: pick again' >/dev/null || fail "reopened decision append failed"
 [ "$(wire_posts)" = "$((before + 1))" ] || fail "reopened keyed decision must ping again"
+# A captain verdict carrying routine text stays silent: only the three
+# classified classes ever notify.
+before=$(wire_posts)
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'heartbeat handled, nothing new' >/dev/null || fail "routine-text captain append failed"
+[ "$(wire_posts)" = "$before" ] || fail "captain verdict with routine text must stay silent"
+assert_grep "silent (routine)" "$TMP_ROOT/wire.last" "routine text is skipped at the caller"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'heartbeat handled, nothing new' >/dev/null || fail "repeat routine-text captain append failed"
+[ "$(wire_posts)" = "$before" ] || fail "repeated routine text must stay silent"
+# A close that never restates the key still releases the marker: the
+# resolution lives in the status log, which the release consults.
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-close --verdict captain --summary 'needs-decision [key=close-key]: pick the cache backend' >/dev/null || fail "keyed decision append failed"
+before=$(wire_posts)
+[ -e "$wirehome/state/discord-notify/decision-wire-close-close-key" ] || fail "decision must hold its marker"
+printf 'needs-decision [key=close-key]: pick the cache backend\nresolved [key=close-key]: answered with redis\n' >> "$wirehome/state/wire-close.status"
+wire_append --task wire-close --verdict routine --summary 'done: shipped the cache switch' >/dev/null 2>&1 || fail "keyless closing append failed"
+[ "$(wire_posts)" = "$before" ] || fail "keyless routine closing row must stay silent"
+[ -e "$wirehome/state/discord-notify/decision-wire-close-close-key" ] && fail "keyless close must release the decision marker via the status fold"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-close --verdict captain --summary 'needs-decision [key=close-key]: pick again' >/dev/null || fail "post-close reopen append failed"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "decision reopened after a keyless close must ping again"
+# A send delayed past the close must neither strand a stale marker nor
+# swallow the reopen: the detached job reconciles its marker after delivery.
+REAL_MKTEMP=$(command -v mktemp)
+cat > "$fakebin/mktemp" <<EOF
+#!/usr/bin/env bash
+if ps -o args= -p "\$PPID" 2>/dev/null | grep -q "fm-discord-notify"; then sleep 4; fi
+exec "$REAL_MKTEMP" "\$@"
+EOF
+chmod +x "$fakebin/mktemp"
+prev=$(wire_log_lines)
+before=$(wire_posts)
+wire_append --task wire-race --verdict captain --summary 'needs-decision [key=race-key]: pick the queue' >/dev/null 2>&1 || fail "slow decision append failed"
+wire_append --task wire-race --verdict routine --summary 'resolved [key=race-key]: answered inline' >/dev/null 2>&1 || fail "racing close append failed"
+wire_wait_log "$prev" "$TMP_ROOT/wire.last" || fail "delayed send never recorded its result"
+[ "$(wire_posts)" = "$((before + 1))" ] || fail "delayed decision send must still deliver its episode ping"
+[ -e "$wirehome/state/discord-notify/decision-wire-race-race-key" ] && fail "delayed send must not strand a stale marker behind the close"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-race --verdict captain --summary 'needs-decision [key=race-key]: pick again' >/dev/null || fail "post-race reopen append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "reopen after a delayed send must ping again"
+rm -f "$fakebin/mktemp"
 before=$(wire_posts)
 export FAKE_SEND_CODE=403
 wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'blocked: flaky mirror went dark' >/dev/null || fail "failed blocker append must stay green"
