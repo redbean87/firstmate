@@ -1,0 +1,7 @@
+warning: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-qwen-two-dead.rnbm8Y/home/data/qwen-recovery-new/launch-brief.md records no ship branch; defaulting to legacy branch fm/qwen-recovery-new
+warning: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-qwen-two-dead.rnbm8Y/home/data/qwen-recovery-new/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-qwen-two-dead.rnbm8Y/fake/fakebin/timeout: line 3: exec: 1: not found
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-qwen-two-dead.rnbm8Y/fake/fakebin/timeout: line 3: exec: 1: not found
+spawned qwen-recovery-new harness=pi kind=ship mode=no-mistakes yolo=off window=firstmate:fm-qwen-recovery-new worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-qwen-two-dead.rnbm8Y/wt
+STATUS=0
+TWO-DEAD-PASS: two exited rows did not block recovery

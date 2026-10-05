@@ -1,0 +1,4 @@
+ok - a live qwen-local worker blocks a second concurrent worker with a named refusal
+ok - an exited qwen-local agent leaves the slot free for a new worker
+ok - the qwen-local slot reopens after its recorded holder's agent exits
+# focused qwen-gate tests passed
