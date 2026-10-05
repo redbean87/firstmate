@@ -1,0 +1,18 @@
+== scenario 1: decision pings
+seq=1
+posts=1 (expect 1)
+decision ping OK
+== scenario 2: completion pings (review-ready)
+posts=2 (expect 2)
+== scenario 3: blocker pings
+posts=3 (expect 3)
+== scenario 4: routine stays silent (routine verdict + captain verdict with routine text)
+posts=3 (expect 3)
+routine silence logged OK
+== scenario 5: append detached (non-blocking) + marker held
+decision marker held OK
+== scenario 6: failed send keeps append green, retry delivers
+simulated-failure path covered by repo suite (403 marker-release test); live smoke: unconfigured home stays green
+bare append green OK; posts=3 (still 3)
+ALL LIVE SCENARIOS PASS
+TMP_ROOT=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-live-discord.81mctL (kept for transcript; removing posts only)
