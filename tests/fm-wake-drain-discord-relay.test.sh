@@ -172,6 +172,24 @@ test_failed_send_releases_marker_for_a_later_drain() {
   pass "a failed relay releases its marker so the next drain retries"
 }
 
+test_widened_completion_shapes_relay() {
+  local dir
+  dir=$(make_relay_case widened-completions)
+  # Append before the Discord env exists so only the drain relay can send:
+  # this isolates the drain seam from the append-time tap.
+  relsq "$dir" ship-g "Phase 1's PR is green and ready: https://example.com/pr/7 - all 7 checks pass with zero red"
+  relsq "$dir" ship-a 'supervision-hardening audit is in with one approvable recommendation'
+  write_discord_env "$dir"
+
+  run_drain "$dir" "$dir/out" || fail "drain failed with widened completion rows"
+  wait_for_posts "$dir" 2 || fail "widened completion rows did not both post (got $(post_count "$dir"))"
+  grep -F 'branch-outcome-ship-g-completion-' "$dir/state/.wake-drain-notify.log" >/dev/null \
+    || fail "green-and-ready PR row did not relay as completion"
+  grep -F 'branch-outcome-ship-a-completion-' "$dir/state/.wake-drain-notify.log" >/dev/null \
+    || fail "audit-completion row did not relay as completion"
+  pass "widened completion summaries relay once through the drain with completion keys"
+}
+
 test_non_captain_statuses_never_notify() {
   local dir
   dir=$(make_relay_case silent-statuses)
@@ -194,4 +212,5 @@ test_non_captain_statuses_never_notify() {
 test_keyed_open_decision_notifies_and_unkeyed_stays_residual
 test_store_rows_relay_with_store_keys_once
 test_failed_send_releases_marker_for_a_later_drain
+test_widened_completion_shapes_relay
 test_non_captain_statuses_never_notify

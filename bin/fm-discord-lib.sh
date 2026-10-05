@@ -83,7 +83,7 @@ discord_classify_notify_text() { # <text> -> decision|blocker|completion|routine
   local text
   text=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   case "$text" in
-    *needs-decision*|*open\ decision*|*awaiting*answer*|*answer*needed*|*captain*decision*|*ask-user*|*decision*waiting*)
+    *needs-decision*|*open\ decision*|*awaiting*answer*|*answer*needed*|*captain*decision*|*ask-user*|*decision*waiting*|*needs\ your\ word*|*need\ your\ word*)
       printf 'decision\n'; return 0 ;;
   esac
   if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])(blocked|blocker|blockers|blocking|fail|failed|failing|failure|failures)([^a-z0-9]|$)'; then
@@ -94,6 +94,14 @@ discord_classify_notify_text() { # <text> -> decision|blocker|completion|routine
       printf 'completion\n'; return 0 ;;
   esac
   if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])(complete|completed|completing|completion|merge|merged|merging|done)([^a-z0-9]|$)'; then
+    printf 'completion\n'; return 0
+  fi
+  # Completion shapes the original vocabulary missed, each anchored to its
+  # completion context rather than matched as a bare keyword: a green or
+  # ready PR, an explicit checks-pass line, a finished audit/investigation/
+  # report (including one that carries a recommendation), a built artifact,
+  # and an explicit need for the captain's word.
+  if printf '%s' "$text" | grep -Eq '(^|[^a-z0-9])pr([^a-z0-9]+[#0-9]*)?([^a-z0-9]+(is|are|was|now|all|and))*[^a-z0-9]+(green|ready)([^a-z0-9]|$)|(^|[^a-z0-9])(all[^a-z0-9]+[0-9]+[^a-z0-9]+)?checks?[^a-z0-9]+(are[^a-z0-9]+|all[^a-z0-9]+)?(pass|passes|passed|passing|green|clear)([^a-z0-9]|$)|(^|[^a-z0-9])(audit|investigation|assessment|analysis|scan|report|review|findings?)[^a-z0-9].*(is|are|were|came|comes|has[^a-z0-9]+come)[^a-z0-9]+(back|complete|completed|done|finished|ready|in[^a-z0-9]+(with|now|and)|in$)|(^|[^a-z0-9])(report|audit|investigation|review|findings?)[^a-z0-9].*with[^a-z0-9].*recommendation|(^|[^a-z0-9])(is|was|has[^a-z0-9]+been)[^a-z0-9]+built([^a-z0-9]|$)'; then
     printf 'completion\n'; return 0
   fi
   printf 'routine\n'

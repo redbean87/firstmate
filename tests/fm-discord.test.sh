@@ -573,11 +573,68 @@ assert float(sys.argv[2]) - float(sys.argv[1]) < 2.0, "append blocked until the 
 PY
 wire_wait_log "$prev" "$TMP_ROOT/wire.last" || fail "detached send never recorded its result"
 [ "$(wire_posts)" = "$((before + 1))" ] || fail "detached send must still deliver"
+# The widened completion vocabulary reaches the append hook end to end, under
+# its stable content keys, exactly like the original completion shapes.
+before=$(wire_posts)
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary "Phase 1's PR is green and ready: https://example.com/pr/7 - all 7 checks pass with zero red" >/dev/null || fail "green-and-ready PR append failed"
+wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'supervision-hardening audit is in with one approvable recommendation' >/dev/null || fail "audit-completion append failed"
+[ "$(wire_posts)" = "$((before + 2))" ] || fail "widened completion shapes must each notify"
 # An unconfigured home stays inert and green.
 barehome="$TMP_ROOT/bare-home"; mkdir -p "$barehome/state" "$barehome/config"
 before=$(wire_posts)
 FM_HOME="$barehome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-branch-outcome.sh" append --task bare --verdict captain --summary 'done: something finished' >/dev/null 2>&1 || fail "unconfigured append must stay green"
 [ "$(wire_posts)" = "$before" ] || fail "unconfigured home must stay inert"
 pass "branch-outcome wiring notifies three classes once routine-silent posture-free"
+
+# 14. Shared classifier vocabulary: the widened completion/attention shapes
+# classify as notifications, genuinely routine text stays silent, and failure
+# vocabulary keeps its existing coarse blocker class. The battery sources the
+# one rule the branch-outcome append hook and the drain relay both call, so it
+# pins the shared behavior directly.
+classify_home="$TMP_ROOT/classify-home"; mkdir -p "$classify_home"
+classify_text() { # <text> -> class
+  FM_HOME="$classify_home" bash -c '. "$0/bin/fm-discord-lib.sh" && discord_classify_notify_text "$1"' "$ROOT" "$1"
+}
+assert_class() { # <expected> <text>
+  local got
+  got=$(classify_text "$2")
+  [ "$got" = "$1" ] || fail "classify [$2] = $got, want $1"
+}
+# The two live-proven cases the captain ordered fixed.
+assert_class completion "Phase 1's PR is green and ready: https://example.com/pr/7 - all 7 checks pass with zero red"
+assert_class completion 'supervision-hardening audit is in with one approvable recommendation'
+# Focused cases for each newly supported shape.
+assert_class completion "PR is green"
+assert_class completion "PR #42 is green and ready to merge"
+assert_class completion "PR ready"
+assert_class completion "all 7 checks pass"
+assert_class completion "checks are green"
+assert_class completion "checks passed"
+assert_class completion "checks passing"
+assert_class completion "the audit is in"
+assert_class completion "the investigation came back in"
+assert_class completion "the report is ready"
+assert_class completion "the report is back with a recommendation"
+assert_class completion "the parser is built and tested"
+assert_class completion "the fix landed on main"
+assert_class decision "the ship needs your word on the transport"
+# Routine silence, including text that could trip the widened vocabulary.
+assert_class routine "heartbeat: all quiet, nothing to report"
+assert_class routine "no-change note: fleet unchanged"
+assert_class routine "working: implementing the parser now"
+assert_class routine "progress: three of five files converted"
+assert_class routine "resolved [key=api-shape]: answered with REST"
+assert_class routine "captain-held [key=api-shape]: waiting on your call"
+assert_class routine "paused: waiting on CI"
+assert_class routine "retrying the flaky network step"
+assert_class routine "supervision mechanics: drained the wake queue"
+assert_class routine "the review is in the details"
+assert_class routine "PR is not green yet"
+assert_class routine "the report has no recommendation"
+# Failure vocabulary keeps its existing coarse blocker behavior: widening the
+# completion rule must not quietly turn a failure mention routine.
+assert_class blocker "the retro mentions a failure mode"
+assert_class blocker "task failed checks"
+pass "shared classifier widens completions and keeps routine and failure classes"
 
 pass "fm-discord"
