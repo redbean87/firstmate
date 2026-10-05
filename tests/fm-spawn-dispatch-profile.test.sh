@@ -135,6 +135,75 @@ assert_meta_profile() {
   assert_grep "effort=$effort" "$meta" "meta missing effort=$effort"
 }
 
+# The canonical Qwen-local profile identifier the serial gate matches on. A
+# recorded task on this exact model/harness pair is what physically occupies
+# the server's single slot, so the gate reads those two meta fields and nothing
+# else.
+QWEN_LOCAL_MODEL='qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs'
+
+seed_qwen_holder() {  # <home> <id> [harness] [model]
+  local home=$1 id=$2 harness=${3:-pi} model=${4:-$QWEN_LOCAL_MODEL}
+  {
+    echo "harness=$harness"
+    echo "model=$model"
+  } > "$home/state/$id.meta"
+}
+
+test_qwen_local_slot_refuses_a_second_worker() {
+  local rec id blocker out status
+  id=qwen-slot-second-z30
+  blocker=qwen-slot-holder-z29
+  rec=$(make_spawn_case qwen-slot-second pi "$id")
+  read_case_record "$rec"
+  seed_qwen_holder "$HOME_DIR" "$blocker"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$QWEN_LOCAL_MODEL")
+  status=$?
+  expect_code 1 "$status" "a second concurrent qwen-local worker must be refused"
+  assert_contains "$out" "$id cannot launch" "the refusal must use the deterministic cannot-launch shape"
+  assert_contains "$out" "$blocker" "the refusal must name the blocking live worker"
+  assert_contains "$out" "re-dispatch $id after $blocker lands" "the refusal must direct re-dispatch after landing"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused qwen-local spawn wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused qwen-local spawn launched a worker"
+  pass "a live qwen-local worker blocks a second concurrent worker with a named refusal"
+}
+
+test_qwen_local_slot_leaves_other_profiles_alone() {
+  local rec id blocker out status
+  id=qwen-slot-other-z31
+  blocker=qwen-slot-holder-z29b
+  rec=$(make_spawn_case qwen-slot-other pi "$id")
+  read_case_record "$rec"
+  seed_qwen_holder "$HOME_DIR" "$blocker"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model openai-codex/gpt-5.6-sol --effort max)
+  status=$?
+  expect_code 0 "$status" "a non-qwen profile must be unaffected by a live qwen-local worker"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi openai-codex/gpt-5.6-sol max
+  pass "a live qwen-local worker does not block a different profile"
+}
+
+test_qwen_local_slot_only_counts_its_own_profile() {
+  local rec id holder out status
+  id=qwen-slot-lookalike-z32
+  holder=qwen-slot-lookalike-holder-z29c
+  rec=$(make_spawn_case qwen-slot-lookalike pi "$id")
+  read_case_record "$rec"
+  # A qwen-local model on another harness, or another model on pi, is not the
+  # canonical profile and must not gate a real qwen-local spawn.
+  seed_qwen_holder "$HOME_DIR" "$holder" codex "$QWEN_LOCAL_MODEL"
+  seed_qwen_holder "$HOME_DIR" "${holder}-b" pi openai-codex/gpt-5.6-sol
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$QWEN_LOCAL_MODEL")
+  status=$?
+  expect_code 0 "$status" "only the canonical profile may hold the qwen-local slot"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
+  pass "the qwen-local gate matches only the canonical model and harness pair"
+}
+
 test_no_profile_keeps_claude_profile_defaults() {
   local rec id out status expected launch
   id=profile-off-z1
@@ -1924,5 +1993,8 @@ test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks
 test_keep_ai_trailers_reaches_secondmate_crew_launches
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch
+test_qwen_local_slot_refuses_a_second_worker
+test_qwen_local_slot_leaves_other_profiles_alone
+test_qwen_local_slot_only_counts_its_own_profile
 
 echo "# all fm-spawn-dispatch-profile tests passed"

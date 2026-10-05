@@ -3225,6 +3225,34 @@ if [ "$KIND" != secondmate ]; then
   fi
 fi
 
+# Qwen-local single-slot gate (supervision-hardening round 1). The local
+# qwen-local server runs one physical slot (total_slots=1), so a second
+# concurrent worker on its canonical profile would stall behind the first.
+# The canonical profile identifier is the exact model string, carried only by
+# harness pi; provider-ness is inherent in the qwen-local/ prefix. Like the pin
+# refusal above, this is a deterministic count-and-refuse, never a queue: it
+# runs before any endpoint, worktree, or record exists, so a refusal costs
+# nothing to unwind. Secondmates are NOT exempt, because the slot constraint is
+# physical. A relaunch of the same task id must not self-block, so the task's
+# own record is skipped; it is the only exemption.
+spawn_refuse_if_qwen_local_slot_taken() {
+  local holder holder_id holder_harness holder_model
+  [ "$HARNESS" = pi ] || return 0
+  [ "$MODEL" = "qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs" ] || return 0
+  for holder in "$STATE"/*.meta; do
+    [ -f "$holder" ] || continue
+    holder_id=$(basename "$holder" .meta)
+    [ "$holder_id" != "$ID" ] || continue
+    holder_harness=$(fm_meta_get "$holder" harness)
+    holder_model=$(fm_meta_get "$holder" model)
+    [ "$holder_harness" = pi ] || continue
+    [ "$holder_model" = "qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs" ] || continue
+    echo "error: $ID cannot launch: the qwen-local server runs a single slot (total_slots=1) and $holder_id is live on that profile; re-dispatch $ID after $holder_id lands" >&2
+    exit 1
+  done
+}
+spawn_refuse_if_qwen_local_slot_taken
+
 BRIEF_DIR_REAL=$(cd "$(dirname "$BRIEF")" && pwd -P)
 BRIEF_REAL="$BRIEF_DIR_REAL/$(basename "$BRIEF")"
 
