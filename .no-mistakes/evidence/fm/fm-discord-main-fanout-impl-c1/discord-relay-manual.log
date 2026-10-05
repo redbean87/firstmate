@@ -1,0 +1,6 @@
+=== scenario A: blocker + merge-completion rows relay once ===
+PASS scenario A
+=== scenario B: byte-cap held rows do NOT relay before presentation ===
+posts after first drain: 27
+PASS scenario B (held-back newest row not relayed; 27 presented rows relayed)
+ALL MANUAL SCENARIOS PASS
