@@ -99,6 +99,15 @@ fm_test_fake_gh_axi() {
 # carry no -l) is appended there instead, one per line in send order. Optional
 # FM_FAKE_DUPLICATE_WINDOW is printed from list-windows.
 #
+# Agent-liveness mode (FM_FAKE_LIVENESS=1) answers the recovery-grade probes
+# bin/fm-backend-agent-state drives so a suite can model a live or exited agent
+# without a real harness: FM_FAKE_WINDOW_LIST supplies the exact window names a
+# `list-windows -F '#{window_name}'` inventory returns, and
+# FM_FAKE_PANE_COMMAND supplies the `#{pane_current_command}` value (an agent
+# name like `pi` reads alive, a shell like `zsh` reads dead). `#{pane_tty}`
+# answers empty so the kernel-side process reads are skipped. Without
+# FM_FAKE_LIVENESS the fake keeps its historical answers.
+#
 # The pane path defaults to empty when FM_FAKE_PANE_PATH is unset. Window
 # cleanup and option operations are no-ops. Launch logging is env-gated, so
 # suites that do not set FM_FAKE_LAUNCH_LOG keep a silent send-keys.
@@ -111,8 +120,20 @@ case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
-  display-message) printf 'firstmate\n'; exit 0 ;;
+  display-message)
+    if [ -n "${FM_FAKE_LIVENESS:-}" ]; then
+      for a in "$@"; do
+        case "$a" in
+          *pane_current_command*) printf '%s\n' "${FM_FAKE_PANE_COMMAND:-zsh}"; exit 0 ;;
+          *pane_tty*) printf '\n'; exit 0 ;;
+        esac
+      done
+    fi
+    printf 'firstmate\n'; exit 0 ;;
   list-windows)
+    if [ -n "${FM_FAKE_LIVENESS:-}" ] && [ -n "${FM_FAKE_WINDOW_LIST:-}" ]; then
+      printf '%s\n' "$FM_FAKE_WINDOW_LIST"
+    fi
     if [ -n "${FM_FAKE_DUPLICATE_WINDOW:-}" ]; then
       printf '%s\n' "$FM_FAKE_DUPLICATE_WINDOW"
     fi

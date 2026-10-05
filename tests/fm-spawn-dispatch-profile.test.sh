@@ -109,6 +109,9 @@ run_spawn() {
   # A test opts in to the set case via FM_TEST_CLAUDE_CONFIG_DIR.
   CLAUDE_CONFIG_DIR="${FM_TEST_CLAUDE_CONFIG_DIR:-}" \
     FM_FAKE_LAUNCH_LOG="$launchlog" FM_FAKE_PANE_LOG="${FM_TEST_PANE_LOG:-}" \
+    FM_FAKE_LIVENESS="${FM_FAKE_LIVENESS:-}" \
+    FM_FAKE_WINDOW_LIST="${FM_FAKE_WINDOW_LIST:-}" \
+    FM_FAKE_PANE_COMMAND="${FM_FAKE_PANE_COMMAND:-}" \
     FM_FAKE_PI_VERSION="${FM_TEST_PI_VERSION:-0.84.0}" \
     FM_FAKE_CURSOR_MODELS="${FM_TEST_CURSOR_MODELS:-}" \
     FM_FAKE_CURSOR_LIST_STATUS="${FM_TEST_CURSOR_LIST_STATUS:-0}" \
@@ -136,17 +139,38 @@ assert_meta_profile() {
 }
 
 # The canonical Qwen-local profile identifier the serial gate matches on. A
-# recorded task on this exact model/harness pair is what physically occupies
-# the server's single slot, so the gate reads those two meta fields and nothing
-# else.
+# recorded task on this exact model/harness pair occupies the server's single
+# slot only while its agent is live, so the gate reads those two meta fields
+# and then the recorded endpoint's agent state through the shared backend
+# reader.
 QWEN_LOCAL_MODEL='qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs'
+# The session every seeded qwen holder's window is recorded in, so the
+# liveness-aware fake tmux can answer the gate's window inventory with the
+# exact window name.
+QWEN_LIVENESS_SESSION=qmses
 
 seed_qwen_holder() {  # <home> <id> [harness] [model]
   local home=$1 id=$2 harness=${3:-pi} model=${4:-$QWEN_LOCAL_MODEL}
   {
     echo "harness=$harness"
     echo "model=$model"
+    echo "window=$QWEN_LIVENESS_SESSION:fm-$id"
   } > "$home/state/$id.meta"
+}
+
+# run_qwen_slot_spawn <live|dead> <holder-id> <args...>: drive run_ship_spawn
+# with the liveness-aware fake tmux pinned to one holder window. <live> gives
+# the pane an agent foreground command, <dead> a bare shell; the window stays
+# in the inventory either way, so a dead row models an exited agent whose
+# endpoint and metadata record both survive.
+run_qwen_slot_spawn() {  # <live|dead> <holder-id> <args...>
+  local state=$1 holder_id=$2
+  shift 2
+  case "$state" in
+    live) FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder_id" FM_FAKE_PANE_COMMAND=pi run_ship_spawn "$@" ;;
+    dead) FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder_id" FM_FAKE_PANE_COMMAND=zsh run_ship_spawn "$@" ;;
+    *) fail "run_qwen_slot_spawn: unknown state '$state'" ;;
+  esac
 }
 
 test_qwen_local_slot_refuses_a_second_worker() {
@@ -157,7 +181,7 @@ test_qwen_local_slot_refuses_a_second_worker() {
   read_case_record "$rec"
   seed_qwen_holder "$HOME_DIR" "$blocker"
 
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+  out=$(run_qwen_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
     --harness pi --model "$QWEN_LOCAL_MODEL")
   status=$?
   expect_code 1 "$status" "a second concurrent qwen-local worker must be refused"
@@ -202,6 +226,50 @@ test_qwen_local_slot_only_counts_its_own_profile() {
   expect_code 0 "$status" "only the canonical profile may hold the qwen-local slot"$'\n'"$out"
   assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
   pass "the qwen-local gate matches only the canonical model and harness pair"
+}
+
+test_qwen_local_slot_ignores_a_dead_agent_row() {
+  local rec id blocker out status
+  id=qwen-slot-dead-second-z33
+  blocker=qwen-slot-dead-holder-z29d
+  rec=$(make_spawn_case qwen-slot-dead pi "$id")
+  read_case_record "$rec"
+  seed_qwen_holder "$HOME_DIR" "$blocker"
+
+  # The holder's record and window survive, but its agent has exited to a bare
+  # shell, so the physical slot is free and the stale row must not block.
+  out=$(run_qwen_slot_spawn dead "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$QWEN_LOCAL_MODEL")
+  status=$?
+  expect_code 0 "$status" "an exited qwen-local agent must not hold the single slot"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
+  pass "an exited qwen-local agent leaves the slot free for a new worker"
+}
+
+test_qwen_local_slot_reopens_after_the_holder_exits() {
+  local rec id blocker out status
+  id=qwen-slot-exit-second-z34
+  blocker=qwen-slot-exit-holder-z29e
+  rec=$(make_spawn_case qwen-slot-exit pi "$id")
+  read_case_record "$rec"
+  seed_qwen_holder "$HOME_DIR" "$blocker"
+
+  # A live holder refuses the second launch...
+  out=$(run_qwen_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$QWEN_LOCAL_MODEL")
+  status=$?
+  expect_code 1 "$status" "a live holder must refuse the second launch"$'\n'"$out"
+  assert_contains "$out" "$blocker" "the refusal must name the live holder"
+  assert_absent "$HOME_DIR/state/$id.meta" "the refused attempt must not write its own task record"
+
+  # ...but once its agent exits while the record and window remain, the same
+  # launch proceeds.
+  out=$(run_qwen_slot_spawn dead "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$QWEN_LOCAL_MODEL")
+  status=$?
+  expect_code 0 "$status" "the same launch must proceed once the holder's agent exits"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
+  pass "the qwen-local slot reopens after its recorded holder's agent exits"
 }
 
 test_no_profile_keeps_claude_profile_defaults() {
@@ -1996,5 +2064,7 @@ test_active_dispatch_profile_does_not_block_secondmate_launch
 test_qwen_local_slot_refuses_a_second_worker
 test_qwen_local_slot_leaves_other_profiles_alone
 test_qwen_local_slot_only_counts_its_own_profile
+test_qwen_local_slot_ignores_a_dead_agent_row
+test_qwen_local_slot_reopens_after_the_holder_exits
 
 echo "# all fm-spawn-dispatch-profile tests passed"
