@@ -1,0 +1,16 @@
+=== load run 1 ===
+ok - generated checks enforce configured and inherited budgets at runtime
+load run 1: PASS
+=== load run 2 ===
+ok - generated checks enforce configured and inherited budgets at runtime
+load run 2: PASS
+=== load run 3 ===
+ok - generated checks enforce configured and inherited budgets at runtime
+load run 3: PASS
+=== load run 4 ===
+ok - generated checks enforce configured and inherited budgets at runtime
+load run 4: PASS
+=== load run 5 ===
+ok - generated checks enforce configured and inherited budgets at runtime
+load run 5: PASS
+LOAD_TOTAL_PASS=5/5

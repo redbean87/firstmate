@@ -1,0 +1,4 @@
+675:  # Both modes freeze the clock: an unfrozen one can tick past a one-second
+676-  # budget before the first forge call, so nothing is ever observed.
+677-  /bin/date +%s > "$home/forge/clock"
+678-  printf '%s\n' "$mode" > "$home/forge/fault"
