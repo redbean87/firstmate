@@ -1,0 +1,23 @@
+=== SCENARIO A: banner-only audit answer fails closed ===
+consult rc=1 out=fm-chatgpt-loop: audit consultation returned an empty prompt after banner stripping; phase unchanged at audit-consult
+phase=audit-consult last_error=audit consultation returned an empty prompt after banner stripping audit_prompt_len=       1
+A-PASS
+
+=== SCENARIO B: consult stdout is stripped value ===
+rc=0 stdout=[AUDIT-PROMPT-MARKER: inspect checks] stored=[AUDIT-PROMPT-MARKER: inspect checks]
+stdout clean of banner
+B-PASS stdout==stored
+
+=== SCENARIO C: duplicate --effort in spawn args refused ===
+rc=2 out=fm-chatgpt-loop: refusing dispatch: spawn args must not carry --effort (use dispatch --effort); nothing launched, no state changed phase=audit-dispatch
+C-PASS
+equals-form rc=2 out=fm-chatgpt-loop: refusing dispatch: spawn args must not carry --effort (use dispatch --effort); nothing launched, no state changed
+C2-PASS
+
+=== SCENARIO D: whitespace-only after strip fails closed ===
+rc=1 phase=audit-consult
+D-PASS
+
+=== SCENARIO E: per-stage effort honored, default low ===
+argv=[effworker myproj --mode local-only --yolo off --effort xhigh]
+E-PASS
