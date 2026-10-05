@@ -255,7 +255,11 @@ mechanism: authorized messages enter Firstmate only as watcher wakes.
   to `"message"`) is stashed at `state/discord-inbox/<iid>.json` with
   `firstmate_command`, `user_id`, and `guild_id`. The `ask` subcommand's
   question text is the interaction option value (or the `!fm ask`
-  remainder as `question`); the agent answers the same way.
+  remainder as `question`); the agent answers the same way. Like plain
+  messages, a gateway command receipt (`!fm` or interaction) also files
+  its full `discord-command <iid> <sub>` wake line as
+  `state/discord-pending-wake/<iid>` for the next watcher poll to drain
+  and retire, so the verb survives the gateway log.
 - `fm-discord-gateway.py --once` is the health check: it reports the
   gateway session-limit lookup, and reports "not configured" (non-zero)
   instead of succeeding while inert.
