@@ -1,0 +1,2 @@
+S3 rc=1 :: warning: secondmate s3-sm sync skipped before launch: primary default-branch commit cannot be resolved
+error: s3-sm cannot launch: the qwen-local server runs a single slot (total_slots=1) and s3-holder is live on that profile; re-dispatch s3-sm after s3-holder lands

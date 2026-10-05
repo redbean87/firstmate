@@ -1,0 +1,20 @@
+S1 rc=1 out=warning: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s1/home/data/s1-second/launch-brief.md records no ship branch; defaulting to legacy branch fm/s1-second
+warning: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s1/home/data/s1-second/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: s1-second cannot launch: the qwen-local server runs a single slot (total_slots=1) and s1-holder is live on that profile; re-dispatch s1-second after s1-holder lands
+S1 PASS
+S2 rc=0 out=rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-control-relaunch.0U6MuS/qwenrelaunch-28404/home: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-control-relaunch.0U6MuS/qwenrelaunch-28404: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-control-relaunch.0U6MuS: Directory not empty
+S2 PASS
+S3 rc=1 out=warning: secondmate s3-sm sync skipped before launch: primary default-branch commit cannot be resolved
+error: s3-sm cannot launch: the qwen-local server runs a single slot (total_slots=1) and s3-holder is live on that profile; re-dispatch s3-sm after s3-holder lands
+S3 PASS
+S4 rc=0 out=warning: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/home/data/s4-other/launch-brief.md records no ship branch; defaulting to legacy branch fm/s4-other
+warning: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/home/data/s4-other/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/fake/fakebin/timeout: line 3: exec: 1: not found
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/fake/fakebin/timeout: line 3: exec: 1: not found
+spawned s4-other harness=pi kind=ship mode=no-mistakes yolo=off window=firstmate:fm-s4-other worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/wt
+S4 PASS
+S5a PASS
+S5b PASS
+DONE pass=6 fail=0

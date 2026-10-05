@@ -1,0 +1,1 @@
+Never re-run checks to force green: report a red result as-is with its evidence.

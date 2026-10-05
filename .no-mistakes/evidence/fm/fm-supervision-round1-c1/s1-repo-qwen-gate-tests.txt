@@ -1,0 +1,5 @@
+# all fm-spawn-dispatch-profile tests passed
+ok - a live qwen-local worker blocks a second concurrent worker with a named refusal
+ok - a live qwen-local worker does not block a different profile
+ok - the qwen-local gate matches only the canonical model and harness pair
+# qwen-gate-only passed

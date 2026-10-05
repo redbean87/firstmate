@@ -1,0 +1,5 @@
+S4 rc=0 :: warning: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/home/data/s4-other/launch-brief.md records no ship branch; defaulting to legacy branch fm/s4-other
+warning: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/home/data/s4-other/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/fake/fakebin/timeout: line 3: exec: 1: not found
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/fake/fakebin/timeout: line 3: exec: 1: not found
+spawned s4-other harness=pi kind=ship mode=no-mistakes yolo=off window=firstmate:fm-s4-other worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/live-qwen-gate.rJL8g0/s4/wt
