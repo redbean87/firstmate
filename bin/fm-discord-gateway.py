@@ -62,7 +62,8 @@ def redact(text):
 
 
 def diag(msg):
-    print("fm-discord-gateway: " + redact(msg), file=sys.stderr)
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    print("%s fm-discord-gateway: %s" % (stamp, redact(msg)), file=sys.stderr)
 
 
 def resolve_home():

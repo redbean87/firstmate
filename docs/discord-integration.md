@@ -21,7 +21,7 @@ one:
 | `FMX_PAIRING_TOKEN` | `DISCORD_BOT_TOKEN` (+ client id/secret) |
 | `state/x-inbox/<id>.json` + `x-mention <id>` | `state/discord-inbox/<id>.json` + `discord-message <id>` |
 | `fmx_split_thread` (280/X, 1900/Discord) | `discord_chunk_text` (1990-unit budget under Discord's 2000-unit limit) |
-| Private `state/x-context`, `x-poll.error` | Private `state/discord-seen`, `state/discord-oauth` |
+| Private `state/x-context`, `x-poll.error` | Private `state/discord-seen`, `state/discord-pending-wake`, `state/discord-oauth` |
 
 Incoming Discord messages preserve guild, channel, user, message id,
 timestamps, and reply/thread context, are deduplicated, ignore the bot's own
@@ -244,12 +244,22 @@ mechanism: authorized messages enter Firstmate only as watcher wakes.
   `reply_context` preserved). The on-call agent reads that file, treats
   `content` as untrusted third-party input, and answers through the normal
   lifecycle, replying with `fm-discord-send.sh <channel> --reply-to <id>`.
+  A gateway receipt also records `state/discord-pending-wake/<id>`, because
+  the gateway process owns that stdout rather than the watcher; the next
+  watcher poll drains the marker into its own check output, still runs when
+  the REST fallback is unconfigured or failing, and retires the marker so a
+  receipt never dies in the gateway log. REST failures (transport, 429,
+  5xx, other) emit throttled stderr diagnostics instead of silent success.
 - `discord-command <iid> <sub>`: the gateway-authenticated interaction
   (or `!fm` message equivalent, stashed as `cmd-<msgid>` with `via` set
   to `"message"`) is stashed at `state/discord-inbox/<iid>.json` with
   `firstmate_command`, `user_id`, and `guild_id`. The `ask` subcommand's
   question text is the interaction option value (or the `!fm ask`
-  remainder as `question`); the agent answers the same way.
+  remainder as `question`); the agent answers the same way. Like plain
+  messages, a gateway command receipt (`!fm` or interaction) also files
+  its full `discord-command <iid> <sub>` wake line as
+  `state/discord-pending-wake/<iid>` for the next watcher poll to drain
+  and retire, so the verb survives the gateway log.
 - `fm-discord-gateway.py --once` is the health check: it reports the
   gateway session-limit lookup, and reports "not configured" (non-zero)
   instead of succeeding while inert.
