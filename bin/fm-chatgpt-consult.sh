@@ -57,7 +57,7 @@ BRIDGE_URL=$(fm_chatgpt_bridge_url) || exit 1
 
 case "$MODE" in
   audit)
-    INSTRUCTIONS="You are a senior code-review auditor. Read the objective and context below and return audit findings: risks, correctness gaps, and missing edge cases, ordered by severity. Return findings only, no execution plan."
+    INSTRUCTIONS="You are a senior engineer writing audit instructions for a worker. Read the objective and context below and return only a self-contained audit prompt that the worker will follow; this is prompt generation, not the audit itself. The prompt must state the specific questions the worker must answer, the evidence and scope to inspect, the required report shape, and explicit stop rules, and it must carry the objective's essential details so it stands alone. This turn has no local tools and does not need any local tools: do not attempt tool use and never emit or discuss a tool-availability notice or banner. Return only the audit prompt."
     ;;
   plan)
     INSTRUCTIONS="You are a senior implementation planner. Read the objective, context, and any findings below and return a concrete step-by-step execution plan a junior worker can follow without further design decisions. Return the plan only."
