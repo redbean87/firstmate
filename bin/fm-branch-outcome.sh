@@ -576,8 +576,8 @@ outcome_key_latest() { # <task> <key> <before|after> <seq> -> close|open|none
     lseq=$(printf '%s' "$line" | jq -r '.seq // empty' 2>/dev/null) || continue
     case "$lseq" in ''|*[!0-9]*) continue ;; esac
     case "$dir" in
-      before) [ "$lseq" -lt "$seq" 2>/dev/null ] || continue ;;
-      *) [ "$lseq" -gt "$seq" 2>/dev/null ] || continue ;;
+      before) [ "$lseq" -lt "$seq" ] 2>/dev/null || continue ;;
+      *) [ "$lseq" -gt "$seq" ] 2>/dev/null || continue ;;
     esac
     summary=$(printf '%s' "$line" | jq -r '.summary // empty' 2>/dev/null) || continue
     k=$(outcome_notify_dkey "$summary")
