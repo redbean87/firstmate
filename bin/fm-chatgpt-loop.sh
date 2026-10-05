@@ -3,7 +3,7 @@
 # orchestration state machine.
 # Usage: fm-chatgpt-loop.sh init --task ID --objective-file FILE [--context-file FILE] [--thread ID]
 #        fm-chatgpt-loop.sh consult --stage audit|plan --task ID
-#        fm-chatgpt-loop.sh dispatch --stage audit|plan --task ID -- <fm-spawn args>
+#        fm-chatgpt-loop.sh dispatch --stage audit|plan [--effort E] --task ID -- <fm-spawn args>
 #        fm-chatgpt-loop.sh record-findings --task ID --file FILE
 #        fm-chatgpt-loop.sh record-result --task ID --file FILE
 #        fm-chatgpt-loop.sh record-worker-failure --task ID --stage audit|plan --reason TEXT
@@ -14,11 +14,13 @@
 # Firstmate owns everything about this workflow: the per-task state file, the
 # ChatGPT consultation lifecycle, worker dispatch, worker results, iteration
 # between audit and planning, and the bridge daemon lifecycle. The worker is
-# an ordinary low-thinking spawn (fm-spawn.sh with --effort low) and never
+# an ordinary low-thinking spawn (fm-spawn.sh with --effort low by default;
+# dispatch accepts a per-stage --effort selection) and never
 # touches the bridge; nothing in the dispatch path starts, stops, or probes
 # it. The prompt handoff belongs to dispatch: right after a successful spawn,
-# dispatch steers the stored stage prompt (the audit prompt for --stage
-# audit, the plan for --stage plan) to that worker through fm-send.sh with an
+# dispatch steers the stored stage prompt (the ChatGPT-generated audit prompt
+# for --stage audit, the plan for --stage plan) to that worker through
+# fm-send.sh with an
 # explicit FM_HOME and state root, addressed at the plain task id that must
 # lead the args after --, and refuses before launching when that leading
 # token is absent or not a plain task id (never a token scanned from option
@@ -33,6 +35,9 @@
 # State file: $FM_HOME/data/<task-id>/chatgpt-loop.json, one JSON object with
 # task_id, objective, context, thread, phase, iteration, audit_prompt,
 # audit_result, findings, plan, worker_result, last_error, and updated_at.
+# audit_prompt stores the banner-stripped ChatGPT-generated worker audit
+# prompt that audit dispatch steers; objective and context stay in state for
+# the plan packet.
 # Phases: audit-consult -> audit-dispatch -> audit-worker -> plan-consult ->
 # plan-dispatch -> plan-worker -> complete. next-round increments iteration
 # and returns to audit-consult so further audit/plan cycles stay possible.
@@ -40,11 +45,14 @@
 #
 # The bridge keeps no conversation history keyed by thread id alone: every
 # consultation is one self-contained turn, so consult assembles prior context
-# into the prompt file itself. The audit prompt carries the user objective
-# plus Firstmate context; the plan prompt carries the objective, context,
-# stored audit prompt, audit result, and worker findings, all explicitly
-# included. bin/fm-chatgpt-consult.sh owns the transport and its fail-closed
-# contract; this script owns state, prompts, and dispatch. On consult or
+# into the prompt file itself. The audit consult carries the user objective
+# plus Firstmate context and asks ChatGPT to generate a worker audit prompt
+# rather than audit findings; the reply is stripped of any leading
+# Local-tools-unavailable banner before it is stored. The plan prompt carries
+# the objective, context, stored audit prompt, audit result, and worker
+# findings, all explicitly included. bin/fm-chatgpt-consult.sh owns the
+# transport and its fail-closed contract; this script owns state, prompts, and
+# dispatch. On consult or
 # bridge failure the phase is unchanged (retryable), last_error records the
 # cause, and dispatch issues nothing.
 #
@@ -72,7 +80,7 @@ BRIDGE_PID_FILE="$STATE/chatgpt-loop-bridge.pid"
 usage() {
   printf 'usage: %s init --task ID --objective-file FILE [--context-file FILE] [--thread ID]\n' "$(basename "$0")" >&2
   printf '       %s consult --stage audit|plan --task ID\n' "$(basename "$0")" >&2
-  printf '       %s dispatch --stage audit|plan --task ID -- <fm-spawn args>\n' "$(basename "$0")" >&2
+  printf '       %s dispatch --stage audit|plan [--effort E] --task ID -- <fm-spawn args>\n' "$(basename "$0")" >&2
   printf '       %s record-findings --task ID --file FILE\n' "$(basename "$0")" >&2
   printf '       %s record-result --task ID --file FILE\n' "$(basename "$0")" >&2
   printf '       %s record-worker-failure --task ID --stage audit|plan --reason TEXT\n' "$(basename "$0")" >&2
@@ -167,6 +175,30 @@ build_plan_prompt() {
   } > "$out"
 }
 
+# strip_local_tools_banner reads a consultation answer on stdin and writes it
+# back with a leading "Local tools unavailable" blockquote removed. Only a
+# leading contiguous blockquote run whose first content line names the banner
+# is stripped, and only the blank separator after that run is trimmed; any
+# later blockquote and every other byte are left untouched.
+strip_local_tools_banner() {
+  awk '
+    { line[NR] = $0 }
+    END {
+      n = NR
+      i = 1
+      while (i <= n && line[i] ~ /^[[:space:]]*$/) i++
+      if (i > n || line[i] !~ /^>.*Local tools unavailable/) {
+        for (j = 1; j <= n; j++) print line[j]
+        exit
+      }
+      j = i
+      while (j <= n && line[j] ~ /^>/) j++
+      while (j <= n && line[j] ~ /^[[:space:]]*$/) j++
+      for (; j <= n; j++) print line[j]
+    }
+  '
+}
+
 cmd_consult() {
   local stage="" task=""
   while [ $# -gt 0 ]; do
@@ -212,8 +244,10 @@ cmd_consult() {
     return "$rc"
   fi
   if [ "$stage" = audit ]; then
-    write_field "$file" audit_prompt "$(cat "$prompt")" || return 1
-    write_field "$file" audit_result "$answer" || return 1
+    local audit_text
+    audit_text=$(printf '%s\n' "$answer" | strip_local_tools_banner)
+    write_field "$file" audit_prompt "$audit_text" || return 1
+    write_field "$file" audit_result "$audit_text" || return 1
     write_field "$file" phase audit-dispatch || return 1
   else
     write_field "$file" plan "$answer" || return 1
@@ -224,7 +258,7 @@ cmd_consult() {
 }
 
 cmd_dispatch() {
-  local stage="" task="" after_dash=0
+  local stage="" task="" effort="" after_dash=0
   local -a spawn_args=()
   while [ $# -gt 0 ]; do
     if [ "$after_dash" = 1 ]; then
@@ -233,6 +267,7 @@ cmd_dispatch() {
       case "$1" in
         --stage) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; stage=$2; shift 2 ;;
         --task) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; task=$2; shift 2 ;;
+        --effort) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; effort=$2; shift 2 ;;
         --) after_dash=1; shift ;;
         -h|--help) usage; return 0 ;;
         *) printf 'fm-chatgpt-loop: unknown dispatch argument %s\n' "$1" >&2; usage; return 2 ;;
@@ -245,6 +280,7 @@ cmd_dispatch() {
   esac
   [ -n "$task" ] || { printf 'fm-chatgpt-loop: dispatch needs --task\n' >&2; usage; return 2; }
   [ "${#spawn_args[@]}" -gt 0 ] || { printf 'fm-chatgpt-loop: dispatch needs spawn args after --\n' >&2; usage; return 2; }
+  [ -n "$effort" ] || effort=low
   local file
   file=$(need_state "$task") || return 1
   if [ "$stage" = audit ]; then
@@ -273,9 +309,10 @@ cmd_dispatch() {
     printf 'fm-chatgpt-loop: refusing dispatch: the first arg after -- must be a plain task id (got %s); nothing launched, no state changed\n' "$worker_task" >&2
     return 2
   fi
-  # The low-thinking worker is this workflow's definition: always --effort low.
-  # Bridge lifecycle stays Firstmate-owned: the worker environment never
-  # carries the bridge URL, and nothing here starts, stops, or probes it.
+  # The stage's effort is selected by the caller and defaults to low, the
+  # workflow's original posture. Bridge lifecycle stays Firstmate-owned: the
+  # worker environment never carries the bridge URL, and nothing here starts,
+  # stops, or probes it.
   local stage_prompt rc send_err phase_next
   if [ "$stage" = audit ]; then
     stage_prompt=$(read_field "$file" audit_prompt)
@@ -284,7 +321,7 @@ cmd_dispatch() {
     stage_prompt=$(read_field "$file" plan)
     phase_next=plan-worker
   fi
-  if env -u CHATGPT_WEB_BRIDGE_URL -u FM_CHATGPT_LOOP_SPAWN -u FM_CHATGPT_LOOP_CONSULT -u FM_CHATGPT_LOOP_SEND "$SPAWN" "${spawn_args[@]}" --effort low; then
+  if env -u CHATGPT_WEB_BRIDGE_URL -u FM_CHATGPT_LOOP_SPAWN -u FM_CHATGPT_LOOP_CONSULT -u FM_CHATGPT_LOOP_SEND "$SPAWN" "${spawn_args[@]}" --effort "$effort"; then
     rc=0
   else
     rc=$?
@@ -307,7 +344,7 @@ cmd_dispatch() {
   fi
   write_field "$file" phase "$phase_next" || return 1
   write_field "$file" last_error "" || return 1
-  printf 'dispatched %s worker for task %s with --effort low and delivered the %s prompt to %s\n' "$stage" "$task" "$stage" "$worker_task"
+  printf 'dispatched %s worker for task %s with --effort %s and delivered the %s prompt to %s\n' "$stage" "$task" "$effort" "$stage" "$worker_task"
 }
 
 cmd_record_findings() {

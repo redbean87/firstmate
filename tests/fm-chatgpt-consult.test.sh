@@ -77,9 +77,18 @@ test_audit_request_shape() {
   stop_stub "$pid"
   expect_code 0 "$rc" "an audit consult against the stub should succeed"
   [ "$out" = "stubbed consultation answer" ] || fail "stdout must carry only the response text, got: $out"
-  assert_contains "$(jq -r '.instructions' "$dir/request.json")" "audit" "an audit request must frame the auditor role"
+  [ "$(jq -r '.model' "$dir/request.json")" = "chatgpt-web/gpt-5.6-luna" ] || fail "an audit request must carry the Responses API model"
+  local instr
+  instr=$(jq -r '.instructions' "$dir/request.json")
+  assert_contains "$instr" "audit prompt" "an audit request must ask for a worker audit prompt"
+  assert_contains "$instr" "prompt generation" "an audit request must frame the answer as prompt generation, not the audit itself"
+  assert_contains "$instr" "questions the worker must answer" "the generated audit prompt must carry the worker's questions"
+  assert_contains "$instr" "evidence and scope" "the generated audit prompt must carry required evidence and scope"
+  assert_contains "$instr" "report shape" "the generated audit prompt must carry the report shape"
+  assert_contains "$instr" "stop rules" "the generated audit prompt must carry explicit stop rules"
+  assert_contains "$instr" "no local tools" "an audit request must state that local tools are unavailable and unneeded"
   assert_contains "$(jq -r '.input[0].content' "$dir/request.json")" "login handler" "the request must carry the prompt file text"
-  pass "an audit consult posts the auditor framing with the prompt text and prints only the answer"
+  pass "an audit consult asks for a generated worker audit prompt with the prompt text and prints only the answer"
 }
 
 test_plan_request_shape() {

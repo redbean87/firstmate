@@ -124,8 +124,7 @@ test_full_loop_happy_path() {
   [ "$(loop_phase happy)" = "audit-worker" ] || fail "an audit dispatch must advance to audit-worker"
   assert_contains "$(cat "$dir/argv.txt")" "--effort low" "the audit stage must dispatch a low-thinking worker"
   assert_contains "$(cat "$dir/send.txt")" "target: mytask" "the audit prompt must be steered to the spawn's first positional task id"
-  assert_contains "$(cat "$dir/send.txt")" "User objective:" "the delivered audit prompt must be the stored stage prompt"
-  assert_contains "$(cat "$dir/send.txt")" "Fix the two failing CI checks" "the audit prompt must reach the worker's input"
+  assert_contains "$(cat "$dir/send.txt")" "stubbed consultation answer" "the delivered audit prompt must be the ChatGPT-generated audit answer"
   grep -Eiq 'CHATGPT_WEB_BRIDGE_URL|codex-chatgpt-web|17841|17911|fm-chatgpt|127\.0\.0\.1' "$dir/send.txt" && fail "the delivered audit prompt must carry no bridge reference"
   printf 'worker found two flaky tests\n' > "$dir/findings.txt"
   pid=$(start_stub "$dir")
@@ -411,6 +410,99 @@ test_bridge_verbs_refused() {
   pass "bridge install and setup verbs and any extra start/stop argument refuse"
 }
 
+test_audit_worker_receives_generated_prompt() {
+  local dir=$TMP_ROOT/generated pid answer
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  answer=$(printf '%s\n' \
+    '> **Local tools unavailable**' \
+    '>' \
+    '> The model cannot reach local tools in this turn.' \
+    '>' \
+    '> **Action:** connect the harness.' \
+    '' \
+    'AUDIT-PROMPT-MARKER: inspect the failing checks' \
+    'Answer these questions with evidence: which checks fail and why.' \
+    'Report findings in severity order and stop when the checklist is complete.')
+  pid=$(start_stub "$dir" 200 "$answer")
+  bash "$LOOP" init --task generated --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task generated >/dev/null
+  stop_stub "$pid"
+  local state
+  state=$(jq -r '.audit_prompt' "$HOME_DIR/data/generated/chatgpt-loop.json")
+  assert_contains "$state" "AUDIT-PROMPT-MARKER" "loop state must store the ChatGPT-generated audit prompt"
+  printf '%s' "$state" | grep -q 'Local tools unavailable' && fail "the stored audit prompt must not carry the canned banner"
+  [ "$state" != "$(cat "$TMP_ROOT/objective.txt")" ] || fail "the stored audit prompt must be distinct from the objective file"
+  bash "$LOOP" dispatch --stage audit --task generated -- genworker myproj --mode local-only --yolo off >/dev/null
+  assert_contains "$(cat "$dir/send.txt")" "AUDIT-PROMPT-MARKER" "the audit worker must receive the ChatGPT-generated prompt"
+  printf '%s' "$(cat "$dir/send.txt")" | grep -q 'Local tools unavailable' && fail "the audit worker input must not carry the canned banner"
+  printf '%s' "$(cat "$dir/send.txt")" | grep -q 'User objective:' && fail "the audit worker input must not be the raw objective file"
+  [ "$(jq -r '.objective' "$HOME_DIR/data/generated/chatgpt-loop.json")" = "Fix the two failing CI checks." ] || fail "the objective must stay in loop state for the plan packet"
+  printf 'worker finding: flaky retry logic\n' > "$dir/findings.txt"
+  bash "$LOOP" record-findings --task generated --file "$dir/findings.txt" >/dev/null
+  pid=$(start_stub "$dir")
+  bash "$LOOP" consult --stage plan --task generated >/dev/null
+  stop_stub "$pid"
+  assert_contains "$(jq -r '.input[0].content' "$dir/request.json")" "Fix the two failing CI checks" "the plan packet must still carry the objective"
+  pass "the audit worker receives the banner-stripped ChatGPT-generated prompt while the objective stays in loop state for the plan packet"
+}
+
+test_consult_banner_stripping() {
+  local dir=$TMP_ROOT/strip pid answer noanswer stored expected
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+
+  noanswer=$(printf '%s\n' 'NO-BANNER-MARKER' '> a blockquote the model wrote' 'Rest of the answer.')
+  pid=$(start_stub "$dir" 200 "$noanswer")
+  bash "$LOOP" init --task nobanner --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task nobanner >/dev/null
+  stop_stub "$pid"
+  stored=$(jq -r '.audit_prompt' "$HOME_DIR/data/nobanner/chatgpt-loop.json")
+  [ "$stored" = "$noanswer" ] || fail "a banner-free answer must be stored byte-for-byte, got: $stored"
+  assert_contains "$stored" "> a blockquote the model wrote" "a later blockquote must never be stripped"
+
+  answer=$(printf '%s\n' '> **Local tools unavailable**' '>' '> The model cannot reach local tools in this turn.' '>' '> **Action:** connect the harness.' '' 'LEADING-STRIPPED-CONTENT' '> a later blockquote stays')
+  pid=$(start_stub "$dir" 200 "$answer")
+  bash "$LOOP" init --task leadbanner --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task leadbanner >/dev/null
+  stop_stub "$pid"
+  stored=$(jq -r '.audit_prompt' "$HOME_DIR/data/leadbanner/chatgpt-loop.json")
+  expected=$(printf '%s\n' 'LEADING-STRIPPED-CONTENT' '> a later blockquote stays')
+  [ "$stored" = "$expected" ] || fail "a leading banner and its blank separator must be stripped exactly, got: $stored"
+  pass "the consult receipt strips only a leading Local-tools-unavailable blockquote and preserves every other byte"
+}
+
+test_per_stage_effort_dispatch() {
+  local dir=$TMP_ROOT/effort pid
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task effort --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task effort >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task effort -- effortworker myproj --mode local-only --yolo off >/dev/null
+  assert_contains "$(cat "$dir/argv.txt")" "--effort low" "the audit stage must default to low effort"
+  printf 'worker finding\n' > "$dir/findings.txt"
+  bash "$LOOP" record-findings --task effort --file "$dir/findings.txt" >/dev/null
+  pid=$(start_stub "$dir")
+  bash "$LOOP" consult --stage plan --task effort >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage plan --task effort --effort high -- effortworker myproj --mode local-only --yolo off >/dev/null
+  assert_contains "$(cat "$dir/argv.txt")" "--effort high" "the plan dispatch must carry the requested stage effort"
+
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task effort2 --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task effort2 >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task effort2 --effort xhigh -- effortworker myproj --mode local-only --yolo off >/dev/null
+  assert_contains "$(cat "$dir/argv.txt")" "--effort xhigh" "the audit dispatch must accept a caller-selected effort"
+  pass "dispatch carries the selected per-stage effort in the worker argv and keeps low as the audit default"
+}
+
 test_full_loop_happy_path
 test_plan_consult_carries_explicit_context
 test_consult_failure_is_retryable
@@ -423,3 +515,6 @@ test_trailing_option_requires_value
 test_worker_never_touches_bridge
 test_bridge_pid_identity
 test_bridge_verbs_refused
+test_audit_worker_receives_generated_prompt
+test_consult_banner_stripping
+test_per_stage_effort_dispatch
