@@ -664,7 +664,7 @@ outcome_reconcile_decision_marker() { # <task> <key> <seq>; always 0
 # already durable, so a failed send is a stderr warning, never an append
 # failure (failing the append would record a duplicate row on retry).
 outcome_maybe_notify_discord() { # <task> <summary> <seq>; always 0
-  local task=$1 summary=$2 seq=$3 class event text dkey out rc=0 marker had_marker=0
+  local task=$1 summary=$2 seq=$3 class event text dkey out rc=0 marker had_marker=0 sent=0
   class=$(outcome_notify_class "$summary")
   if [ "$class" = routine ]; then
     echo "discord-notify: $task: silent (routine)" >&2
@@ -679,7 +679,7 @@ outcome_maybe_notify_discord() { # <task> <summary> <seq>; always 0
   [ -n "$text" ] || text="update on $task"
   marker="$STATE/discord-notify/$event"
   if [ -e "$marker" ]; then had_marker=1; fi
-  trap '[ "$had_marker" = 1 ] || rm -f -- "$marker"' HUP INT TERM
+  trap '[ "$had_marker" = 1 ] || [ "$sent" = 1 ] || rm -f -- "$marker"' HUP INT TERM
   if [ -n "$dkey" ]; then
     if [ "$(outcome_key_latest "$task" "$dkey" before "$seq" 2>/dev/null)" = close ]; then
       rm -f -- "$marker" 2>/dev/null \
@@ -693,6 +693,7 @@ outcome_maybe_notify_discord() { # <task> <summary> <seq>; always 0
   # The || exempts the send from set -e: a failed delivery is a warning,
   # never an append failure.
   out=$("$SCRIPT_DIR/fm-discord-notify.sh" "$@" 2>&1) || rc=$?
+  if [ "$rc" -eq 0 ]; then sent=1; fi
   if [ "$rc" -eq 0 ]; then
     [ -n "$out" ] || out="silent (already notified, unconfigured, or suppressed)"
     echo "discord-notify: $event [$class]: $out" >&2
