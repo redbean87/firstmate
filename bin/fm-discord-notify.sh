@@ -22,11 +22,14 @@
 # classification for direct callers that already know the class.
 #
 # Each message is one short plain-language outcome: the summary text, the
-# link or decision key when there is one, and a mention of the owner user
-# (<@owner-id>) so the phone pings. Text is passed through discord_redact
-# so secrets, tokens, or credential shapes never ride along, and internal
-# machinery terms are left out by the caller-supplied wording (this script
-# never invents detail beyond --text/--link/--decision-key).
+# link when there is one, and a mention of the owner user (<@owner-id>) so
+# the phone pings. A decision-class message is rendered from its record as
+# outcome, consequence, options, recommendation, and the reply path rather
+# than forwarding raw text; the decision key selects the dedup marker but is
+# never shown. Text is passed through discord_redact so secrets, tokens, or
+# credential shapes never ride along, and internal machinery terms are left
+# out by the caller-supplied wording (this script never invents detail
+# beyond --text/--link/--decision-key).
 #
 # Destination: DISCORD_NOTIFY_CHANNEL_ID names the notify channel. When it
 # is unset or empty, the script falls back to the existing send-channel
@@ -118,13 +121,21 @@ if ! printf '%s\n' "$(date +%s)" > "$tmp" || ! chmod 600 "$tmp"; then rm -f "$tm
 if ln -- "$tmp" "$marker" 2>/dev/null; then rm -f "$tmp"; else rm -f "$tmp"; if [ -e "$marker" ]; then exit 0; fi; echo "fm-discord-notify: cannot claim event $event" >&2; exit 1; fi
 find "$notify_dir" -type f -mtime +"$DISCORD_SEEN_RETENTION_DAYS" -delete 2>/dev/null || true
 
-body=$(discord_redact "$text")
 if [ -n "$link" ]; then
   printf '%s' "$link" | grep -qE '^[A-Za-z0-9_/:.?=&%#@+,;~*-]+$' || { echo "fm-discord-notify: unsafe link" >&2; rm -f "$marker"; exit 2; }
-  body="$body $link"
 fi
 case "$decision_key" in ''|*[!A-Za-z0-9._-]*) [ -z "$decision_key" ] || { echo "fm-discord-notify: unsafe decision key" >&2; rm -f "$marker"; exit 2; } ;; esac
-[ -z "$decision_key" ] || body="$body (decision: $decision_key)"
+body=
+if [ "$class" = decision ]; then
+  # The decision key selects the dedup marker but is never rendered; the
+  # phone message is the record's outcome, consequence, options,
+  # recommendation, and the existing reply path. Full links survive inside
+  # the rendered body instead of being appended as raw metadata.
+  body=$(discord_redact "$(discord_decision_message "$text" "$link")")
+else
+  body=$(discord_redact "$text")
+  [ -z "$link" ] || body="$body $link"
+fi
 msg="<@$owner> $body"
 
 case "$owner" in ''|*[!A-Za-z0-9_-]*) echo "fm-discord-notify: unsafe owner id" >&2; rm -f "$marker"; exit 2 ;; esac
