@@ -25,6 +25,9 @@
 # this library must not set -u itself. It defines:
 #   discord_load_config      - resolve DISCORD_* into DISCORD_* vars
 #   discord_classify_notify_text <text> - the outbound-tap class rule: map event text to decision|blocker|completion|routine
+#   discord_decision_message <record> [<link>] - render a phone-readable decision message
+#   discord_decision_clause <record> - the plain human clause with metadata stripped
+#   discord_decision_field <record> <Label:> - one labeled field from a decision record
 #   discord_redact <text>    - strip token-looking substrings for logs
 #   discord_config_path      - print config/discord.json path for this home
 #   discord_state_dir <name> - ensure state/discord-<name> exists (0700)
@@ -108,6 +111,133 @@ discord_classify_notify_text() { # <text> -> decision|blocker|completion|routine
     printf 'completion\n'; return 0
   fi
   printf 'routine\n'
+}
+
+# The visible decision-message contract. A decision record - a status-line
+# summary or a labeled rewrite - is rendered as the elements a captain needs
+# to answer from a phone: outcome, consequence, options, recommendation, and
+# the existing Discord reply path. Internal identifiers (task ids, decision
+# keys, finding ids, filesystem paths, pipeline labels) never reach the
+# visible body. The record's own labeled fields win; a legacy unlabeled
+# record falls back to a plain clause derived by stripping those metadata
+# classes. The renderer is idempotent, so the branch append path, the tap,
+# and the drain relay can each apply it without double-wrapping, and it is
+# the single owner of the fixed field order.
+
+# Print the value of one labeled decision field, or nothing. Labels are
+# matched at the start of a segment, so a URL or prose mention cannot
+# masquerade as a field.
+discord_decision_field() { # <record> <Label:> -> value or empty
+  local record=$1 want=$2
+  printf '%s' "$record" | awk -v want="$want" '
+    {
+      gsub(/Outcome:|Consequence:|Options:|Recommendation:|Reply:|Details:/, "\n&")
+      n = split($0, lines, "\n")
+      for (i = 1; i <= n; i++) {
+        if (index(lines[i], want) == 1) {
+          v = substr(lines[i], length(want) + 1)
+          sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+          print v; exit
+        }
+      }
+    }'
+}
+
+# Strip every internal metadata class from a value: bracketed key/at/corr
+# tokens, the tap's old "(decision: ...)" suffix, findings/file addressing,
+# absolute filesystem paths (including after an = or :), and the pipeline
+# labels. Whitespace is collapsed.
+_discord_decision_strip_metadata() { # <text> -> cleaned text
+  printf '%s' "$1" | tr '\n\t\r' '   ' \
+    | sed -E \
+        -e 's/\[[A-Za-z_][A-Za-z0-9_]*=[^]]*\]//g' \
+        -e 's/[[:space:]]*:[[:space:]]*:/:/g' \
+        -e 's#https?://[^[:space:]]+##g' \
+        -e 's/\(decision:[^)]*\)//g' \
+        -e 's/(^|[[:space:]=:])findings=[^[:space:]]*/\1/g' \
+        -e 's/(^|[[:space:]=:])file=[^[:space:]]*/\1/g' \
+        -e 's:(^|[[:space:]=:])/(Users|tmp|private|var|home|root|opt|srv|etc)/[^[:space:]]*:\1:g' \
+        -e 's/(ask-user|needs-decision)//g' \
+    | sed -e 's/  */ /g; s/^ *//; s/ *$//'
+}
+
+# Print the plain human clause of a decision record with every internal
+# metadata class stripped, plus the leading status verb and a leading
+# task-id prefix. Used only when the record carries no explicit Outcome
+# field.
+discord_decision_clause() { # <record> -> plain clause
+  local out
+  out=$(printf '%s' "$1" | tr '\n\t\r' '   ' \
+    | sed -E -e 's/^[[:space:]]*(needs-decision|blocked|blocker)[[:space:]]*:?[[:space:]]*//')
+  out=$(_discord_decision_strip_metadata "$out")
+  printf '%s' "$out" \
+    | sed -E -e 's/^[A-Za-z0-9][A-Za-z0-9._-]*:[[:space:]]*//' \
+    | sed -E -e 's/^[[:space:]]*:?[[:space:]]*//' \
+    | sed -e 's/  */ /g; s/^ *//; s/ *$//'
+}
+
+# Render a decision record as the fixed-order phone message. Idempotent: an
+# already-rendered body (one carrying the reply line) passes through
+# untouched.
+discord_decision_message() { # <record> [<link>] -> message on stdout
+  local record=$1 link=${2:-} outcome consequence options recommendation details clause urls reply
+  case "$record" in
+    "Outcome:"*"Reply to this message with your answer."*)
+      printf '%s' "$record"
+      if [ -n "$link" ]; then
+        case "$record" in *"$link"*) ;; *) printf '\nDetails: %s' "$link" ;; esac
+      fi
+      return 0
+      ;;
+  esac
+  outcome=$(discord_decision_field "$record" "Outcome:")
+  consequence=$(discord_decision_field "$record" "Consequence:")
+  options=$(discord_decision_field "$record" "Options:")
+  recommendation=$(discord_decision_field "$record" "Recommendation:")
+  details=$(discord_decision_field "$record" "Details:")
+  clause=$(discord_decision_clause "$record")
+  [ -z "$outcome" ] || outcome=$(_discord_decision_strip_metadata "$outcome")
+  [ -z "$consequence" ] || consequence=$(_discord_decision_strip_metadata "$consequence")
+  [ -z "$options" ] || options=$(_discord_decision_strip_metadata "$options")
+  [ -z "$recommendation" ] || recommendation=$(_discord_decision_strip_metadata "$recommendation")
+  [ -z "$details" ] || details=$(_discord_decision_strip_metadata "$details")
+  if [ -z "$outcome" ]; then
+    case "$record" in
+      *ask-user*|*findings=*) outcome="A validation review paused the work and needs your decision." ;;
+      *) outcome=$clause ;;
+    esac
+  fi
+  [ -n "$outcome" ] || outcome="A decision is waiting for your call."
+  if [ -z "$consequence" ]; then
+    case "$record" in
+      *ask-user*|*findings=*) consequence="The work stays paused until you decide." ;;
+      *) consequence="The work waits on your answer." ;;
+    esac
+  fi
+  if [ -z "$options" ]; then
+    case "$clause" in
+      *" or "*)
+        options="${clause%% or *}; ${clause#* or }"
+        options=$(printf '%s' "$options" | sed -E 's/^[[:space:]]*(please[[:space:]]+)?(pick|choose|select)[[:space:]]+//')
+        ;;
+      *) options="Approve; Reject" ;;
+    esac
+  fi
+  [ -n "$recommendation" ] || recommendation="Reply with your choice."
+  # Keep full external links (and only links), de-duplicated; never a
+  # filesystem path.
+  urls=$(printf '%s %s' "$record" "$link" | grep -oE 'https?://[^[:space:]]+' | awk '!seen[$0]++' | tr '\n' ' ' | sed -e 's/ *$//') || urls=
+  # Full external links win; a labeled Details field is the fallback.
+  if [ -n "$urls" ]; then details=$urls; fi
+  reply="Reply to this message with your answer."
+  outcome=$(printf '%s' "$outcome" | jq -Rr 'if length > 200 then .[0:197] + "..." else . end')
+  consequence=$(printf '%s' "$consequence" | jq -Rr 'if length > 200 then .[0:197] + "..." else . end')
+  options=$(printf '%s' "$options" | jq -Rr 'if length > 240 then .[0:237] + "..." else . end')
+  recommendation=$(printf '%s' "$recommendation" | jq -Rr 'if length > 200 then .[0:197] + "..." else . end')
+  printf 'Outcome: %s\nConsequence: %s\nOptions: %s\nRecommendation: %s\nReply: %s' \
+    "$outcome" "$consequence" "$options" "$recommendation" "$reply"
+  [ -z "$details" ] || printf '\nDetails: %s' "$details"
+  printf '\n'
 }
 
 discord_env_file() {

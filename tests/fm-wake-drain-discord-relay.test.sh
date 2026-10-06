@@ -209,8 +209,44 @@ test_non_captain_statuses_never_notify() {
   pass "working, resolved, paused, keyless blockers, and routine or silent rows never notify"
 }
 
+test_relayed_decision_matches_presentation_contract() {
+  local dir
+  dir=$(make_relay_case decision-presentation)
+  # Append before the Discord env exists so only the drain relay can send:
+  # this isolates the relay seam from the append-time tap.
+  relsq "$dir" ship-p 'needs-decision [key=pres-key]: Outcome: The store choice is open. Consequence: Work waits. Options: A; B Recommendation: A https://example.com/pr/42 findings=ci-1,ci-2 file=/Users/dev/run/nm-findings.txt'
+  write_discord_env "$dir"
+
+  run_drain "$dir" "$dir/out" || fail "drain failed on a rich decision row"
+  grep -F 'BRANCH OUTCOMES' "$dir/out" >/dev/null || fail "branch outcomes section missing"
+  wait_for_posts "$dir" 1 || fail "rich decision row did not relay"
+  [ "$(post_count "$dir")" = 1 ] || fail "rich decision row relayed $(post_count "$dir") times, expected once"
+  grep -F 'decision-ship-p-pres-key' "$dir/state/.wake-drain-notify.log" >/dev/null \
+    || fail "relayed decision did not keep the append path's decision key marker"
+  python3 - "$dir/posts" <<'PY' || fail "relayed decision violated the presentation contract"
+import glob, json, sys
+posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post.*")]
+assert len(posts) == 1, posts
+c = posts[0]
+for label in ("Outcome:", "Consequence:", "Options:", "Recommendation:", "Reply:"):
+    assert label in c, "relayed decision is missing " + label
+assert "Reply to this message with your answer." in c, "relayed decision is missing the phone reply path"
+assert "https://example.com/pr/42" in c, "full link did not survive the relay"
+for leaked in ("pres-key", "ship-p", "[key=", "findings=ci-1", "/Users/dev", "file=", "ask-user"):
+    assert leaked not in c, "relay leaked decision metadata: " + leaked
+PY
+
+  # The presentation refactor must not move the dedup identity: a repeat
+  # sighting shares the decision key marker and stays silent.
+  run_drain "$dir" "$dir/out2" || fail "second drain failed"
+  sleep 0.5
+  [ "$(post_count "$dir")" = 1 ] || fail "re-presented decision double-posted after the refactor"
+  pass "a relayed decision uses the same phone contract and dedup identity"
+}
+
 test_keyed_open_decision_notifies_and_unkeyed_stays_residual
 test_store_rows_relay_with_store_keys_once
 test_failed_send_releases_marker_for_a_later_drain
 test_widened_completion_shapes_relay
 test_non_captain_statuses_never_notify
+test_relayed_decision_matches_presentation_contract

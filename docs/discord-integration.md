@@ -188,6 +188,22 @@ this integration.
   three event classes: a decision waiting on the captain, finished work
   (including review and merge calls), and blockers or failures.
   Routine progress never sends.
+  A decision-class message is rendered by the shared decision contract in
+  `bin/fm-discord-lib.sh` as `Outcome:`, `Consequence:`, `Options:`,
+  `Recommendation:`, and `Reply:` lines, in that order, with any full
+  external links preserved. Internal metadata - task ids, decision keys,
+  finding ids, filesystem paths, and pipeline labels (`needs-decision`,
+  `ask-user`) - never appears in the visible body; the decision key selects
+  the dedup marker and is never concatenated into the text. A labeled
+  record (`Outcome:` ...) keeps its own fields; a legacy unlabeled status
+  line is translated into the same shape by stripping those metadata
+  classes rather than forwarded. The `Reply:` line names the existing
+  answer path: the captain replies to the decision-request message, which
+  arrives as a normal `discord-message` wake. Completions and blockers keep
+  their existing plain-outcome-plus-link shape and are not wrapped.
+  The branch append path, the tap, and the drain relay all render through
+  that one contract, and the render is idempotent so applying it twice at
+  those seams does not double-wrap.
   The production caller is the outcome-store append: `bin/fm-branch-outcome.sh append` invokes the tap once for every `captain`-verdict row whose summary classifies into one of the three classes, with an explicit class, a stable logical event key, and sanitized text; `routine` text never notifies, whatever the verdict. The append starts that send detached from its exit path — the row and its seq are written first and append exits without waiting on Discord — so caller bookkeeping and queued deliveries never stall on network latency; the run's one result line is appended to `state/.branch-outcome-notify.log`.
   A decision row carrying a stated `[key=...]` token (read by the status fold's own key grammar) notifies under `decision-<task>-<key>` so re-handled rows for one still-open decision share a marker; every other row notifies under the content-derived logical key `branch-outcome-<task>-<class>-<summary-hash>`, so the same recurring event shares one marker across re-wakes and re-reports and never double-pings.
   A `resolved` or `captain-held` status line carrying a decision's key releases that marker when the decision closes (any verdict, including `routine`), so the next keyed decision occurrence for the task pings again — this also covers a closing outcome summary that never restates the key, since the release consults the status fold, not just that summary. A detached send reconciles its marker against the store and the fold before and after delivery, so a delayed send neither strands a stale marker behind a close nor double-pings a repeat.
@@ -195,7 +211,7 @@ this integration.
   Nothing gates on away or quiet posture, presence, or the gateway websocket, so decisions and blockers still ping while the captain is away.
   The branch append is the authoritative first delivery; the wake drain's presentation is its retry and reconciliation seam. After the drain has selected a captain-relevant item for presentation it relays the same logical event through the tap, deriving the class, key, and text with `bin/fm-branch-outcome.sh notify-event` rather than reimplementing them, and fires the tap detached so drain latency never depends on Discord; one result line per attempt goes to `state/.wake-drain-notify.log`.
   A `BRANCH OUTCOMES` captain row is a store record, so its derived key is exactly the append path's and a re-presentation, or a row whose append-time send failed, is a silent dedup or a retry, never a second ping.
-  A keyed `OPEN DECISIONS` decision relays under `decision-<task>-<key>`, the same marker a covering branch row uses when its summary states that key.
+  A keyed `OPEN DECISIONS` decision relays under `decision-<task>-<key>`, the same marker a covering branch row uses when its summary states that key. A relayed decision reuses the branch render, so the phone sees the same outcome/consequence/options/recommendation/reply contract with no task-id prefix and no internal identifiers.
   Only items the section already deems captain-relevant relay: routine or silent rows, `working`, `resolved`, `captain-held`, `paused`, and `RECORD DIVERGENCE` prose never notify, and nothing gates on away or quiet posture, presence, or the gateway websocket.
   A `STATUS OUTCOME BACKSTOP` sighting, or any unkeyed decision, has no event identity the branch append path is proven to reproduce, so it is not relayed under a second, incompatible key; that residual gap is logged as such in `state/.wake-drain-notify.log` rather than pinged.
   A relayed send that fails releases its marker exactly as the append path's does, so the next drain retries.
