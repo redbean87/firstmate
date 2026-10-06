@@ -29,7 +29,7 @@
 # this host's Firstmate copy happens to hold. Omitting <parent-commit> targets
 # this host's own code-root HEAD instead, which is what /updatefirstmate wants
 # after it has refreshed that
-# code root from origin. Because this home is a standalone clone, the target
+# code root from that host's preferred remote. Because this home is a standalone clone, the target
 # commit is imported here first and the fast-forward itself is the shared one in
 # bin/fm-ff-lib.sh, so the clean, ancestry, and branch guards have a single owner.
 # A private parent-route state directory stores only the remote secondmate
