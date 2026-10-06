@@ -111,7 +111,7 @@ relsq() {  # <dir> <task> <summary>
   # exits before any marker claim or send), leaving the drain relay as the
   # test's only sender. Scoped to this one command so the drain still reads
   # the file.
-  DISCORD_BOT_TOKEN= FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" "$OUTCOMES" append \
+  DISCORD_BOT_TOKEN='' FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" "$OUTCOMES" append \
     --task "$2" --verdict captain --summary "$3" >/dev/null
 }
 
