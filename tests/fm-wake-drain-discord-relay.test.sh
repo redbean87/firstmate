@@ -102,7 +102,16 @@ wait_for_log() {  # <dir> <pattern>
 }
 
 relsq() {  # <dir> <task> <summary>
-  FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" "$OUTCOMES" append \
+  # The append path fires its Discord tap in the background, and the tap
+  # resolves configuration at execution time with env-wins-over-file
+  # semantics. Without this override the tap would observe the .env file
+  # the test writes next and race the drain relay for the same dedup
+  # marker; the drain would then silently skip and no post would land.
+  # A set-but-empty token wins over the file and keeps the tap inert (it
+  # exits before any marker claim or send), leaving the drain relay as the
+  # test's only sender. Scoped to this one command so the drain still reads
+  # the file.
+  DISCORD_BOT_TOKEN= FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" "$OUTCOMES" append \
     --task "$2" --verdict captain --summary "$3" >/dev/null
 }
 
