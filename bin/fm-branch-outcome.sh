@@ -990,7 +990,7 @@ case "$CMD" in
     # The relay consumes one tab-separated line, and a rendered decision
     # message is multi-line, so encode newlines as a literal \n for the wire
     # and let the tap decode them back into real line breaks before sending.
-    NOTIFY_TEXT=$(printf '%s' "$NOTIFY_TEXT" | awk '{ if (NR > 1) printf "\\n"; printf "%s", $0 }')
+    NOTIFY_TEXT=$(printf '%s' "$NOTIFY_TEXT" | sed 's/\\/\\\\/g' | awk '{ if (NR > 1) printf "\\n"; printf "%s", $0 }')
     printf '%s\t%s\t%s\t%s\n' "$NOTIFY_CLASS" "$NOTIFY_EVENT" "$NOTIFY_TEXT" "$NOTIFY_DKEY"
     ;;
   list)
