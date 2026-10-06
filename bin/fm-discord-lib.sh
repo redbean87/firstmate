@@ -185,7 +185,7 @@ discord_decision_message() { # <record> [<link>] -> message on stdout
     "Outcome:"*"Reply to this message with your answer."*)
       printf '%s' "$record"
       if [ -n "$link" ]; then
-        case "$record" in *"$link"*) ;; *) printf '\nDetails: %s' "$link" ;; esac
+        case "$record" in *"$link"*) ;; *) link=$(printf '%s' "$link" | jq -Rr 'if length > 500 then .[0:497] + "..." else . end'); printf '\nDetails: %s' "$link" ;; esac
       fi
       return 0
       ;;
@@ -234,6 +234,7 @@ discord_decision_message() { # <record> [<link>] -> message on stdout
   consequence=$(printf '%s' "$consequence" | jq -Rr 'if length > 200 then .[0:197] + "..." else . end')
   options=$(printf '%s' "$options" | jq -Rr 'if length > 240 then .[0:237] + "..." else . end')
   recommendation=$(printf '%s' "$recommendation" | jq -Rr 'if length > 200 then .[0:197] + "..." else . end')
+  [ -z "$details" ] || details=$(printf '%s' "$details" | jq -Rr 'if length > 500 then .[0:497] + "..." else . end')
   printf 'Outcome: %s\nConsequence: %s\nOptions: %s\nRecommendation: %s\nReply: %s' \
     "$outcome" "$consequence" "$options" "$recommendation" "$reply"
   [ -z "$details" ] || printf '\nDetails: %s' "$details"

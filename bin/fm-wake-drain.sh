@@ -350,7 +350,7 @@ EOF
   # notify-event encodes a rendered multi-line decision body as a literal
   # \n so it survives the one-line tab-separated relay protocol; decode it
   # back to real line breaks before the tap sends.
-  case "$class" in decision) text=$(printf '%b' "$text") ;; esac
+  case "$class" in decision) text=${text//\\n/$'\n'} ;; esac
   if [ "$source" != store ]; then
     case "$event" in
       decision-*) ;;
