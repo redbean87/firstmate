@@ -1,0 +1,5 @@
+Outcome: use C:\next or D:\temp
+Consequence: waits on you.
+Options: C; D
+Recommendation: pick C
+Reply: Reply to this message with your answer.

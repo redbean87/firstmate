@@ -1,0 +1,6 @@
+Outcome: The service API shape is unresolved.
+Consequence: The build cannot start.
+Options: REST; RPC
+Recommendation: REST
+Reply: Reply to this message with your answer.
+Details: https://github.com/example/repo/pull/42

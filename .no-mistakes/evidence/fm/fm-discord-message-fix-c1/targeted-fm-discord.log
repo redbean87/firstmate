@@ -1,0 +1,19 @@
+ok - oauth state validation
+ok - callback persistence verify status
+ok - incoming routing authorization self-filter guild guard
+ok - gateway wake durability and REST failure visibility
+ok - gateway command wakes drain with verbs
+ok - outbound send chunking numbering reply
+fm-discord-poll: permission failure HTTP 403 for channel c1
+ok - api errors rate-limit permission failures
+ok - slash commands verification enforcement
+ok - disconnect reconnect
+ok - gateway honesty intents dotenv
+ok - watcher arming validation opt-out
+ok - configuration validation
+ok - relay-style outbound-only reply path
+ok - outbound tap send-once owner-mention routine-silent
+ok - branch-outcome wiring notifies three classes once routine-silent posture-free
+ok - shared classifier widens completions and keeps routine and failure classes
+ok - decision messages are phone-readable, metadata-free, and keep full links
+ok - fm-discord

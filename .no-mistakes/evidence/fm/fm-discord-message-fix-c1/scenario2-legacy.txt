@@ -1,0 +1,5 @@
+Outcome: A validation review paused the work and needs your decision.
+Consequence: The work stays paused until you decide.
+Options: Approve; Reject
+Recommendation: Reply with your choice.
+Reply: Reply to this message with your answer.

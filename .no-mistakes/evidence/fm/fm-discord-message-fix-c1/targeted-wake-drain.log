@@ -1,0 +1,6 @@
+ok - a keyed open decision pings under its decision key; an unkeyed one is a logged residual gap
+ok - store captain rows relay under the append path's own keys and only once
+ok - a failed relay releases its marker so the next drain retries
+ok - widened completion summaries relay once through the drain with completion keys
+ok - working, resolved, paused, keyless blockers, and routine or silent rows never notify
+ok - a relayed decision uses the same phone contract and dedup identity

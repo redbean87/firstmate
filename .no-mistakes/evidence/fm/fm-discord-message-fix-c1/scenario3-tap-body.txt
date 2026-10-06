@@ -1,0 +1,8 @@
+{
+  "content": "<@u9> Outcome: The service API shape is unresolved.\nConsequence: The build cannot start.\nOptions: REST; RPC\nRecommendation: REST\nReply: Reply to this message with your answer.\nDetails: https://github.com/example/repo/pull/42",
+  "allowed_mentions": {
+    "users": [
+      "u9"
+    ]
+  }
+}

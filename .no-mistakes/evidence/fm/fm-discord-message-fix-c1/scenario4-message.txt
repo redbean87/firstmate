@@ -1,0 +1,5 @@
+Outcome: A decision is waiting for your call.
+Consequence: The work waits on your answer.
+Options: Approve; Reject
+Recommendation: Reply with your choice.
+Reply: Reply to this message with your answer.
