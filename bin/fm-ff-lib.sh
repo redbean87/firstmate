@@ -6,8 +6,9 @@
 # clean fast-forward, never forcing, merging, or stashing" used by every sync
 # path:
 #   - /updatefirstmate (bin/fm-update.sh) pulls the primary from `upstream`
-#     (commit-ish `upstream/<default>`, fetched by the caller); secondmate
-#     homes still use base_mode "origin".
+#     (commit-ish `upstream/<default>`, fetched by the caller), falling back to
+#     base_mode "origin" when no upstream remote exists or its fetch fails;
+#     secondmate homes still use base_mode "origin".
 #   - the local-HEAD secondmate sync (bin/fm-spawn.sh on launch, bin/fm-bootstrap.sh
 #     on startup) follows the PRIMARY checkout's current default-branch commit:
 #     base_mode is that local commit, with NO fetch and no origin dependency.
