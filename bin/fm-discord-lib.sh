@@ -129,7 +129,7 @@ discord_classify_notify_text() { # <text> -> decision|blocker|completion|routine
 # masquerade as a field.
 discord_decision_field() { # <record> <Label:> -> value or empty
   local record=$1 want=$2
-  printf '%s' "$record" | awk -v want="$want" '
+  printf '%s' "$record" | tr '\n' ' ' | awk -v want="$want" '
     {
       gsub(/Outcome:|Consequence:|Options:|Recommendation:|Reply:|Details:/, "\n&")
       n = split($0, lines, "\n")
