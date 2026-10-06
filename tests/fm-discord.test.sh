@@ -440,8 +440,12 @@ FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" -
 python3 - "$FAKE_POST_DIR/post-0.json" <<'PY' || fail "tap message contract violated"
 import json, sys
 body = json.load(open(sys.argv[1]))
-assert "<@u9>" in body["content"], "owner mention pings the phone"
-assert "nm-1-x" in body["content"], "decision key rides along"
+content = body["content"]
+assert "<@u9>" in content, "owner mention pings the phone"
+assert "nm-1-x" not in content, "decision key must never be rendered"
+for label in ("Outcome:", "Consequence:", "Options:", "Recommendation:", "Reply:"):
+    assert label in content, "decision message is missing " + label
+assert "Reply to this message" in content, "decision message names the phone reply path"
 assert body.get("allowed_mentions", {}).get("users") == ["u9"], "owner mention must parse so the phone pings"
 PY
 FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" --event tap-r1 --wake-line "heartbeat: all quiet" --text "routine progress" >/dev/null || fail "routine wake failed"
@@ -449,6 +453,14 @@ FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" -
 FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" --event tap-b1 --wake-line "task failed checks" --text "Build broke" --link "https://example.com/pr/5" >/dev/null || fail "tap blocker send failed"
 FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" --event tap-c1 --wake-line "review ready for PR" --text "Fix ready for review" --link "https://example.com/pr/6" >/dev/null || fail "tap completion send failed"
 [ "$(find "$FAKE_POST_DIR" -maxdepth 1 -type f -name 'post-*.json' | wc -l | tr -d ' ')" = 3 ] || fail "blocker and completion classes must each send once"
+python3 - "$FAKE_POST_DIR" <<'PY' || fail "completions and blockers must not gain decision fields"
+import glob, json, sys
+posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post-*.json")]
+for needle in ("https://example.com/pr/5", "https://example.com/pr/6"):
+    hit = [c for c in posts if needle in c]
+    assert len(hit) == 1, "plain outcome + link must survive unchanged"
+    assert "Outcome:" not in hit[0], "completion/blocker must not be rendered as a decision"
+PY
 # Failed sends release the dedup marker so a retry can still deliver.
 export FAKE_SEND_CODE=403
 FM_HOME="$taphome" PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-discord-notify.sh" --event tap-retry --class blocker --text "Outage" 2>/dev/null && fail "failed send must exit non-zero"
@@ -510,7 +522,14 @@ python3 - "$FAKE_POST_DIR" <<'PY' || fail "wired message contract violated"
 import glob, json, sys
 posts = [json.load(open(p))["content"] for p in glob.glob(sys.argv[1] + "/post-*.json")]
 assert any("<@u9>" in c for c in posts), "owner mention pings the phone"
-assert any("wire-pick" in c for c in posts), "decision key rides along"
+assert not any("wire-pick" in c for c in posts), "decision key must never be rendered"
+decisions = [c for c in posts if "Outcome:" in c]
+assert decisions, "a rendered decision message must reach the phone"
+for c in decisions:
+    for label in ("Outcome:", "Consequence:", "Options:", "Recommendation:", "Reply:"):
+        assert label in c, "wired decision message is missing " + label
+    for leaked in ("wire-pick", "wire-ship", "[key=", "ask-user", "/Users/"):
+        assert leaked not in c, "decision metadata leaked to the phone: " + leaked
 PY
 wire_append_wait "$TMP_ROOT/wire.last" --task wire-ship --verdict captain --summary 'done: built under /tmp/scratch/wire/thing, all green' >/dev/null || fail "path summary append failed"
 python3 - "$FAKE_POST_DIR" <<'PY' || fail "wired text must drop scratch paths"
@@ -609,6 +628,10 @@ wire_append --task wire-race --verdict captain --summary 'needs-decision [key=ra
 wire_append --task wire-race --verdict routine --summary 'resolved [key=race-key]: answered inline' >/dev/null 2>&1 || fail "racing close append failed"
 wire_wait_log "$prev" "$TMP_ROOT/wire.last" || fail "delayed send never recorded its result"
 [ "$(wire_posts)" = "$((before + 1))" ] || fail "delayed decision send must still deliver its episode ping"
+# The detached send reconciles its marker after delivery, so wait for that
+# cleanup to settle before asserting it did not strand the marker.
+_wait=0
+while [ -e "$wirehome/state/discord-notify/decision-wire-race-race-key" ] && [ "$_wait" -lt 100 ]; do sleep 0.05; _wait=$((_wait + 1)); done
 [ -e "$wirehome/state/discord-notify/decision-wire-race-race-key" ] && fail "delayed send must not strand a stale marker behind the close"
 wire_append_wait "$TMP_ROOT/wire.last" --task wire-race --verdict captain --summary 'needs-decision [key=race-key]: pick again' >/dev/null || fail "post-race reopen append failed"
 [ "$(wire_posts)" = "$((before + 2))" ] || fail "reopen after a delayed send must ping again"
@@ -698,5 +721,40 @@ assert_class routine "the report has no recommendation"
 assert_class blocker "the retro mentions a failure mode"
 assert_class blocker "task failed checks"
 pass "shared classifier widens completions and keeps routine and failure classes"
+
+# 15. Decision presentation contract: the phone message is rendered from the
+# record as outcome, consequence, options, recommendation, and the reply
+# path; internal ids, keys, finding ids, paths, and pipeline labels never
+# appear, and full links survive. Legacy unlabeled records are translated,
+# not forwarded, and the render is idempotent so every composition site can
+# share it.
+decision_render() { # <record> [<link>]
+  FM_HOME="$classify_home" bash -c '. "$0/bin/fm-discord-lib.sh" && discord_decision_message "$1" "${2:-}"' "$ROOT" "$1" "${2:-}"
+}
+assert_decision_contract() { # <record> [<link>]
+  local out=$1 label
+  out=$(decision_render "$1" "${2:-}")
+  for label in 'Outcome:' 'Consequence:' 'Options:' 'Recommendation:' 'Reply:'; do
+    assert_contains "$out" "$label" "decision render is missing $label"
+  done
+  assert_contains "$out" 'Reply to this message with your answer.' "decision render is missing the phone reply path"
+}
+rich='needs-decision [at=1] [key=nm-run-step]: Outcome: The service API shape is unresolved. Consequence: The build cannot start. Options: REST; RPC Recommendation: REST https://github.com/redbean87/firstmate/pull/42 findings=ci-1,ci-2 file=/Users/dev/run/nm-run-findings.txt'
+rich_out=$(decision_render "$rich")
+assert_decision_contract "$rich"
+assert_contains "$rich_out" 'The service API shape is unresolved.' "a labeled outcome is kept"
+assert_contains "$rich_out" 'https://github.com/redbean87/firstmate/pull/42' "a full link survives unchanged"
+for leak in 'nm-run-step' 'ci-1' '[key=' 'ask-user' 'needs-decision' '/Users/dev' 'file=' 'findings='; do
+  assert_not_contains "$rich_out" "$leak" "decision render leaked metadata class: $leak"
+done
+legacy='needs-decision [at=1] [key=nm-run-ci]: ask-user findings=ci-1,ci-2 file=/Users/dev/ship/nm-run-findings.txt (decision: nm-run-ci)'
+legacy_out=$(decision_render "$legacy")
+assert_decision_contract "$legacy"
+for leak in 'nm-run-ci' 'ci-1' '[key=' 'ask-user' 'needs-decision' '/Users/dev' '(decision:'; do
+  assert_not_contains "$legacy_out" "$leak" "legacy decision leaked metadata class: $leak"
+done
+again=$(decision_render "$rich_out")
+[ "$again" = "$rich_out" ] || fail "decision rendering must be idempotent across composition sites"
+pass "decision messages are phone-readable, metadata-free, and keep full links"
 
 pass "fm-discord"

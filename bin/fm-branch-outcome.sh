@@ -561,8 +561,16 @@ outcome_notify_key() { # <task> <class> <decision-key> <summary> -> event key
 
 # Concise phone-safe text: collapse whitespace, drop absolute scratch paths,
 # cap length. Secret shapes are additionally redacted by the tap itself; the
-# branch owns keeping internal wording out of the summary it records.
+# branch owns keeping internal wording out of the summary it records. A
+# decision summary is instead rendered through the shared decision-message
+# contract (bin/fm-discord-lib.sh), which strips every internal metadata
+# class and emits outcome, consequence, options, recommendation, and the
+# reply path; the tap and the drain relay share that same renderer.
 outcome_notify_text() { # <summary> -> text on stdout
+  if [ "$(outcome_notify_class "$1")" = decision ]; then
+    discord_decision_message "$1"
+    return 0
+  fi
   printf '%s' "$1" | tr '\n\t\r' '   ' \
     | sed -E -e 's:(^| )/(Users|tmp|private|var|home|root|opt|srv|etc)/[^ ]*::g' \
     | sed -e 's/  */ /g; s/^ *//; s/ *$//' \
@@ -979,6 +987,10 @@ case "$CMD" in
     fi
     NOTIFY_EVENT=$(outcome_notify_key "$NOTIFY_TASK" "$NOTIFY_CLASS" "$NOTIFY_DKEY" "$NOTIFY_SUMMARY")
     NOTIFY_TEXT=$(outcome_notify_text "$NOTIFY_SUMMARY" 2>/dev/null) || NOTIFY_TEXT=''
+    # The relay consumes one tab-separated line, and a rendered decision
+    # message is multi-line, so encode newlines as a literal \n for the wire
+    # and let the tap decode them back into real line breaks before sending.
+    NOTIFY_TEXT=$(printf '%s' "$NOTIFY_TEXT" | sed 's/\\/\\\\/g' | awk '{ if (NR > 1) printf "\\n"; printf "%s", $0 }')
     printf '%s\t%s\t%s\t%s\n' "$NOTIFY_CLASS" "$NOTIFY_EVENT" "$NOTIFY_TEXT" "$NOTIFY_DKEY"
     ;;
   list)

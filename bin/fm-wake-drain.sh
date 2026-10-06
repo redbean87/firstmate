@@ -347,6 +347,10 @@ $plan
 EOF
   case "$class" in decision|completion|blocker) ;; *) return 0 ;; esac
   case "$event" in ''|.*|*[!A-Za-z0-9._-]*) return 0 ;; esac
+  # notify-event encodes a rendered multi-line decision body as a literal
+  # \n so it survives the one-line tab-separated relay protocol; decode it
+  # back to real line breaks before the tap sends.
+  text=$(printf '%s' "$text" | awk '{ out=""; i=1; n=length($0); while (i <= n) { c=substr($0, i, 1); if (c == "\\" && i < n) { nx=substr($0, i + 1, 1); if (nx == "\\") { out=out "\\"; i+=2; continue } ; if (nx == "n") { out=out "\n"; i+=2; continue } } ; out=out c; i++ } ; printf "%s", out }')
   if [ "$source" != store ]; then
     case "$event" in
       decision-*) ;;
@@ -356,7 +360,14 @@ EOF
         return 0
         ;;
     esac
-    [ -n "$text" ] && text="$task: $text"
+    # The decision text is already a rendered, task-id-free decision message;
+    # prefixing the task id here would reintroduce the internal identifier the
+    # presentation contract forbids. Only non-decision derived rows keep the
+    # task prefix that names which work the update concerns.
+    case "$class" in
+      decision) ;;
+      *) [ -n "$text" ] && text="$task: $text" ;;
+    esac
   fi
   [ -n "$text" ] || text="update on $task"
   {
