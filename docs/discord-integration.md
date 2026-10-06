@@ -190,8 +190,8 @@ this integration.
   Routine progress never sends.
   A decision-class message is rendered by the shared decision contract in
   `bin/fm-discord-lib.sh` as `Outcome:`, `Consequence:`, `Options:`,
-  `Recommendation:`, and `Reply:` lines, in that order, with any full
-  external links preserved. Internal metadata - task ids, decision keys,
+  `Recommendation:`, and `Reply:` lines, in that order, plus an optional
+  `Details:` line carrying de-duplicated full external links (or the labeled Details fallback), each field length-capped. Internal metadata - task ids, decision keys,
   finding ids, filesystem paths, and pipeline labels (`needs-decision`,
   `ask-user`) - never appears in the visible body; the decision key selects
   the dedup marker and is never concatenated into the text. A labeled
