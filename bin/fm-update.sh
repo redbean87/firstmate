@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Self-update a running firstmate and its secondmates to the latest upstream.
+# Self-update a running firstmate and its secondmates to the latest update source.
 #
 # Mechanical half of the /updatefirstmate skill. Fast-forwards the running
 # firstmate repo's default branch from `upstream` (the official repository;
-# `origin` is this fleet's fork), then fast-forwards every
+# `origin` is this fleet's fork), falling back to `origin` when no upstream
+# remote exists or its fetch fails, then fast-forwards every
 # registered secondmate home. Local homes are treehouse worktrees or standalone
 # clones; remote routes update their configured code root on that host and then
 # fast-forward the persistent home to that root. FAST-FORWARD ONLY, exactly like
@@ -20,8 +21,9 @@
 # any other worktree's checkout or the shared `main` branch.
 #
 # The fast-forward mechanics live in bin/fm-ff-lib.sh (commit-ish base
-# `upstream/<default>` here; the lib's origin fetch mode is reserved for
-# secondmate homes, whose own `origin` remote is their source);
+# `upstream/<default>` on the preferred path and the lib's origin fetch mode
+# on the fallback path; that same origin mode serves secondmate homes, whose
+# own `origin` remote is their source);
 # the same library drives local and remote parent-targeted secondmate sync, so
 # there is one ff implementation, not several.
 #
