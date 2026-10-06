@@ -561,6 +561,106 @@ test_primary_update_rebinds_local_watch() {
   pass "T12 a self-update rebinds a locally armed watch on the primary"
 }
 
+# --- T13: an origin-only primary degrades to the origin path ----------------
+# The remote-host production case: a normally cloned Firstmate code root (for
+# example a remote secondmate host's code root) carries only `origin`, so the
+# updater must fall back to the documented origin path instead of reporting a
+# skip and leaving the host un-updatable.
+test_origin_only_primary_falls_back_to_origin() {
+  local w out rc
+  w=$(new_world t13)
+  git -C "$w/main" remote remove upstream
+  bump_origin "$w" instr
+
+  out=$(run_update "$w")
+  rc=$?
+
+  [ "$rc" -eq 0 ] || fail "origin-only update exited $rc, expected 0"
+  assert_contains "$out" "firstmate: updated " "an origin-only primary must fall back and advance"
+  assert_not_contains "$out" "firstmate: skipped" "a successful fallback must not report a skip"
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$(git -C "$w/main" rev-parse origin/main)" ] \
+    || fail "origin-only primary did not reach origin/main"
+  pass "T13 an origin-only primary falls back to origin and advances"
+}
+
+# --- T14: upstream stays preferred when it is the authoritative target ------
+test_upstream_stays_preferred_over_origin() {
+  local w out rc origin_tip
+  w=$(new_world t14)
+  # Split the two remotes so the selected target is observable: upstream is a
+  # separate, newer source while origin stays on the old tip.
+  git init -q --bare "$w/upstream.git"
+  git -C "$w/upstream.git" symbolic-ref HEAD refs/heads/main
+  git -C "$w/main" push -q "$w/upstream.git" main:main
+  git -C "$w/main" remote set-url upstream "$w/upstream.git"
+  git clone -q "$w/upstream.git" "$w/useed" 2>/dev/null
+  printf 'up\n' >> "$w/useed/AGENTS.md"
+  git -C "$w/useed" commit -qam upstream-only
+  git -C "$w/useed" push -q origin main
+  origin_tip=$(git -C "$w/main" rev-parse origin/main)
+
+  out=$(run_update "$w")
+  rc=$?
+
+  [ "$rc" -eq 0 ] || fail "upstream-preferred update exited $rc, expected 0"
+  assert_contains "$out" "firstmate: updated " "the preferred upstream path still advances"
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$(git -C "$w/main" rev-parse upstream/main)" ] \
+    || fail "primary did not advance to upstream/main"
+  [ "$(git -C "$w/main" rev-parse HEAD)" != "$origin_tip" ] \
+    || fail "primary advanced to origin instead of the newer upstream"
+  pass "T14 upstream remains preferred over origin when both exist"
+}
+
+# --- T15: a failed upstream fetch falls back, it does not terminate ---------
+test_upstream_fetch_failure_falls_back_to_origin() {
+  local w out rc
+  w=$(new_world t15)
+  # Keep the upstream remote but point it at an unreachable path so its fetch
+  # fails; origin still holds a real newer commit to advance to.
+  git -C "$w/main" remote set-url upstream "$w/missing-upstream.git"
+  bump_origin "$w" instr
+
+  out=$(run_update "$w")
+  rc=$?
+
+  [ "$rc" -eq 0 ] || fail "fetch-failure fallback exited $rc, expected 0"
+  assert_contains "$out" "firstmate: updated " "a failed upstream fetch must fall back, not terminate"
+  assert_not_contains "$out" "firstmate: skipped" "the successful fallback must not report a skip"
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$(git -C "$w/main" rev-parse origin/main)" ] \
+    || fail "fetch-failure fallback did not reach origin/main"
+  pass "T15 a failed upstream fetch falls back to origin"
+}
+
+# --- T16: no usable remote reports a truthful skip, never a false success ---
+test_no_usable_remote_reports_skip() {
+  local w out rc
+  w=$(new_world t16)
+  git -C "$w/main" remote remove upstream
+  git -C "$w/main" remote remove origin
+
+  out=$(run_update "$w")
+  rc=$?
+
+  [ "$rc" -eq 0 ] || fail "unresolvable primary exited $rc, expected the established 0"
+  assert_contains "$out" "firstmate: skipped: no origin remote" "an unresolvable primary must report a skip"
+  assert_not_contains "$out" "firstmate: updated" "no remote must never report a false advance"
+  assert_not_contains "$out" "firstmate: already current" "no remote must never report a false current"
+  pass "T16 a primary with no usable remote reports a truthful skip"
+}
+
+# --- T17: an already-current fallback is current, not skipped ---------------
+test_origin_only_already_current() {
+  local w out
+  w=$(new_world t17)
+  git -C "$w/main" remote remove upstream
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "firstmate: already current" "an origin-only primary at origin/main is already current"
+  assert_not_contains "$out" "firstmate: skipped" "already-current fallback must not be reported as a skip"
+  pass "T17 an already-current origin-only primary reports already current"
+}
+
 test_updates_main_and_secondmate
 test_reread_gate_is_instruction_only
 test_bin_only_advance_restarts
@@ -577,5 +677,10 @@ test_firstmate_wrong_branch_skipped
 test_firstmate_detached_head_skipped
 test_unsafe_secondmate_home_skipped_before_git_update
 test_primary_update_rebinds_local_watch
+test_origin_only_primary_falls_back_to_origin
+test_upstream_stays_preferred_over_origin
+test_upstream_fetch_failure_falls_back_to_origin
+test_no_usable_remote_reports_skip
+test_origin_only_already_current
 
 echo "# all fm-update tests passed"

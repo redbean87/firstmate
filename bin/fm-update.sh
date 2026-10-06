@@ -92,14 +92,27 @@ fi
 
 reread_firstmate="no"
 # Fork layout: `upstream` is the official repository and `origin` is this
-# fleet's fork; the primary must advance from upstream, never the fork.
-# ff_target's fetch special-case is origin-only, so fetch upstream here and
-# hand it the fetched upstream/<default> ref as its commit-ish base. Same
-# guards as every other target: never force, merge, stash, or discard.
-if git -C "$FM_ROOT" fetch upstream --prune --quiet 2>/dev/null; then
+# fleet's fork; the primary PREFERS upstream over the fork whenever it can.
+# ff_target's fetch special-case is origin-only, so the upstream path fetches
+# upstream here and hands the fetched upstream/<default> ref as its commit-ish
+# base. Same guards as every other target: never force, merge, stash, or
+# discard.
+#
+# Not every host has an upstream remote. A normally cloned checkout - for
+# example a remote secondmate host's Firstmate code root, which is created by
+# the operator and never given a second remote - carries only `origin`, and its
+# own origin is its documented update source. So an absent upstream, or an
+# upstream fetch that fails (offline, moved, refused), falls back to the
+# documented origin path: ff_target's origin base mode fetches `origin` and
+# advances to origin/<default> under the identical guards. A successful
+# fallback therefore reports the same `firstmate: updated` / `firstmate:
+# already current` vocabulary as the preferred path, and only a genuinely
+# unresolvable remote reports a skip.
+if git -C "$FM_ROOT" remote get-url upstream >/dev/null 2>&1 \
+  && git -C "$FM_ROOT" fetch upstream --prune --quiet 2>/dev/null; then
   ff_target "$FM_ROOT" "firstmate" "upstream/$(default_branch "$FM_ROOT")" no no
 else
-  echo "firstmate: skipped: upstream fetch failed"
+  ff_target "$FM_ROOT" "firstmate" origin no no
 fi
 if [ "$FF_STATUS" = "updated" ]; then
   if [ -n "$FF_INSTR" ]; then
