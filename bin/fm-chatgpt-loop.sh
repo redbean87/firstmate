@@ -427,21 +427,29 @@ cmd_dispatch() {
   # reach fm-spawn as duplicate or disagreeing flags. Bridge lifecycle stays
   # Firstmate-owned: the worker environment never carries the bridge URL, and
   # nothing here starts, stops, or probes it.
-  local spawn_has_effort=0 spawn_effort="" expect_effort=0 effective_effort
+  local spawn_effort_count=0 spawn_effort="" expect_effort=0 effective_effort
   for a in "${spawn_args[@]}"; do
     if [ "$expect_effort" = 1 ]; then
       spawn_effort=$a; expect_effort=0; continue
     fi
     case "$a" in
-      --effort) spawn_has_effort=1; expect_effort=1 ;;
-      --effort=*) spawn_has_effort=1; spawn_effort=${a#--effort=} ;;
+      --effort) spawn_effort_count=$((spawn_effort_count + 1)); expect_effort=1 ;;
+      --effort=*) spawn_effort_count=$((spawn_effort_count + 1)); spawn_effort=${a#--effort=} ;;
     esac
   done
-  if [ "$spawn_has_effort" = 1 ] && [ -n "$effort" ]; then
+  if [ "$spawn_effort_count" -gt 1 ]; then
+    printf 'fm-chatgpt-loop: refusing dispatch: duplicate --effort in the spawn args; nothing launched, no state changed\n' >&2
+    return 2
+  fi
+  if [ "$expect_effort" = 1 ] || { [ "$spawn_effort_count" = 1 ] && [ -z "$spawn_effort" ]; }; then
+    printf 'fm-chatgpt-loop: refusing dispatch: empty --effort value in the spawn args; nothing launched, no state changed\n' >&2
+    return 2
+  fi
+  if [ "$spawn_effort_count" = 1 ] && [ -n "$effort" ]; then
     printf 'fm-chatgpt-loop: refusing dispatch: effort given both as dispatch --effort and in the spawn args; nothing launched, no state changed\n' >&2
     return 2
   fi
-  if [ "$spawn_has_effort" = 1 ]; then
+  if [ "$spawn_effort_count" = 1 ]; then
     effective_effort=$spawn_effort
   else
     [ -n "$effort" ] || effort=low
