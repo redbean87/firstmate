@@ -71,7 +71,8 @@
 # the spawn interface's own --effort. Exactly one --effort reaches fm-spawn:
 # the passthrough value is used when present, otherwise the dispatch selection
 # is appended, and supplying both at once is refused as a conflict before
-# launch.
+# launch. A duplicated or empty spawn-side --effort is refused before launch,
+# including a bare --effort with no usable value and an empty --effort= value.
 
 # The bridge keeps no conversation history keyed by thread id alone: every
 # consultation is one self-contained turn, so consult assembles prior context
