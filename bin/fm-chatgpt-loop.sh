@@ -2,9 +2,9 @@
 # fm-chatgpt-loop.sh - Firstmate-owned ChatGPT -> worker -> ChatGPT -> worker
 # orchestration state machine.
 # Usage: fm-chatgpt-loop.sh init --task ID --objective-file FILE [--context-file FILE] [--thread ID]
-#        fm-chatgpt-loop.sh consult --stage audit|plan --task ID
+#        fm-chatgpt-loop.sh consult --stage audit|plan [--findings-file FILE] --task ID
 #        fm-chatgpt-loop.sh dispatch --stage audit|plan [--effort E] --task ID -- <fm-spawn args>
-#        fm-chatgpt-loop.sh record-findings --task ID --file FILE
+#        fm-chatgpt-loop.sh record-findings --task ID [--file FILE]
 #        fm-chatgpt-loop.sh record-result --task ID --file FILE
 #        fm-chatgpt-loop.sh record-worker-failure --task ID --stage audit|plan --reason TEXT
 #        fm-chatgpt-loop.sh next-round --task ID
@@ -35,15 +35,44 @@
 #
 # State file: $FM_HOME/data/<task-id>/chatgpt-loop.json, one JSON object with
 # task_id, objective, context, thread, phase, iteration, audit_prompt,
-# audit_result, findings, plan, worker_result, last_error, and updated_at.
+# audit_result, findings, findings_source, worker_task, plan, worker_result,
+# last_error, and updated_at.
 # audit_prompt stores the banner-stripped ChatGPT-generated worker audit
 # prompt that audit dispatch steers; objective and context stay in state for
-# the plan packet.
+# the plan packet. findings_source records the prior-audit path cited to a
+# plan consult, and worker_task records the task id the last dispatch handed
+# the stage prompt to.
 # Phases: audit-consult -> audit-dispatch -> audit-worker -> plan-consult ->
 # plan-dispatch -> plan-worker -> complete. next-round increments iteration
 # and returns to audit-consult so further audit/plan cycles stay possible.
 # A wrong-phase call refuses with a nonzero exit and no state change.
 #
+# Findings feedback is part of stage completion, never a separate afterthought:
+# after the audit worker reports done, record-findings is the completion step
+# that persists the worker's findings and advances audit-worker -> plan-consult
+# in one state write, so a successful audit can never advance to the plan with
+# empty findings and a failed record never marks the worker complete. The
+# findings file defaults to the dispatched worker's report at
+# $DATA/<worker_task>/report.md when --file is omitted; a missing or
+# whitespace-only result is refused with the phase unchanged so the same stage
+# retries. The same non-empty rule governs a prior audit cited to the plan
+# consult below.
+#
+# The plan stage is reachable from a prior audit without a redundant
+# audit-worker cycle: consult --stage plan accepts --findings-file FILE, and a
+# usable file (existing, non-empty) lets the call run from audit-consult or
+# audit-worker as well as plan-consult. The evidence path is recorded in
+# findings_source, its content becomes findings, and the consult advances to
+# plan-dispatch; a missing or empty file is refused with the phase unchanged.
+# Without --findings-file the plan consult still requires plan-consult.
+#
+# Effort has one owner per dispatch: dispatch --effort is the per-stage
+# selection and defaults to low, while the passthrough spawn args may carry
+# the spawn interface's own --effort. Exactly one --effort reaches fm-spawn:
+# the passthrough value is used when present, otherwise the dispatch selection
+# is appended, and supplying both at once is refused as a conflict before
+# launch.
+
 # The bridge keeps no conversation history keyed by thread id alone: every
 # consultation is one self-contained turn, so consult assembles prior context
 # into the prompt file itself. The audit consult carries the user objective
@@ -81,9 +110,9 @@ BRIDGE_PID_FILE="$STATE/chatgpt-loop-bridge.pid"
 
 usage() {
   printf 'usage: %s init --task ID --objective-file FILE [--context-file FILE] [--thread ID]\n' "$(basename "$0")" >&2
-  printf '       %s consult --stage audit|plan --task ID\n' "$(basename "$0")" >&2
+  printf '       %s consult --stage audit|plan [--findings-file FILE] --task ID\n' "$(basename "$0")" >&2
   printf '       %s dispatch --stage audit|plan [--effort E] --task ID -- <fm-spawn args>\n' "$(basename "$0")" >&2
-  printf '       %s record-findings --task ID --file FILE\n' "$(basename "$0")" >&2
+  printf '       %s record-findings --task ID [--file FILE]\n' "$(basename "$0")" >&2
   printf '       %s record-result --task ID --file FILE\n' "$(basename "$0")" >&2
   printf '       %s record-worker-failure --task ID --stage audit|plan --reason TEXT\n' "$(basename "$0")" >&2
   printf '       %s next-round --task ID\n' "$(basename "$0")" >&2
@@ -124,6 +153,53 @@ require_phase() {
   [ "$actual" = "$want" ] || { printf 'fm-chatgpt-loop: task %s is in phase %s, need %s; no state changed\n' "$3" "$actual" "$want" >&2; return 1; }
 }
 
+# require_phase_any <file> <task> <phase>...: pass only when the task's phase
+# is one of the listed values. The plan consult uses it for the cited-evidence
+# shortcut, where a prior audit may leave the task at audit-consult or
+# audit-worker instead of the normal plan-consult.
+require_phase_any() {
+  local file=$1 task=$2 actual want
+  shift 2
+  actual=$(read_field "$file" phase)
+  for want in "$@"; do
+    [ "$actual" = "$want" ] && return 0
+  done
+  printf 'fm-chatgpt-loop: task %s is in phase %s, need one of %s; no state changed\n' "$task" "$actual" "$*" >&2
+  return 1
+}
+
+# findings_text <file>: print a usable findings file's content, or explain why
+# it is unusable. A missing path and a whitespace-only file are both refusals,
+# because an audit that records nothing must never look complete.
+findings_text() {
+  local file=$1 text
+  [ -n "$file" ] || { printf 'fm-chatgpt-loop: no findings file given and no dispatched worker report to fall back on\n' >&2; return 1; }
+  [ -f "$file" ] || { printf 'fm-chatgpt-loop: findings file not found: %s\n' "$file" >&2; return 1; }
+  text=$(cat "$file") || return 1
+  [ -n "$(printf '%s' "$text" | tr -d '[:space:]')" ] || { printf 'fm-chatgpt-loop: findings file is empty: %s\n' "$file" >&2; return 1; }
+  printf '%s' "$text"
+}
+
+# persist_findings <state-file> <findings-file> <source> [phase]: atomically
+# record findings and their source path, and optionally the phase, in one
+# state write so a failed record can never leave a half-updated state. The
+# plan consult's cited-evidence path passes no phase because the consult owns
+# its own transition; record-findings passes plan-consult so a failed record
+# never marks the audit worker complete.
+persist_findings() {
+  local file=$1 find_file=$2 source=$3 phase=${4:-} text tmp
+  text=$(findings_text "$find_file") || return 1
+  tmp=$(mktemp) || return 1
+  if [ -n "$phase" ]; then
+    jq --arg f "$text" --arg s "$source" --arg p "$phase" --arg now "$(now_iso)" \
+      '.findings = $f | .findings_source = $s | .phase = $p | .updated_at = $now' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+  else
+    jq --arg f "$text" --arg s "$source" --arg now "$(now_iso)" \
+      '.findings = $f | .findings_source = $s | .updated_at = $now' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+  fi
+  mv "$tmp" "$file"
+}
+
 cmd_init() {
   local task="" objective_file="" context_file="" thread=""
   while [ $# -gt 0 ]; do
@@ -153,7 +229,7 @@ cmd_init() {
   objective=$(cat "$objective_file")
   tmp=$(mktemp) || return 1
   jq -n --arg t "$task" --arg o "$objective" --arg c "$context" --arg th "$thread" --arg u "$(now_iso)" \
-    '{task_id: $t, objective: $o, context: $c, thread: $th, phase: "audit-consult", iteration: 1, audit_prompt: "", audit_result: "", findings: "", plan: "", worker_result: "", last_error: "", updated_at: $u}' > "$tmp" || { rm -f "$tmp"; return 1; }
+    '{task_id: $t, objective: $o, context: $c, thread: $th, phase: "audit-consult", iteration: 1, audit_prompt: "", audit_result: "", findings: "", findings_source: "", worker_task: "", plan: "", worker_result: "", last_error: "", updated_at: $u}' > "$tmp" || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$file"
   printf 'initialized task %s in phase audit-consult\n' "$task"
 }
@@ -202,11 +278,12 @@ strip_local_tools_banner() {
 }
 
 cmd_consult() {
-  local stage="" task=""
+  local stage="" task="" findings_file=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --stage) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; stage=$2; shift 2 ;;
       --task) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; task=$2; shift 2 ;;
+      --findings-file) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; findings_file=$2; shift 2 ;;
       -h|--help) usage; return 0 ;;
       *) printf 'fm-chatgpt-loop: unknown consult argument %s\n' "$1" >&2; usage; return 2 ;;
     esac
@@ -216,14 +293,37 @@ cmd_consult() {
     *) printf 'fm-chatgpt-loop: consult needs --stage audit|plan\n' >&2; usage; return 2 ;;
   esac
   [ -n "$task" ] || { printf 'fm-chatgpt-loop: consult needs --task\n' >&2; usage; return 2; }
+  if [ "$stage" = audit ] && [ -n "$findings_file" ]; then
+    printf 'fm-chatgpt-loop: consult --findings-file applies only to --stage plan\n' >&2
+    usage
+    return 2
+  fi
   local file thread
   file=$(need_state "$task") || return 1
+  # The normal gate is one phase per stage. A plan consult carrying a usable
+  # prior-audit file additionally reaches plan from the pre-plan phases, which
+  # is what lets an already-audited task plan without a redundant audit-worker
+  # cycle. The wider gate is proven only after the cited file is usable, and the
+  # evidence is persisted after both checks, so a bad or wrong-phase citation
+  # changes no state.
   if [ "$stage" = audit ]; then
     require_phase "$file" audit-consult "$task" || return 1
+  elif [ -n "$findings_file" ]; then
+    require_phase_any "$file" "$task" plan-consult audit-consult audit-worker || return 1
+    findings_text "$findings_file" >/dev/null || {
+      write_field "$file" last_error "cited prior audit unusable: $findings_file" || return 1
+      return 1
+    }
   else
     require_phase "$file" plan-consult "$task" || return 1
   fi
   command -v jq >/dev/null 2>&1 || { printf 'fm-chatgpt-loop: consultation needs jq\n' >&2; return 1; }
+  if [ -n "$findings_file" ]; then
+    persist_findings "$file" "$findings_file" "$findings_file" || {
+      write_field "$file" last_error "cited prior audit unusable: $findings_file" || return 1
+      return 1
+    }
+  fi
   thread=$(read_field "$file" thread)
   local work prompt answer rc
   work=$(mktemp -d) || return 1
@@ -291,7 +391,6 @@ cmd_dispatch() {
   esac
   [ -n "$task" ] || { printf 'fm-chatgpt-loop: dispatch needs --task\n' >&2; usage; return 2; }
   [ "${#spawn_args[@]}" -gt 0 ] || { printf 'fm-chatgpt-loop: dispatch needs spawn args after --\n' >&2; usage; return 2; }
-  [ -n "$effort" ] || effort=low
   local file
   file=$(need_state "$task") || return 1
   if [ "$stage" = audit ]; then
@@ -320,15 +419,35 @@ cmd_dispatch() {
     printf 'fm-chatgpt-loop: refusing dispatch: the first arg after -- must be a plain task id (got %s); nothing launched, no state changed\n' "$worker_task" >&2
     return 2
   fi
-  # The stage's effort is selected by the caller and defaults to low, the
-  # workflow's original posture. Bridge lifecycle stays Firstmate-owned: the
-  # worker environment never carries the bridge URL, and nothing here starts,
-  # stops, or probes it.
+  # Effort has exactly one owner in the spawned argv. The passthrough spawn
+  # args may already carry the spawn interface's own --effort; the dispatch
+  # selection is used only when they do not, and supplying both at once is a
+  # conflict refused before launch. This keeps one --effort in the argv, so the
+  # loop's per-stage default of low and a caller's spawn-side effort never
+  # reach fm-spawn as duplicate or disagreeing flags. Bridge lifecycle stays
+  # Firstmate-owned: the worker environment never carries the bridge URL, and
+  # nothing here starts, stops, or probes it.
+  local spawn_has_effort=0 spawn_effort="" expect_effort=0 effective_effort
   for a in "${spawn_args[@]}"; do
+    if [ "$expect_effort" = 1 ]; then
+      spawn_effort=$a; expect_effort=0; continue
+    fi
     case "$a" in
-      --effort|--effort=*) printf 'fm-chatgpt-loop: refusing dispatch: spawn args must not carry --effort (use dispatch --effort); nothing launched, no state changed\n' >&2; return 2 ;;
+      --effort) spawn_has_effort=1; expect_effort=1 ;;
+      --effort=*) spawn_has_effort=1; spawn_effort=${a#--effort=} ;;
     esac
   done
+  if [ "$spawn_has_effort" = 1 ] && [ -n "$effort" ]; then
+    printf 'fm-chatgpt-loop: refusing dispatch: effort given both as dispatch --effort and in the spawn args; nothing launched, no state changed\n' >&2
+    return 2
+  fi
+  if [ "$spawn_has_effort" = 1 ]; then
+    effective_effort=$spawn_effort
+  else
+    [ -n "$effort" ] || effort=low
+    spawn_args+=(--effort "$effort")
+    effective_effort=$effort
+  fi
   local stage_prompt rc send_err phase_next
   if [ "$stage" = audit ]; then
     stage_prompt=$(read_field "$file" audit_prompt)
@@ -337,7 +456,7 @@ cmd_dispatch() {
     stage_prompt=$(read_field "$file" plan)
     phase_next=plan-worker
   fi
-  if env -u CHATGPT_WEB_BRIDGE_URL -u FM_CHATGPT_LOOP_SPAWN -u FM_CHATGPT_LOOP_CONSULT -u FM_CHATGPT_LOOP_SEND "$SPAWN" "${spawn_args[@]}" --effort "$effort"; then
+  if env -u CHATGPT_WEB_BRIDGE_URL -u FM_CHATGPT_LOOP_SPAWN -u FM_CHATGPT_LOOP_CONSULT -u FM_CHATGPT_LOOP_SEND "$SPAWN" "${spawn_args[@]}"; then
     rc=0
   else
     rc=$?
@@ -347,6 +466,9 @@ cmd_dispatch() {
     printf 'fm-chatgpt-loop: %s worker spawn failed for task %s (exit %s); phase unchanged at %s-dispatch\n' "$stage" "$task" "$rc" "$stage" >&2
     return "$rc"
   fi
+  # The worker exists from here, so record its task id for the completion path
+  # before the handoff; record-findings resolves this worker's report.
+  write_field "$file" worker_task "$worker_task" || return 1
   # Handoff: deliver the stored stage prompt to the spawned worker through the
   # ordinary durable steering path, right after launch.
   if send_err=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SEND" "$worker_task" "$stage_prompt" 2>&1); then
@@ -360,7 +482,7 @@ cmd_dispatch() {
   fi
   write_field "$file" phase "$phase_next" || return 1
   write_field "$file" last_error "" || return 1
-  printf 'dispatched %s worker for task %s with --effort %s and delivered the %s prompt to %s\n' "$stage" "$task" "$effort" "$stage" "$worker_task"
+  printf 'dispatched %s worker for task %s with --effort %s and delivered the %s prompt to %s\n' "$stage" "$task" "$effective_effort" "$stage" "$worker_task"
 }
 
 cmd_record_findings() {
@@ -374,12 +496,23 @@ cmd_record_findings() {
     esac
   done
   [ -n "$task" ] || { printf 'fm-chatgpt-loop: record-findings needs --task\n' >&2; usage; return 2; }
-  [ -n "$rfile" ] && [ -f "$rfile" ] || { printf 'fm-chatgpt-loop: record-findings needs an existing --file\n' >&2; usage; return 2; }
-  local file
+  local file worker
   file=$(need_state "$task") || return 1
   require_phase "$file" audit-worker "$task" || return 1
-  write_field "$file" findings "$(cat "$rfile")" || return 1
-  write_field "$file" phase plan-consult || return 1
+  # Findings feedback is the audit completion step. Without --file the worker's
+  # own report is the source, resolved from the task id dispatch recorded, so
+  # the completion path never needs the caller to know a path.
+  if [ -z "$rfile" ]; then
+    worker=$(read_field "$file" worker_task)
+    [ -n "$worker" ] || { printf 'fm-chatgpt-loop: record-findings needs --file: no dispatched worker is recorded to fall back on\n' >&2; return 2; }
+    rfile="$DATA/$worker/report.md"
+  fi
+  # Findings and the phase advance land in one write: a failed record can never
+  # leave the audit worker looking complete with findings still empty.
+  persist_findings "$file" "$rfile" "$rfile" plan-consult || {
+    write_field "$file" last_error "audit findings unusable: $rfile" || return 1
+    return 1
+  }
   printf 'recorded audit findings for task %s\n' "$task"
 }
 
