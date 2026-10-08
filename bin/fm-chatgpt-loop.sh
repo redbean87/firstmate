@@ -68,9 +68,11 @@
 #
 # Cited evidence never goes out as a bare reference: both prompt builders
 # inline the content of every evidence path cited with the @[path] marker
-# anywhere in the assembled prompt (objective, context, audit prompt, audit
-# result, findings), and the plan builder inlines its --findings-file
-# the same way. Resolution tries an absolute path as-is, then a relative path
+# in user-controlled text (objective, context, findings), and the plan
+# builder inlines its --findings-file
+# the same way. Only user-controlled text is a citation source: a marker
+# in model-generated text (audit prompt, audit result) is refused loudly
+# instead of being resolved or sent bare. Resolution tries an absolute path as-is, then a relative path
 # against the task data directory $DATA/<task-id> first and $HOME second; only
 # a readable regular file is accepted. The original citation text stays
 # visible in the prompt and each inlined block is delimited by the resolved
@@ -239,21 +241,33 @@ cited_paths() {
   printf '%s' "$1" | grep -o '@\[[^]]*\]' | sed -e 's/^@\[//' -e 's/\]$//' | awk '!seen[$0]++'
 }
 
-# inline_citations <task> <out>: append one delimited evidence
-# block per citation found in the prompt text already written to <out>,
-# after the original prompt text that cites it. Scanning the assembled
-# prompt covers every emitted field (objective, context, audit prompt,
-# audit result, findings), and every inlined evidence body is rescanned
-# until no new citation appears, so a marker inside an inlined file is
-# inlined or fails loudly like a top-level one. Each distinct citation
-# is resolved once, which keeps citation cycles to one block per file.
-# Every citation is resolved and checked readable before anything is
-# written, so one unreadable or empty citation fails the whole prompt
-# construction with a nonzero return instead of shipping a dangling
-# reference.
+# refuse_model_citations <field-name> <text>: fail loudly when
+# model-generated text contains anything shaped like a citation marker.
+# Model output is emitted verbatim and is never a citation source, so a
+# marker there is refused before the bridge is contacted instead of going
+# out bare or triggering a model-directed local read.
+refuse_model_citations() {
+  local name=$1 text=$2
+  if printf '%s' "$text" | grep -q '@\[[^]]*\]'; then
+    printf 'fm-chatgpt-loop: refusing prompt: model-generated %s contains a citation marker; markers in model output are never resolved and never sent bare\n' "$name" >&2
+    return 1
+  fi
+}
+
+# inline_citations <task> <out> <user-text>: append one delimited evidence
+# block per citation found in user-controlled text (objective, context,
+# findings), after the original prompt text that cites it. Only
+# user-controlled text is a citation source: model-generated fields are
+# refused separately before the bridge is contacted. Every inlined
+# evidence body is rescanned until no new citation appears, so a marker
+# inside an inlined file is inlined or fails loudly like a top-level one.
+# Each distinct citation is resolved once, which keeps citation cycles to
+# one block per file. Every citation is resolved and checked readable
+# before anything is written, so one unreadable or empty citation fails
+# the whole prompt construction with a nonzero return instead of shipping
+# a dangling reference.
 inline_citations() {
-  local task=$1 out=$2 text path resolved p content e seen qi
-  text=$(cat "$out")
+  local task=$1 out=$2 text=$3 path resolved p content e seen qi
   local -a paths=() resolved_paths=() queue=()
   while IFS= read -r path; do
     queue+=("$path")
@@ -357,21 +371,30 @@ cmd_init() {
 }
 
 build_audit_prompt() {
-  local file=$1 out=$2 task=$3
+  local file=$1 out=$2 task=$3 objective context
+  objective=$(read_field "$file" objective)
+  context=$(read_field "$file" context)
   {
-    printf 'User objective:\n%s\n\n' "$(read_field "$file" objective)"
-    printf 'Firstmate context:\n%s\n' "$(read_field "$file" context)"
+    printf 'User objective:\n%s\n\n' "$objective"
+    printf 'Firstmate context:\n%s\n' "$context"
   } > "$out" || return 1
-  inline_citations "$task" "$out"
+  inline_citations "$task" "$out" "$objective"$'\n'"$context"
 }
 
 build_plan_prompt() {
-  local file=$1 out=$2 task=$3 fsrc
+  local file=$1 out=$2 task=$3 fsrc objective context audit_prompt audit_result findings
+  objective=$(read_field "$file" objective)
+  context=$(read_field "$file" context)
+  audit_prompt=$(read_field "$file" audit_prompt)
+  audit_result=$(read_field "$file" audit_result)
+  findings=$(read_field "$file" findings)
+  refuse_model_citations "audit prompt" "$audit_prompt" || return 1
+  refuse_model_citations "audit result" "$audit_result" || return 1
   {
-    printf 'User objective:\n%s\n\n' "$(read_field "$file" objective)"
-    printf 'Firstmate context:\n%s\n\n' "$(read_field "$file" context)"
-    printf 'Audit prompt sent earlier:\n%s\n\n' "$(read_field "$file" audit_prompt)"
-    printf 'ChatGPT audit result:\n%s\n\n' "$(read_field "$file" audit_result)"
+    printf 'User objective:\n%s\n\n' "$objective"
+    printf 'Firstmate context:\n%s\n\n' "$context"
+    printf 'Audit prompt sent earlier:\n%s\n\n' "$audit_prompt"
+    printf 'ChatGPT audit result:\n%s\n\n' "$audit_result"
   } > "$out" || return 1
   fsrc=$(read_field "$file" findings_source)
   if [ -n "$fsrc" ]; then
@@ -380,9 +403,9 @@ build_plan_prompt() {
     jq -r '.findings' "$file" >> "$out" || return 1
     printf -- '\n--- END CITED EVIDENCE: %s ---\n' "$fsrc" >> "$out" || return 1
   else
-    printf 'Worker audit findings:\n%s\n' "$(read_field "$file" findings)" >> "$out" || return 1
+    printf 'Worker audit findings:\n%s\n' "$findings" >> "$out" || return 1
   fi
-  inline_citations "$task" "$out"
+  inline_citations "$task" "$out" "$objective"$'\n'"$context"$'\n'"$findings"
 }
 
 # strip_local_tools_banner reads a consultation answer on stdin and writes it
