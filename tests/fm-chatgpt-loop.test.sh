@@ -660,6 +660,45 @@ test_consult_missing_citation_fails_closed() {
   pass "an unreadable audit citation fails loudly, sends nothing, and leaves the stage retryable"
 }
 
+test_consult_empty_citation_fails_closed() {
+  local dir=$TMP_ROOT/emptycite pid out rc
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'See @[] for detail.\n' > "$TMP_ROOT/context-empty.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task emptycite --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context-empty.txt" >/dev/null
+  stop_stub "$pid"
+  rm -f "$dir/request.json"
+  out=$(bash "$LOOP" consult --stage audit --task emptycite 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an empty audit citation must fail the consult"
+  [ "$(loop_phase emptycite)" = "audit-consult" ] || fail "a failed empty citation must leave the phase unchanged"
+  [ ! -f "$dir/request.json" ] || fail "an empty audit citation must send no consultation"
+  assert_contains "$out" "empty" "the refusal must report the empty citation"
+  assert_contains "$(jq -r '.last_error' "$HOME_DIR/data/emptycite/chatgpt-loop.json")" "empty" "the refusal must be recorded in state"
+  pass "an empty @[] citation fails loudly, sends nothing, and leaves the stage retryable"
+}
+
+test_plan_inlines_nested_citation_in_findings() {
+  local dir=$TMP_ROOT/nestedcite pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task nestedcite --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  printf 'NESTED-EVIDENCE-MARKER: shared taxonomy\n' > "$HOME_DIR/data/nestedcite/extra.md"
+  printf 'Prior audit says see @[extra.md] for the taxonomy.\n' > "$dir/prior-nested.md"
+  bash "$LOOP" consult --stage plan --task nestedcite --findings-file "$dir/prior-nested.md" >/dev/null
+  stop_stub "$pid"
+  [ "$(loop_phase nestedcite)" = "plan-dispatch" ] || fail "a plan consult with a nested citation must advance to plan-dispatch"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" "Prior audit says see @[extra.md]" "the cited findings must stay inlined"
+  assert_contains "$prompt" "NESTED-EVIDENCE-MARKER" "a citation nested in findings must be inlined, not sent bare"
+  assert_contains "$prompt" '@[extra.md]' "the nested citation must stay visible"
+  assert_contains "$prompt" "$HOME_DIR/data/nestedcite/extra.md" "the nested evidence block must name its resolved source"
+  pass "a plan consult inlines a citation nested inside cited findings instead of sending it bare"
+}
+
 test_plan_consult_inlines_cited_prior_plan() {
   local dir=$TMP_ROOT/plantax pid prompt
   mkdir -p "$dir"
@@ -827,6 +866,8 @@ test_consult_resolves_citation_from_home
 test_consult_resolves_absolute_citation
 test_consult_without_citations_has_no_evidence_section
 test_consult_missing_citation_fails_closed
+test_consult_empty_citation_fails_closed
+test_plan_inlines_nested_citation_in_findings
 test_plan_consult_inlines_cited_prior_plan
 test_plan_cited_findings_resolve_relative
 test_consult_inlines_evidence_verbatim

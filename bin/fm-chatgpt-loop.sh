@@ -67,8 +67,9 @@
 # Without --findings-file the plan consult still requires plan-consult.
 #
 # Cited evidence never goes out as a bare reference: both prompt builders
-# inline the content of every evidence path cited with the @[path] marker in
-# the objective or context, and the plan builder inlines its --findings-file
+# inline the content of every evidence path cited with the @[path] marker
+# anywhere in the assembled prompt (objective, context, audit prompt, audit
+# result, findings), and the plan builder inlines its --findings-file
 # the same way. Resolution tries an absolute path as-is, then a relative path
 # against the task data directory $DATA/<task-id> first and $HOME second; only
 # a readable regular file is accepted. The original citation text stays
@@ -238,18 +239,21 @@ cited_paths() {
   printf '%s' "$1" | grep -o '@\[[^]]*\]' | sed -e 's/^@\[//' -e 's/\]$//' | awk '!seen[$0]++'
 }
 
-# inline_citations <state-file> <task> <out>: append one delimited evidence
-# block per citation found in the objective and context, after the original
-# prompt text that cites it. Every citation is resolved and checked readable
-# before anything is written, so one unreadable citation fails the whole
-# prompt construction with a nonzero return instead of shipping a dangling
-# reference.
+# inline_citations <task> <out>: append one delimited evidence
+# block per citation found in the prompt text already written to <out>,
+# after the original prompt text that cites it. Scanning the assembled
+# prompt covers every emitted field (objective, context, audit prompt,
+# audit result, findings), so a nested citation inside any of them is
+# inlined or fails loudly like a top-level one. Every citation is
+# resolved and checked readable before anything is written, so one
+# unreadable or empty citation fails the whole prompt construction with
+# a nonzero return instead of shipping a dangling reference.
 inline_citations() {
-  local file=$1 task=$2 out=$3 text path resolved p
-  text="$(read_field "$file" objective)"$'\n'"$(read_field "$file" context)"
+  local task=$1 out=$2 text path resolved p
+  text=$(cat "$out")
   local -a paths=() resolved_paths=()
   while IFS= read -r path; do
-    [ -n "$path" ] && paths+=("$path")
+    paths+=("$path")
   done < <(cited_paths "$text")
   [ "${#paths[@]}" -gt 0 ] || return 0
   for p in "${paths[@]}"; do
@@ -340,7 +344,7 @@ build_audit_prompt() {
     printf 'User objective:\n%s\n\n' "$(read_field "$file" objective)"
     printf 'Firstmate context:\n%s\n' "$(read_field "$file" context)"
   } > "$out" || return 1
-  inline_citations "$file" "$task" "$out"
+  inline_citations "$task" "$out"
 }
 
 build_plan_prompt() {
@@ -360,7 +364,7 @@ build_plan_prompt() {
   else
     printf 'Worker audit findings:\n%s\n' "$(read_field "$file" findings)" >> "$out" || return 1
   fi
-  inline_citations "$file" "$task" "$out"
+  inline_citations "$task" "$out"
 }
 
 # strip_local_tools_banner reads a consultation answer on stdin and writes it
