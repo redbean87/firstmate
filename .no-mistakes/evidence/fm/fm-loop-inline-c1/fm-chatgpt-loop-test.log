@@ -1,0 +1,38 @@
+ok - objective to audit to worker to plan to worker to completion flows through every phase
+ok - the plan consultation explicitly carries objective, context, audit result, and worker findings
+ok - a ChatGPT bridge failure exits nonzero, records last_error, keeps the phase, and dispatches nothing
+ok - a worker failure returns to dispatch, records last_error, and the stage retries
+ok - a failed spawn records last_error, holds the dispatch phase, and the stage retries
+ok - dispatch refuses option-leading and batch first args, and hands off with an explicit FM_HOME
+ok - wrong-phase calls refuse with no state change
+ok - every subcommand validates the task id before building state paths
+ok - a trailing valueless option refuses with a usage error instead of hanging
+ok - bridge lifecycle stays Firstmate-owned: dispatch refuses a bridge-referencing arg before launch and reports the bridge itself
+ok - bridge start and stop verify the recorded pid against the daemon-dir entrypoints before refusing or killing
+ok - bridge install and setup verbs and any extra start/stop argument refuse
+ok - the audit worker receives the banner-stripped ChatGPT-generated prompt while the objective stays in loop state for the plan packet
+ok - the consult receipt strips only a leading Local-tools-unavailable blockquote and preserves every other byte
+ok - dispatch carries the selected per-stage effort in the worker argv and keeps low as the audit default
+ok - a plan consult citing a usable prior audit records it and skips the redundant audit worker
+ok - a task stuck at audit-worker plans directly from cited prior audit evidence
+ok - a plan consult without cited prior audit evidence keeps the normal audit-required path
+ok - malformed or missing cited evidence is rejected with the phase intact and the stage retryable
+ok - an audit consult inlines a cited report from the task data directory and keeps the reference visible
+ok - a relative citation resolves against HOME when it is not in the task data directory
+ok - an absolute citation is read as-is and inlined
+ok - a consult with no citation emits no empty evidence section and treats prose paths as prose
+ok - an unreadable audit citation fails loudly, sends nothing, and leaves the stage retryable
+ok - an empty @[] citation fails loudly, sends nothing, and leaves the stage retryable
+ok - a plan consult inlines a citation nested inside cited findings instead of sending it bare
+ok - a consult inlines a citation found inside inlined evidence instead of sending it bare
+ok - an unreadable transitive citation fails loudly, sends nothing, and leaves the stage retryable
+ok - an empty @[] inside inlined evidence fails loudly, sends nothing, and leaves the stage retryable
+ok - cyclic citations terminate with each file inlined exactly once
+ok - a citation marker in model output is refused: nothing is read and nothing is sent
+ok - an empty @[] in model output is refused: nothing is sent
+ok - a plan consult inlines a cited prior plan so exact taxonomy values need no manual copying
+ok - a relative cited findings file resolves from the task data directory and is inlined
+ok - cited evidence with quotes, backticks, shell text, spaces, and empty lines is inlined verbatim in order
+ok - a successful audit records non-empty findings while an empty record never completes the worker
+ok - the completion path resolves the dispatched worker's report so findings stop staying empty
+ok - effort reaches the spawn once, from whichever single source supplied it, and conflicting sources refuse
