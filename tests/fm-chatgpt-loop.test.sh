@@ -699,6 +699,90 @@ test_plan_inlines_nested_citation_in_findings() {
   pass "a plan consult inlines a citation nested inside cited findings instead of sending it bare"
 }
 
+test_consult_inlines_transitive_citation() {
+  local dir=$TMP_ROOT/transitive pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'See @[a.md] for detail.\n' > "$TMP_ROOT/objective-transitive.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task transitive --objective-file "$TMP_ROOT/objective-transitive.txt" >/dev/null
+  printf 'OUTER-MARKER: summary; full detail in @[deep.md].\n' > "$HOME_DIR/data/transitive/a.md"
+  printf 'DEEP-MARKER: the full detail.\n' > "$HOME_DIR/data/transitive/deep.md"
+  bash "$LOOP" consult --stage audit --task transitive >/dev/null
+  stop_stub "$pid"
+  [ "$(loop_phase transitive)" = "audit-dispatch" ] || fail "a consult with a transitive citation must advance to audit-dispatch"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" "OUTER-MARKER" "the directly cited evidence must be inlined"
+  assert_contains "$prompt" "DEEP-MARKER" "a citation inside inlined evidence must be inlined, not sent bare"
+  assert_contains "$prompt" '@[a.md]' "the outer citation must stay visible"
+  assert_contains "$prompt" '@[deep.md]' "the transitive citation must stay visible"
+  assert_contains "$prompt" "$HOME_DIR/data/transitive/deep.md" "the transitive evidence block must name its resolved source"
+  pass "a consult inlines a citation found inside inlined evidence instead of sending it bare"
+}
+
+test_consult_transitive_missing_citation_fails_closed() {
+  local dir=$TMP_ROOT/deepmissing pid out rc
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'See @[a.md] for detail.\n' > "$TMP_ROOT/objective-deepmissing.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task deepmissing --objective-file "$TMP_ROOT/objective-deepmissing.txt" >/dev/null
+  printf 'outer says see @[missing-deep.md] for the rest.\n' > "$HOME_DIR/data/deepmissing/a.md"
+  stop_stub "$pid"
+  rm -f "$dir/request.json"
+  out=$(bash "$LOOP" consult --stage audit --task deepmissing 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an unreadable transitive citation must fail the consult"
+  [ "$(loop_phase deepmissing)" = "audit-consult" ] || fail "a failed transitive citation must leave the phase unchanged"
+  [ ! -f "$dir/request.json" ] || fail "an unreadable transitive citation must send no consultation"
+  assert_contains "$out" "missing-deep.md" "the refusal must name the transitive source"
+  assert_contains "$out" "not readable" "the refusal must report unreadability"
+  assert_contains "$(jq -r '.last_error' "$HOME_DIR/data/deepmissing/chatgpt-loop.json")" "missing-deep.md" "the refusal must be recorded in state"
+  pass "an unreadable transitive citation fails loudly, sends nothing, and leaves the stage retryable"
+}
+
+test_consult_empty_citation_in_evidence_fails_closed() {
+  local dir=$TMP_ROOT/deepempty pid out rc
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'See @[a.md] for detail.\n' > "$TMP_ROOT/objective-deepempty.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task deepempty --objective-file "$TMP_ROOT/objective-deepempty.txt" >/dev/null
+  printf 'outer says see @[] for nothing.\n' > "$HOME_DIR/data/deepempty/a.md"
+  stop_stub "$pid"
+  rm -f "$dir/request.json"
+  out=$(bash "$LOOP" consult --stage audit --task deepempty 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an empty citation inside evidence must fail the consult"
+  [ "$(loop_phase deepempty)" = "audit-consult" ] || fail "a failed empty transitive citation must leave the phase unchanged"
+  [ ! -f "$dir/request.json" ] || fail "an empty citation inside evidence must send no consultation"
+  assert_contains "$out" "empty" "the refusal must report the empty citation"
+  assert_contains "$(jq -r '.last_error' "$HOME_DIR/data/deepempty/chatgpt-loop.json")" "empty" "the refusal must be recorded in state"
+  pass "an empty @[] inside inlined evidence fails loudly, sends nothing, and leaves the stage retryable"
+}
+
+test_consult_citation_cycle_terminates() {
+  local dir=$TMP_ROOT/cyclecite pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'See @[a.md] for the full story.\n' > "$TMP_ROOT/objective-cycle.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task cyclecite --objective-file "$TMP_ROOT/objective-cycle.txt" >/dev/null
+  printf 'CYCLE-A-MARKER: see @[b.md] for the rest.\n' > "$HOME_DIR/data/cyclecite/a.md"
+  printf 'CYCLE-B-MARKER: see @[a.md] for the start.\n' > "$HOME_DIR/data/cyclecite/b.md"
+  bash "$LOOP" consult --stage audit --task cyclecite >/dev/null
+  stop_stub "$pid"
+  [ "$(loop_phase cyclecite)" = "audit-dispatch" ] || fail "a consult over cyclic citations must still advance to audit-dispatch"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" "CYCLE-A-MARKER" "both sides of a citation cycle must be inlined"
+  assert_contains "$prompt" "CYCLE-B-MARKER" "both sides of a citation cycle must be inlined"
+  assert_equals 1 "$(printf '%s' "$prompt" | grep -cF -- "--- BEGIN CITED EVIDENCE: $HOME_DIR/data/cyclecite/a.md ---")" "a cyclic citation must be inlined exactly once"
+  assert_equals 1 "$(printf '%s' "$prompt" | grep -cF -- "--- BEGIN CITED EVIDENCE: $HOME_DIR/data/cyclecite/b.md ---")" "a cyclic citation must be inlined exactly once"
+  pass "cyclic citations terminate with each file inlined exactly once"
+}
+
 test_plan_consult_inlines_cited_prior_plan() {
   local dir=$TMP_ROOT/plantax pid prompt
   mkdir -p "$dir"
@@ -868,6 +952,10 @@ test_consult_without_citations_has_no_evidence_section
 test_consult_missing_citation_fails_closed
 test_consult_empty_citation_fails_closed
 test_plan_inlines_nested_citation_in_findings
+test_consult_inlines_transitive_citation
+test_consult_transitive_missing_citation_fails_closed
+test_consult_empty_citation_in_evidence_fails_closed
+test_consult_citation_cycle_terminates
 test_plan_consult_inlines_cited_prior_plan
 test_plan_cited_findings_resolve_relative
 test_consult_inlines_evidence_verbatim

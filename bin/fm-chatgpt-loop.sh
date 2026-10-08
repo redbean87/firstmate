@@ -243,23 +243,41 @@ cited_paths() {
 # block per citation found in the prompt text already written to <out>,
 # after the original prompt text that cites it. Scanning the assembled
 # prompt covers every emitted field (objective, context, audit prompt,
-# audit result, findings), so a nested citation inside any of them is
-# inlined or fails loudly like a top-level one. Every citation is
-# resolved and checked readable before anything is written, so one
-# unreadable or empty citation fails the whole prompt construction with
-# a nonzero return instead of shipping a dangling reference.
+# audit result, findings), and every inlined evidence body is rescanned
+# until no new citation appears, so a marker inside an inlined file is
+# inlined or fails loudly like a top-level one. Each distinct citation
+# is resolved once, which keeps citation cycles to one block per file.
+# Every citation is resolved and checked readable before anything is
+# written, so one unreadable or empty citation fails the whole prompt
+# construction with a nonzero return instead of shipping a dangling
+# reference.
 inline_citations() {
-  local task=$1 out=$2 text path resolved p
+  local task=$1 out=$2 text path resolved p content e seen qi
   text=$(cat "$out")
-  local -a paths=() resolved_paths=()
+  local -a paths=() resolved_paths=() queue=()
   while IFS= read -r path; do
-    paths+=("$path")
+    queue+=("$path")
   done < <(cited_paths "$text")
-  [ "${#paths[@]}" -gt 0 ] || return 0
-  for p in "${paths[@]}"; do
+  qi=0
+  while [ "$qi" -lt "${#queue[@]}" ]; do
+    p=${queue[$qi]}
+    qi=$((qi + 1))
+    seen=0
+    if [ "${#paths[@]}" -gt 0 ]; then
+      for e in "${paths[@]}"; do
+        if [ "$e" = "$p" ]; then seen=1; break; fi
+      done
+    fi
+    if [ "$seen" -eq 1 ]; then continue; fi
     resolved=$(resolve_citation "$task" "$p") || return 1
+    paths+=("$p")
     resolved_paths+=("$resolved")
+    content=$(cat "$resolved") || return 1
+    while IFS= read -r path; do
+      queue+=("$path")
+    done < <(cited_paths "$content")
   done
+  [ "${#paths[@]}" -gt 0 ] || return 0
   {
     printf '\nCited evidence (verbatim file content for each @[path] citation above):\n'
     local i
