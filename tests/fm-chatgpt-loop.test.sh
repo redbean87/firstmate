@@ -503,6 +503,145 @@ test_per_stage_effort_dispatch() {
   pass "dispatch carries the selected per-stage effort in the worker argv and keeps low as the audit default"
 }
 
+test_plan_consult_with_cited_evidence() {
+  local dir=$TMP_ROOT/cited pid
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  bash "$LOOP" init --task cited --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context.txt" >/dev/null
+  printf 'prior audit finding: flaky retry logic\n' > "$dir/prior-audit.md"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" consult --stage plan --task cited --findings-file "$dir/prior-audit.md" >/dev/null
+  stop_stub "$pid"
+  [ "$(loop_phase cited)" = "plan-dispatch" ] || fail "a plan consult citing a usable prior audit must advance to plan-dispatch"
+  [ "$(jq -r '.findings' "$HOME_DIR/data/cited/chatgpt-loop.json")" = "prior audit finding: flaky retry logic" ] || fail "the cited prior audit must be persisted as findings"
+  [ "$(jq -r '.findings_source' "$HOME_DIR/data/cited/chatgpt-loop.json")" = "$dir/prior-audit.md" ] || fail "the cited evidence path must be recorded in state"
+  assert_contains "$(jq -r '.input[0].content' "$dir/request.json")" "prior audit finding: flaky retry logic" "the plan prompt must explicitly carry the cited prior audit"
+  [ ! -f "$dir/argv.txt" ] || fail "the cited-evidence plan path must dispatch no audit worker"
+  pass "a plan consult citing a usable prior audit records it and skips the redundant audit worker"
+}
+
+test_plan_consult_cited_evidence_from_audit_worker() {
+  local dir=$TMP_ROOT/citedworker pid
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task citedworker --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task citedworker >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task citedworker -- myworker myproj --mode local-only --yolo off >/dev/null
+  [ "$(loop_phase citedworker)" = "audit-worker" ] || fail "the setup must reach audit-worker"
+  printf 'worker audit report: retries are unbounded\n' > "$dir/report.md"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" consult --stage plan --task citedworker --findings-file "$dir/report.md" >/dev/null
+  stop_stub "$pid"
+  [ "$(loop_phase citedworker)" = "plan-dispatch" ] || fail "a plan consult citing prior evidence must reach plan from audit-worker"
+  assert_contains "$(jq -r '.input[0].content' "$dir/request.json")" "retries are unbounded" "the plan prompt must carry the cited report"
+  pass "a task stuck at audit-worker plans directly from cited prior audit evidence"
+}
+
+test_plan_consult_without_evidence_refuses() {
+  local dir=$TMP_ROOT/noevidence rc out
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  bash "$LOOP" init --task noevidence --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  out=$(bash "$LOOP" consult --stage plan --task noevidence 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a plan consult without cited evidence must refuse outside plan-consult"
+  [ "$(loop_phase noevidence)" = "audit-consult" ] || fail "a refused plan consult must change no phase"
+  [ ! -f "$dir/request.json" ] || fail "a refused plan consult must issue no consultation"
+  assert_contains "$out" "plan-consult" "the refusal must name the required phase"
+  pass "a plan consult without cited prior audit evidence keeps the normal audit-required path"
+}
+
+test_cited_evidence_invalid_is_retryable() {
+  local dir=$TMP_ROOT/badevidence rc out
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  bash "$LOOP" init --task badevidence --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  : > "$dir/empty.md"
+  out=$(bash "$LOOP" consult --stage plan --task badevidence --findings-file "$dir/empty.md" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an empty cited evidence file must refuse"
+  [ "$(loop_phase badevidence)" = "audit-consult" ] || fail "an empty citation must leave the phase unchanged"
+  [ -z "$(jq -r '.findings' "$HOME_DIR/data/badevidence/chatgpt-loop.json")" ] || fail "an empty citation must persist no findings"
+  assert_contains "$(jq -r '.last_error' "$HOME_DIR/data/badevidence/chatgpt-loop.json")" "unusable" "an unusable citation must record last_error"
+  out=$(bash "$LOOP" consult --stage plan --task badevidence --findings-file "$dir/missing.md" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a missing cited evidence file must refuse"
+  [ "$(loop_phase badevidence)" = "audit-consult" ] || fail "a missing citation must leave the phase unchanged"
+  [ ! -f "$dir/request.json" ] || fail "an unusable citation must issue no consultation"
+  pass "malformed or missing cited evidence is rejected with the phase intact and the stage retryable"
+}
+
+test_record_findings_requires_nonempty() {
+  local dir=$TMP_ROOT/emptyfindings pid rc
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task emptyfindings --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task emptyfindings >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task emptyfindings -- myworker myproj --mode local-only --yolo off >/dev/null
+  : > "$dir/empty.txt"
+  bash "$LOOP" record-findings --task emptyfindings --file "$dir/empty.txt" >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 0 ] || fail "an empty findings record must refuse"
+  [ "$(loop_phase emptyfindings)" = "audit-worker" ] || fail "an empty findings record must not complete the audit worker"
+  [ -z "$(jq -r '.findings' "$HOME_DIR/data/emptyfindings/chatgpt-loop.json")" ] || fail "an empty findings record must persist no findings"
+  printf 'real audit finding\n' > "$dir/real.txt"
+  bash "$LOOP" record-findings --task emptyfindings --file "$dir/real.txt" >/dev/null
+  [ "$(loop_phase emptyfindings)" = "plan-consult" ] || fail "a valid findings record must complete the audit worker"
+  [ "$(jq -r '.findings' "$HOME_DIR/data/emptyfindings/chatgpt-loop.json")" = "real audit finding" ] || fail "a successful audit completion must persist non-empty findings"
+  pass "a successful audit records non-empty findings while an empty record never completes the worker"
+}
+
+test_record_findings_resolves_worker_report() {
+  local dir=$TMP_ROOT/resolvereport pid
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task resolvereport --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task resolvereport >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task resolvereport -- reportworker myproj --mode local-only --yolo off >/dev/null
+  mkdir -p "$HOME_DIR/data/reportworker"
+  printf 'report findings: two flaky tests\n' > "$HOME_DIR/data/reportworker/report.md"
+  bash "$LOOP" record-findings --task resolvereport >/dev/null
+  [ "$(loop_phase resolvereport)" = "plan-consult" ] || fail "recording without --file must complete from the dispatched worker report"
+  [ "$(jq -r '.findings' "$HOME_DIR/data/resolvereport/chatgpt-loop.json")" = "report findings: two flaky tests" ] || fail "the dispatched worker report must flow back as findings"
+  [ "$(jq -r '.findings_source' "$HOME_DIR/data/resolvereport/chatgpt-loop.json")" = "$HOME_DIR/data/reportworker/report.md" ] || fail "the resolved report path must be recorded"
+  pass "the completion path resolves the dispatched worker's report so findings stop staying empty"
+}
+
+test_dispatch_effort_owns_single_flag() {
+  local dir=$TMP_ROOT/effortowner pid count rc
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task effortowner --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task effortowner >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task effortowner -- wt p --mode local-only --yolo off --effort xhigh >/dev/null
+  [ "$(loop_phase effortowner)" = "audit-worker" ] || fail "a spawn-side effort must dispatch"
+  count=$(grep -o -- '--effort' "$dir/argv.txt" | wc -l | tr -d ' ')
+  [ "$count" = 1 ] || fail "exactly one --effort must reach the spawn argv, got $count"
+  assert_contains "$(cat "$dir/argv.txt")" "--effort xhigh" "the spawn-side effort must be the one that reaches the spawn"
+  grep -q -- '--effort low' "$dir/argv.txt" && fail "the loop must not append a second effort beside a spawn-side one"
+  rm -f "$dir/argv.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task effortowner2 --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task effortowner2 >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --effort high --task effortowner2 -- wt p --mode local-only --yolo off --effort low >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 0 ] || fail "two disagreeing effort sources must refuse"
+  [ "$(loop_phase effortowner2)" = "audit-dispatch" ] || fail "an effort conflict must change no phase"
+  [ ! -f "$dir/argv.txt" ] || fail "an effort conflict must launch nothing"
+  pass "effort reaches the spawn once, from whichever single source supplied it, and conflicting sources refuse"
+}
+
 test_full_loop_happy_path
 test_plan_consult_carries_explicit_context
 test_consult_failure_is_retryable
@@ -518,3 +657,10 @@ test_bridge_verbs_refused
 test_audit_worker_receives_generated_prompt
 test_consult_banner_stripping
 test_per_stage_effort_dispatch
+test_plan_consult_with_cited_evidence
+test_plan_consult_cited_evidence_from_audit_worker
+test_plan_consult_without_evidence_refuses
+test_cited_evidence_invalid_is_retryable
+test_record_findings_requires_nonempty
+test_record_findings_resolves_worker_report
+test_dispatch_effort_owns_single_flag
