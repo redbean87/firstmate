@@ -66,6 +66,18 @@
 # plan-dispatch; a missing or empty file is refused with the phase unchanged.
 # Without --findings-file the plan consult still requires plan-consult.
 #
+# Cited evidence never goes out as a bare reference: both prompt builders
+# inline the content of every evidence path cited with the @[path] marker in
+# the objective or context, and the plan builder inlines its --findings-file
+# the same way. Resolution tries an absolute path as-is, then a relative path
+# against the task data directory $DATA/<task-id> first and $HOME second; only
+# a readable regular file is accepted. The original citation text stays
+# visible in the prompt and each inlined block is delimited by the resolved
+# source path. An unresolvable or unreadable citation fails prompt
+# construction loudly on stderr with the attempted candidates and a nonzero
+# return before the bridge is contacted, so a prompt carrying a dangling
+# reference is never sent.
+#
 # Effort has one owner per dispatch: dispatch --effort is the per-stage
 # selection and defaults to low, while the passthrough spawn args may carry
 # the spawn interface's own --effort. Exactly one --effort reaches fm-spawn:
@@ -169,6 +181,93 @@ require_phase_any() {
   return 1
 }
 
+# normalize_path <path>: print the path with its directory component resolved
+# to a physical absolute path when that directory is inspectable. A path whose
+# directory cannot be inspected is returned unchanged. A resolved citation is
+# normalized before it is read so the same file always compares and prints the
+# same way.
+normalize_path() {
+  local path=$1 dir base
+  dir=$(dirname -- "$path")
+  base=$(basename -- "$path")
+  if [ -d "$dir" ]; then
+    printf '%s/%s\n' "$(cd "$dir" && pwd -P)" "$base"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+# resolve_citation <task> <cited-path>: resolve one cited evidence path and
+# print the normalized path to a readable regular file. An absolute path is
+# used as-is; a relative path is tried against the task data directory first
+# and $HOME second. Nothing is invented: only the cited path itself is
+# considered, and an unreadable result is a loud refusal naming the attempted
+# candidates.
+resolve_citation() {
+  local task=$1 path=$2 candidate
+  [ -n "$path" ] || { printf 'fm-chatgpt-loop: cited evidence path is empty\n' >&2; return 1; }
+  case "$path" in
+    /*)
+      if [ -f "$path" ] && [ -r "$path" ]; then
+        normalize_path "$path"
+        return 0
+      fi
+      printf 'fm-chatgpt-loop: cited evidence not readable: %s\n' "$path" >&2
+      return 1
+      ;;
+  esac
+  candidate="$DATA/$task/$path"
+  if [ -f "$candidate" ] && [ -r "$candidate" ]; then
+    normalize_path "$candidate"
+    return 0
+  fi
+  candidate="$HOME/$path"
+  if [ -f "$candidate" ] && [ -r "$candidate" ]; then
+    normalize_path "$candidate"
+    return 0
+  fi
+  printf 'fm-chatgpt-loop: cited evidence not readable: %s (tried %s and %s)\n' "$path" "$DATA/$task/$path" "$HOME/$path" >&2
+  return 1
+}
+
+# cited_paths <text>: print each unique cited evidence path in the text, one
+# per line, in order of first appearance. The @[path] marker is the only
+# syntax treated as a citation, so ordinary prose paths are never invented as
+# sources; a cited path ends at the first ], so a ] cannot appear in it.
+cited_paths() {
+  printf '%s' "$1" | grep -o '@\[[^]]*\]' | sed -e 's/^@\[//' -e 's/\]$//' | awk '!seen[$0]++'
+}
+
+# inline_citations <state-file> <task> <out>: append one delimited evidence
+# block per citation found in the objective and context, after the original
+# prompt text that cites it. Every citation is resolved and checked readable
+# before anything is written, so one unreadable citation fails the whole
+# prompt construction with a nonzero return instead of shipping a dangling
+# reference.
+inline_citations() {
+  local file=$1 task=$2 out=$3 text path resolved p
+  text="$(read_field "$file" objective)"$'\n'"$(read_field "$file" context)"
+  local -a paths=() resolved_paths=()
+  while IFS= read -r path; do
+    [ -n "$path" ] && paths+=("$path")
+  done < <(cited_paths "$text")
+  [ "${#paths[@]}" -gt 0 ] || return 0
+  for p in "${paths[@]}"; do
+    resolved=$(resolve_citation "$task" "$p") || return 1
+    resolved_paths+=("$resolved")
+  done
+  {
+    printf '\nCited evidence (verbatim file content for each @[path] citation above):\n'
+    local i
+    for i in "${!paths[@]}"; do
+      printf 'source: %s\n' "${resolved_paths[$i]}"
+      printf -- '--- BEGIN CITED EVIDENCE: %s ---\n' "${resolved_paths[$i]}"
+      cat "${resolved_paths[$i]}" || return 1
+      printf -- '\n--- END CITED EVIDENCE: %s ---\n' "${resolved_paths[$i]}"
+    done
+  } >> "$out"
+}
+
 # findings_text <file>: print a usable findings file's content, or explain why
 # it is unusable. A missing path and a whitespace-only file are both refusals,
 # because an audit that records nothing must never look complete.
@@ -236,22 +335,32 @@ cmd_init() {
 }
 
 build_audit_prompt() {
-  local file=$1 out=$2
+  local file=$1 out=$2 task=$3
   {
     printf 'User objective:\n%s\n\n' "$(read_field "$file" objective)"
     printf 'Firstmate context:\n%s\n' "$(read_field "$file" context)"
-  } > "$out"
+  } > "$out" || return 1
+  inline_citations "$file" "$task" "$out"
 }
 
 build_plan_prompt() {
-  local file=$1 out=$2
+  local file=$1 out=$2 task=$3 fsrc
   {
     printf 'User objective:\n%s\n\n' "$(read_field "$file" objective)"
     printf 'Firstmate context:\n%s\n\n' "$(read_field "$file" context)"
     printf 'Audit prompt sent earlier:\n%s\n\n' "$(read_field "$file" audit_prompt)"
     printf 'ChatGPT audit result:\n%s\n\n' "$(read_field "$file" audit_result)"
-    printf 'Worker audit findings:\n%s\n' "$(read_field "$file" findings)"
-  } > "$out"
+  } > "$out" || return 1
+  fsrc=$(read_field "$file" findings_source)
+  if [ -n "$fsrc" ]; then
+    printf 'Worker audit findings (source: %s):\n' "$fsrc" >> "$out" || return 1
+    printf -- '--- BEGIN CITED EVIDENCE: %s ---\n' "$fsrc" >> "$out" || return 1
+    jq -r '.findings' "$file" >> "$out" || return 1
+    printf -- '\n--- END CITED EVIDENCE: %s ---\n' "$fsrc" >> "$out" || return 1
+  else
+    printf 'Worker audit findings:\n%s\n' "$(read_field "$file" findings)" >> "$out" || return 1
+  fi
+  inline_citations "$file" "$task" "$out"
 }
 
 # strip_local_tools_banner reads a consultation answer on stdin and writes it
@@ -299,7 +408,7 @@ cmd_consult() {
     usage
     return 2
   fi
-  local file thread
+  local file thread resolved_findings=""
   file=$(need_state "$task") || return 1
   # The normal gate is one phase per stage. A plan consult carrying a usable
   # prior-audit file additionally reaches plan from the pre-plan phases, which
@@ -311,7 +420,11 @@ cmd_consult() {
     require_phase "$file" audit-consult "$task" || return 1
   elif [ -n "$findings_file" ]; then
     require_phase_any "$file" "$task" plan-consult audit-consult audit-worker || return 1
-    findings_text "$findings_file" >/dev/null || {
+    resolved_findings=$(resolve_citation "$task" "$findings_file") || {
+      write_field "$file" last_error "cited prior audit unusable: $findings_file" || return 1
+      return 1
+    }
+    findings_text "$resolved_findings" >/dev/null || {
       write_field "$file" last_error "cited prior audit unusable: $findings_file" || return 1
       return 1
     }
@@ -320,21 +433,29 @@ cmd_consult() {
   fi
   command -v jq >/dev/null 2>&1 || { printf 'fm-chatgpt-loop: consultation needs jq\n' >&2; return 1; }
   if [ -n "$findings_file" ]; then
-    persist_findings "$file" "$findings_file" "$findings_file" || {
+    persist_findings "$file" "$resolved_findings" "$resolved_findings" || {
       write_field "$file" last_error "cited prior audit unusable: $findings_file" || return 1
       return 1
     }
   fi
   thread=$(read_field "$file" thread)
-  local work prompt answer rc
+  local work prompt answer rc build_err
   work=$(mktemp -d) || return 1
   # shellcheck disable=SC2064
   trap "rm -rf '$work'" RETURN
   prompt="$work/prompt.txt"
   if [ "$stage" = audit ]; then
-    build_audit_prompt "$file" "$prompt"
+    build_err=$(build_audit_prompt "$file" "$prompt" "$task" 2>&1) || {
+      printf '%s\n' "$build_err" >&2
+      write_field "$file" last_error "audit prompt construction failed: $build_err" || return 1
+      return 1
+    }
   else
-    build_plan_prompt "$file" "$prompt"
+    build_err=$(build_plan_prompt "$file" "$prompt" "$task" 2>&1) || {
+      printf '%s\n' "$build_err" >&2
+      write_field "$file" last_error "plan prompt construction failed: $build_err" || return 1
+      return 1
+    }
   fi
   if answer=$("$CONSULT_BIN" --prompt-file "$prompt" --mode "$stage" --thread "$thread" 2>"$work/stderr.txt"); then
     rc=0

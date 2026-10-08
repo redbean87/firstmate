@@ -574,6 +574,167 @@ test_cited_evidence_invalid_is_retryable() {
   pass "malformed or missing cited evidence is rejected with the phase intact and the stage retryable"
 }
 
+test_audit_consult_inlines_cited_evidence() {
+  local dir=$TMP_ROOT/auditinline pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'Use the audit evidence at @[report.md] when writing the questions.\n' > "$TMP_ROOT/context-audit-cited.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task auditinline --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context-audit-cited.txt" >/dev/null
+  printf 'AUDIT-EVIDENCE-MARKER: two flaky retries\n' > "$HOME_DIR/data/auditinline/report.md"
+  bash "$LOOP" consult --stage audit --task auditinline >/dev/null
+  stop_stub "$pid"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" "AUDIT-EVIDENCE-MARKER" "an audit consult must inline a task-data-dir citation"
+  assert_contains "$prompt" '@[report.md]' "the original audit citation must stay visible"
+  assert_contains "$prompt" "BEGIN CITED EVIDENCE" "the inlined audit evidence must be delimited"
+  assert_contains "$prompt" "$HOME_DIR/data/auditinline/report.md" "the inlined block must name its resolved source"
+  pass "an audit consult inlines a cited report from the task data directory and keeps the reference visible"
+}
+
+test_consult_resolves_citation_from_home() {
+  local dir=$TMP_ROOT/homecite pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'Environment note from @[home-note.md].\n' > "$TMP_ROOT/context-home.txt"
+  printf 'HOME-EVIDENCE-MARKER: shells differ\n' > "$HOME_DIR/home-note.md"
+  pid=$(start_stub "$dir")
+  HOME="$HOME_DIR" bash "$LOOP" init --task homecite --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context-home.txt" >/dev/null
+  HOME="$HOME_DIR" bash "$LOOP" consult --stage audit --task homecite >/dev/null
+  stop_stub "$pid"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" "HOME-EVIDENCE-MARKER" "a relative citation must resolve against HOME"
+  pass "a relative citation resolves against HOME when it is not in the task data directory"
+}
+
+test_consult_resolves_absolute_citation() {
+  local dir=$TMP_ROOT/abscite pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'ABS-EVIDENCE-MARKER: absolute citation\n' > "$dir/abs-evidence.md"
+  printf 'See @[%s/abs-evidence.md].\n' "$dir" > "$TMP_ROOT/context-abs.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task abscite --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context-abs.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task abscite >/dev/null
+  stop_stub "$pid"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" "ABS-EVIDENCE-MARKER" "an absolute citation must resolve as-is"
+  pass "an absolute citation is read as-is and inlined"
+}
+
+test_consult_without_citations_has_no_evidence_section() {
+  local dir=$TMP_ROOT/nocite pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task nocite --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task nocite >/dev/null
+  stop_stub "$pid"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_not_contains "$prompt" "Cited evidence" "a consult with no citation must emit no evidence section"
+  assert_contains "$prompt" "repo at /tmp/demo" "ordinary prose paths must stay ordinary context"
+  pass "a consult with no citation emits no empty evidence section and treats prose paths as prose"
+}
+
+test_consult_missing_citation_fails_closed() {
+  local dir=$TMP_ROOT/missingcite pid out rc
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'See @[missing-report.md] for detail.\n' > "$TMP_ROOT/context-missing.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task missingcite --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context-missing.txt" >/dev/null
+  stop_stub "$pid"
+  rm -f "$dir/request.json"
+  out=$(bash "$LOOP" consult --stage audit --task missingcite 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an unreadable audit citation must fail the consult"
+  [ "$(loop_phase missingcite)" = "audit-consult" ] || fail "a failed audit citation must leave the phase unchanged"
+  [ ! -f "$dir/request.json" ] || fail "an unreadable audit citation must send no consultation"
+  assert_contains "$out" "missing-report.md" "the refusal must name the cited source"
+  assert_contains "$out" "not readable" "the refusal must report unreadability"
+  assert_contains "$(jq -r '.last_error' "$HOME_DIR/data/missingcite/chatgpt-loop.json")" "not readable" "the refusal must be recorded in state"
+  pass "an unreadable audit citation fails loudly, sends nothing, and leaves the stage retryable"
+}
+
+test_plan_consult_inlines_cited_prior_plan() {
+  local dir=$TMP_ROOT/plantax pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'Reuse the exact taxonomy from @[prior-plan.md].\n' > "$TMP_ROOT/context-plan-cited.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task plantax --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context-plan-cited.txt" >/dev/null
+  {
+    printf 'Canonical taxonomy:\n'
+    printf -- '- 200MA Pullback-Breakout\n'
+    printf -- '- 200MA Zone Rejection\n'
+    printf -- '- Swing-Level Retest\n'
+  } > "$HOME_DIR/data/plantax/prior-plan.md"
+  printf 'prior audit: entries lack the canonical taxonomy\n' > "$dir/prior-audit.md"
+  bash "$LOOP" consult --stage plan --task plantax --findings-file "$dir/prior-audit.md" >/dev/null
+  stop_stub "$pid"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" "200MA Pullback-Breakout" "the cited plan taxonomy must reach the plan prompt"
+  assert_contains "$prompt" "200MA Zone Rejection" "the second taxonomy value must reach the plan prompt"
+  assert_contains "$prompt" "Swing-Level Retest" "the third taxonomy value must reach the plan prompt"
+  assert_contains "$prompt" "prior audit: entries lack the canonical taxonomy" "the cited findings must stay inlined"
+  assert_contains "$prompt" '@[prior-plan.md]' "the plan citation must stay visible"
+  pass "a plan consult inlines a cited prior plan so exact taxonomy values need no manual copying"
+}
+
+test_plan_cited_findings_resolve_relative() {
+  local dir=$TMP_ROOT/relfind pid prompt
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task relfind --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  printf 'REL-FINDING-MARKER: prior audit\n' > "$HOME_DIR/data/relfind/prior.md"
+  bash "$LOOP" consult --stage plan --task relfind --findings-file prior.md >/dev/null
+  stop_stub "$pid"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" "REL-FINDING-MARKER" "a relative findings file must resolve from the task data directory"
+  [ "$(jq -r '.findings_source' "$HOME_DIR/data/relfind/chatgpt-loop.json")" = "$HOME_DIR/data/relfind/prior.md" ] || fail "the resolved findings source must be recorded"
+  pass "a relative cited findings file resolves from the task data directory and is inlined"
+}
+
+test_consult_inlines_evidence_verbatim() {
+  local dir=$TMP_ROOT/verbatim pid prompt o c e
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  printf 'Objective-first-marker line.\n' > "$TMP_ROOT/objective-verbatim.txt"
+  printf 'Context-second-marker cites @[odd name.md].\n' > "$TMP_ROOT/context-verbatim.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task verbatim --objective-file "$TMP_ROOT/objective-verbatim.txt" --context-file "$TMP_ROOT/context-verbatim.txt" >/dev/null
+  cat > "$HOME_DIR/data/verbatim/odd name.md" <<'EOF'
+line one with "double quotes"
+line two with 'single quotes'
+line three with `backticks` and $HOME and $(command) and ${var}
+line four with a path with spaces: /tmp/a b/c
+
+line six after an empty line
+EOF
+  bash "$LOOP" consult --stage audit --task verbatim >/dev/null
+  stop_stub "$pid"
+  prompt=$(jq -r '.input[0].content' "$dir/request.json")
+  assert_contains "$prompt" 'line one with "double quotes"' "double quotes must survive verbatim"
+  assert_contains "$prompt" "line two with 'single quotes'" "single quotes must survive verbatim"
+  # shellcheck disable=SC2016
+  assert_contains "$prompt" 'line three with `backticks` and $HOME and $(command) and ${var}' "shell-looking text must survive verbatim"
+  assert_contains "$prompt" 'line four with a path with spaces: /tmp/a b/c' "a path with spaces must survive verbatim"
+  assert_contains "$prompt" "line six after an empty line" "an empty line must not truncate the evidence"
+  o=$(printf '%s' "$prompt" | grep -n 'Objective-first-marker' | head -1 | cut -d: -f1)
+  c=$(printf '%s' "$prompt" | grep -n 'Context-second-marker' | head -1 | cut -d: -f1)
+  e=$(printf '%s' "$prompt" | grep -n 'BEGIN CITED EVIDENCE' | head -1 | cut -d: -f1)
+  { [ -n "$o" ] && [ -n "$c" ] && [ -n "$e" ] && [ "$o" -lt "$c" ] && [ "$c" -lt "$e" ]; } || fail "objective, context, and evidence must keep their order"
+  pass "cited evidence with quotes, backticks, shell text, spaces, and empty lines is inlined verbatim in order"
+}
+
 test_record_findings_requires_nonempty() {
   local dir=$TMP_ROOT/emptyfindings pid rc
   mkdir -p "$dir"
@@ -661,6 +822,14 @@ test_plan_consult_with_cited_evidence
 test_plan_consult_cited_evidence_from_audit_worker
 test_plan_consult_without_evidence_refuses
 test_cited_evidence_invalid_is_retryable
+test_audit_consult_inlines_cited_evidence
+test_consult_resolves_citation_from_home
+test_consult_resolves_absolute_citation
+test_consult_without_citations_has_no_evidence_section
+test_consult_missing_citation_fails_closed
+test_plan_consult_inlines_cited_prior_plan
+test_plan_cited_findings_resolve_relative
+test_consult_inlines_evidence_verbatim
 test_record_findings_requires_nonempty
 test_record_findings_resolves_worker_report
 test_dispatch_effort_owns_single_flag
