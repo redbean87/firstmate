@@ -157,6 +157,8 @@ A correction edits only the wrong text and never runs `bin/fm-ensure-agents-md.s
 Keep fleet delivery posture and captain-private strategy out of project memory.
 When the captain invokes `/stow`, load the `stow` skill for its memory curation, knowledge routing, and persistence of the open work records this session is holding; it files and corrects only the open work that session is holding, and never reconciles the backlog against repository or PR reality.
 
+Load `session-retro` when the captain asks to retrospect a finished task, or when repeated waste across recent runs needs explaining; route what it finds to the owner above rather than leaving it in the report.
+
 ## 7. Task lifecycle
 
 The delivery lifecycle is an always-loaded operational contract; referenced scripts own exact commands, flags, and data mechanics.
