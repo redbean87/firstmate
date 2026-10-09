@@ -569,6 +569,10 @@
       "audience": "agent-runtime"
     },
     {
+      "path": ".agents/skills/session-retro/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
       "path": ".agents/skills/session-start-recovery/SKILL.md",
       "audience": "agent-runtime"
     },
