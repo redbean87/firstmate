@@ -165,8 +165,8 @@ finding = '{"findings": [{"id": "f", "severity": "warning", "file": "src/b.ts", 
 for round_no in (1, 2):
     db.execute("INSERT INTO step_rounds VALUES (?, 's1', ?, ?, ?, ?)",
                ("sr%d" % round_no, round_no, "auto_fix" if round_no > 1 else "initial", finding, 60_000))
-db.execute("INSERT INTO agent_invocations VALUES ('i1', 'run1', 'review', 1, 'review', 700_000, 'ok', NULL, 12, ?)", (base,))
-db.execute("INSERT INTO agent_invocations VALUES ('i2', 'run1', 'review', 2, 'review-fix', 1_000, 'error', 'timeout', 3, ?)", (base + 1,))
+db.execute("INSERT INTO agent_invocations VALUES ('i1', 'run1', 'review', 1, 'review', ?, 'ok', NULL, 12, ?)", (700000, base))
+db.execute("INSERT INTO agent_invocations VALUES ('i2', 'run1', 'review', 2, 'review-fix', ?, 'error', 'timeout', 3, ?)", (1000, base + 1))
 db.commit()
 db.close()
 PY
