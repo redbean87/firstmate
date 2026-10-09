@@ -8,7 +8,7 @@
 #
 # A task record is required only when no --transcript is given, so a cleaned-up
 # task can still be retrospected from its transcript. --project and --branch
-# attribute pipeline data when the task record is gone.
+# attribute pipeline runs when the task record is gone.
 #
 # Purpose: explain where one finished worker session spent confusion, context,
 # and tokens, with file:line evidence and concrete reduction recommendations,
@@ -31,7 +31,9 @@
 #   - no-mistakes' state database, opened read-only, for pipeline churn: run
 #     outcomes, per-step rounds, findings per round, durations, and failures.
 #     Pipeline token totals are read only from the owned ledger
-#     data/pipeline-spend.jsonl when a record exists; this script never
+#     data/pipeline-spend.jsonl when a task-scoped record exists; a transcript-only
+#     run without --task omits ledger totals rather than attributing another task's.
+#     This script never
 #     recomputes bin/fm-pipeline-spend.sh's token accounting.
 #
 # Signal thresholds, weights, and the report schema are owned by the analyzer
