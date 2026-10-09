@@ -741,6 +741,15 @@ def analyze_sessions(sessions, index):
         if not cut:
             continue
         rereads.extend(repeat_reads_after(reads, cut))
+    seen = set()
+    unique = []
+    for call in rereads:
+        key = (call.get("session"), call.get("line"))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(call)
+    rereads = unique
     if rereads:
         findings.append(make(
             "confusion", "post_compaction_reread", len(rereads),
@@ -928,7 +937,7 @@ def analyze_pipeline(cfg):
               "repasse_files": [], "long_tail": [], "failures": [], "roundtrips": 0,
               "ledger": None}
     ledger_path = cfg.get("ledger")
-    if ledger_path and os.path.isfile(ledger_path):
+    if ledger_path and cfg.get("task") and os.path.isfile(ledger_path):
         try:
             for raw in Path(ledger_path).read_text(encoding="utf-8", errors="replace").splitlines():
                 try:
