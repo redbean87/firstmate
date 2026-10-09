@@ -1,17 +1,16 @@
-# Session retrospective: other-task
+# Session retrospective: t2
 
-- kind: unknown
+- kind: ship
 - delivery: unknown
-- runtime: pi / unknown / effort unknown / unknown backend
-- project: /tmp/fm-retro-dedup.eEwJaM/wt
+- runtime: pi / fake/m / effort unknown / unknown backend
+- project: /tmp/fm-retro-dedup.eEwJaM
 - branch: fm/t2
-- outcome: completed (https://example.invalid/pr/9)
-- report built: 2026-10-09T12:09:40Z
+- outcome: unknown
+- report built: 2026-10-09T12:09:02Z
 - session: 1 transcript(s), 2026-10-09T12:09:02Z to 2026-10-09T12:12:03Z (3m01s)
 - session 1: /tmp/fm-retro-dedup.eEwJaM/pi/--wt--/s.jsonl (pi)
 - turns: 2 assistant, 0 user, 2 tool calls
-- pipeline: 1 run(s), 0 agent invocation(s), 0 fix round(s)
-- pipeline tokens: 99,999 input, 88,888 output, 77,777 cache-read (from the spend ledger)
+- pipeline: unavailable: no-mistakes resolved no repository from the task copy
 
 ## Top drivers
 1. **compaction** - 2 compaction(s), peak context 100,000 tokens (s1:4, s1:5)

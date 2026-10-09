@@ -1,4 +1,4 @@
-# Session retrospective: other-task
+# Session retrospective: <transcript only>
 
 - kind: unknown
 - delivery: unknown
@@ -11,7 +11,6 @@
 - session 1: /tmp/fm-retro-dedup.eEwJaM/pi/--wt--/s.jsonl (pi)
 - turns: 2 assistant, 0 user, 2 tool calls
 - pipeline: 1 run(s), 0 agent invocation(s), 0 fix round(s)
-- pipeline tokens: 99,999 input, 88,888 output, 77,777 cache-read (from the spend ledger)
 
 ## Top drivers
 1. **compaction** - 2 compaction(s), peak context 100,000 tokens (s1:4, s1:5)
