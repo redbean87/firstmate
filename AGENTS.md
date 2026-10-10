@@ -195,6 +195,9 @@ On a `no-mistakes-prod-only` project, classify the task's surface: internal-only
 An unregistered project or absent registry resolves to `no-mistakes` with yolo off, and the registration gap goes to the captain.
 Record the resulting mode, `yolo` merge posture, and the one-line reason for any deviation in the backlog item note.
 
+When a request yields several pieces of work, cut it at intake with tracer-bullet slicing: break the work into vertical end-to-end pieces that each carry the change through its full path rather than finishing one layer, size each piece as a review-round-sized ship task under the sizing guidance below, and have each backlog item declare its blockers explicitly so work proceeds on the unblocked edge; trivially small work stays one item and is unaffected.
+A wide mechanical refactor that resists vertical cutting is sequenced expand-then-contract instead: add the new form beside the old, migrate in batches, then remove the old form, with each batch declaring what it waits on.
+
 Treat file or subsystem overlap as a risk signal rather than an automatic reason to wait, and dispatch isolated work immediately with no concurrency cap when each change can be independently implemented and validated and the selected delivery path can reconcile ordinary rebases or conflicts.
 A project's declared machine capacity (`config/project-capacity`) still bounds that dispatch: a spawn beyond it exits 75 without launching, and its item stays queued rather than blocked.
 Serialize only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress or reconciliation unsafe; same-file editing alone is insufficient, and genuine blockers remain durable.
