@@ -1284,19 +1284,31 @@ test_chatgpt_bridge_probe_reporting() {
   assert_not_contains "$out" "CHATGPT_BRIDGE" \
     "FM_CHATGPT_HEALTH_PROBE=0 must skip the probe"
 
-  # A home with no override and no consult-loop state never configured the
-  # channel, so the probe stays silent even when enabled. The reachability
-  # probe goes to the default port, so a dev machine with a live bridge
-  # occupying it cannot observe this case; CI has no bridge.
+  # The default-URL cases need nothing listening at the default port; a dev
+  # machine with a live bridge occupying it cannot observe them.
   if curl -s -m 1 -o /dev/null "http://127.0.0.1:17841/v1" 2>/dev/null; then
-    pass "bootstrap: the bridge probe reports a configured-but-broken channel from the network phase only (never-configured case skipped: a live bridge occupies the default port)"
+    pass "bootstrap: the bridge probe reports a configured-but-broken channel from the network phase only (default-URL cases skipped: a live bridge occupies the default port)"
     return 0
   fi
+
+  # A home with no override, no consult-loop state, and no channel evidence
+  # never configured the channel, so the probe stays silent even when enabled.
   out=$(env -u CHATGPT_WEB_BRIDGE_URL PATH="$fakebin:$toolbin:$BASE_PATH" \
     FM_HOME="$case_dir/quiet-home" FM_ROOT_OVERRIDE="$case_dir/quiet-home" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_CHATGPT_HEALTH_PROBE=1 "$ROOT/bin/fm-bootstrap.sh")
   assert_not_contains "$out" "CHATGPT_BRIDGE" \
     "a never-configured channel must stay silent"
+
+  # A home that recorded channel use reads as configured, so a dead bridge at
+  # the default address surfaces an actionable line.
+  mkdir -p "$case_dir/marked-home/config"
+  printf '%s\n' manual > "$case_dir/marked-home/config/backlog-backend"
+  : > "$case_dir/marked-home/config/chatgpt-consultation"
+  out=$(env -u CHATGPT_WEB_BRIDGE_URL PATH="$fakebin:$toolbin:$BASE_PATH" \
+    FM_HOME="$case_dir/marked-home" FM_ROOT_OVERRIDE="$case_dir/marked-home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_CHATGPT_HEALTH_PROBE=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "CHATGPT_BRIDGE: unreachable" \
+    "a home that used the channel must surface a dead default-address bridge"
   pass "bootstrap: the bridge probe reports a configured-but-broken channel from the network phase only"
 }
 

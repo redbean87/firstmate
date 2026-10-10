@@ -81,12 +81,24 @@ fm_chatgpt_model_slug() {
   esac
 }
 
+# fm_chatgpt_channel_evidence_file
+# Prints the path of this home's durable consultation-channel evidence marker.
+# bin/fm-chatgpt-consult.sh writes it on a genuine consult attempt, so a home
+# that reached the channel through the direct path reads as configured even
+# without a URL override or consult-loop state.
+fm_chatgpt_channel_evidence_file() {
+  local home
+  home="${FM_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  printf '%s/config/chatgpt-consultation\n' "$home"
+}
+
 # fm_chatgpt_bridge_configured
 # Returns 0 when this home has configuration evidence that the consultation
 # channel is meant to work here: an explicit CHATGPT_WEB_BRIDGE_URL override,
-# or consult-loop state under the home's data directory (bin/fm-chatgpt-loop.sh
-# writes data/<task>/chatgpt-loop.json for every task it has run). Returns 1
-# when the channel was never configured on this home.
+# consult-loop state under the home's data directory (bin/fm-chatgpt-loop.sh
+# writes data/<task>/chatgpt-loop.json for every task it has run), or the
+# channel-evidence marker bin/fm-chatgpt-consult.sh records on a consult
+# attempt. Returns 1 when the channel was never configured on this home.
 fm_chatgpt_bridge_configured() {
   [ -n "${CHATGPT_WEB_BRIDGE_URL:-}" ] && return 0
   local home data f
@@ -95,7 +107,20 @@ fm_chatgpt_bridge_configured() {
   for f in "$data"/*/chatgpt-loop.json; do
     [ -e "$f" ] && return 0
   done
+  [ -e "$(fm_chatgpt_channel_evidence_file)" ] && return 0
   return 1
+}
+
+# fm_chatgpt_record_channel_use
+# Records durable evidence that this home uses the consultation channel, so a
+# later health probe reports a dead bridge instead of staying silent. Best
+# effort: never fails the caller.
+fm_chatgpt_record_channel_use() {
+  local marker
+  marker=$(fm_chatgpt_channel_evidence_file) || return 0
+  mkdir -p "$(dirname "$marker")" 2>/dev/null || return 0
+  : > "$marker" 2>/dev/null || return 0
+  return 0
 }
 
 # fm_chatgpt_bridge_health

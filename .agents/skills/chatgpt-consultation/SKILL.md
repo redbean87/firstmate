@@ -26,7 +26,7 @@ It only observes: installation, authentication, and repair of the bridge stay ou
 
 - `healthy` - a bounded test turn completed; the channel can run.
 - `unconfigured` - nothing is listening and this home has no consultation-channel configuration; quiet by contract, and a consult attempted anyway still fails closed with its prerequisite report.
-- `unreachable` - nothing is listening although this home configures the channel (a `CHATGPT_WEB_BRIDGE_URL` override or consult-loop state under `data/`); the preferred flow cannot run.
+- `unreachable` - nothing is listening although this home configures the channel (a `CHATGPT_WEB_BRIDGE_URL` override, consult-loop state under `data/`, or the `config/chatgpt-consultation` evidence flag a consult records); the preferred flow cannot run.
 - `unhealthy` - a bridge is listening but the bounded test turn failed, so the channel is present yet broken until the failure reason is disproven.
 - `misconfigured` - the resolved URL was refused (a non-loopback `CHATGPT_WEB_BRIDGE_URL` override), so no consultation can reach the channel until the override is corrected.
 

@@ -54,6 +54,7 @@ command -v curl >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs curl
 command -v jq >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs jq\n' >&2; exit 1; }
 
 BRIDGE_URL=$(fm_chatgpt_bridge_url) || exit 1
+fm_chatgpt_record_channel_use
 
 case "$MODE" in
   audit)

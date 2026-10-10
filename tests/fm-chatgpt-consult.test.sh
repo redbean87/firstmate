@@ -19,6 +19,8 @@ CONSULT="$ROOT/bin/fm-chatgpt-consult.sh"
 TMP_ROOT=$(fm_test_tmproot fm-chatgpt-consult)
 STUB_PORT=17899
 export CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:$STUB_PORT/v1"
+export FM_HOME="$TMP_ROOT/home"
+mkdir -p "$FM_HOME"
 
 # start_stub <case-dir> [status] [kind]: serves one canned Responses payload
 # and records the request body at <case-dir>/request.json. kind is `ok` (a
@@ -166,9 +168,35 @@ test_bridge_health_configuration_evidence() {
   printf '{}\n' > "$home/data/task-1/chatgpt-loop.json"
   ( unset CHATGPT_WEB_BRIDGE_URL; FM_HOME="$home"; fm_chatgpt_bridge_configured ); rc=$?
   expect_code 0 "$rc" "existing consult-loop state must count as channel configuration"
+  rm -rf "$home/data"
+  mkdir -p "$home/config"
+  : > "$home/config/chatgpt-consultation"
+  ( unset CHATGPT_WEB_BRIDGE_URL; FM_HOME="$home"; fm_chatgpt_bridge_configured ); rc=$?
+  expect_code 0 "$rc" "recorded channel evidence must count as channel configuration"
   fm_chatgpt_bridge_configured; rc=$?
   expect_code 0 "$rc" "the exported bridge URL override must count as channel configuration"
-  pass "configuration evidence is a bridge URL override or prior consult-loop state"
+  pass "configuration evidence is a bridge URL override, consult-loop state, or recorded channel use"
+}
+
+test_consult_records_channel_evidence() {
+  local dir pid home rc
+  dir="$TMP_ROOT/evidence-consult"; mkdir -p "$dir"
+  home="$TMP_ROOT/evidence-home"; mkdir -p "$home"
+  new_prompt
+  pid=$(start_stub "$dir")
+  FM_HOME="$home" bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" --mode audit --thread thread-evidence >/dev/null 2>&1; rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "an audit consult against the stub should succeed"
+  ( unset CHATGPT_WEB_BRIDGE_URL; FM_HOME="$home"; fm_chatgpt_bridge_configured ); rc=$?
+  expect_code 0 "$rc" "a home that ran a consult must read as configured without an override or loop state"
+
+  home="$TMP_ROOT/evidence-down-home"; mkdir -p "$home"
+  CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:1/v1" FM_HOME="$home" bash "$CONSULT" \
+    --prompt-file "$TMP_ROOT/prompt.txt" --mode audit --thread thread-down-evidence >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 0 ] || fail "an unreachable bridge must fail the consult"
+  ( unset CHATGPT_WEB_BRIDGE_URL; FM_HOME="$home"; fm_chatgpt_bridge_configured ); rc=$?
+  expect_code 0 "$rc" "a failed consult must still record channel evidence"
+  pass "a consult records durable channel evidence so a later dead bridge is reported"
 }
 
 test_audit_request_shape() {
@@ -284,3 +312,4 @@ test_bridge_failure_fails_closed
 test_bridge_health_probe_verdicts
 test_bridge_health_unconfigured_stays_quiet
 test_bridge_health_configuration_evidence
+test_consult_records_channel_evidence
