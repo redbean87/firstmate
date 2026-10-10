@@ -1387,6 +1387,28 @@ test_web_tool_exclusion_is_model_and_harness_scoped() {
   pass "the web-tool exclusion is scoped to qwen-local models on Pi runtimes"
 }
 
+test_qwen_local_secondmate_config_model_excludes_web_tools() {
+  local rec id sm out status launch
+  id=excl-qwen-web-secondmate-z9e
+  rec=$(make_spawn_case excl-qwen-web-secondmate pi "$id")
+  read_case_record "$rec"
+  printf '%s\n' "pi $QWEN_LOCAL_MODEL" > "$HOME_DIR/config/secondmate-harness"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  sm=$(cd "$sm" && pwd -P)
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+  status=$?
+  expect_code 0 "$status" "a config-resolved qwen-local secondmate should succeed"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "--model '$QWEN_LOCAL_MODEL' " \
+    "the config-resolved secondmate model must reach the launch"
+  assert_contains "$launch" "--exclude-tools '$WEB_TOOL_EXCLUSION' " \
+    "a config-resolved qwen-local secondmate must exclude the unused pi-web-access tools"
+  pass "a config-resolved qwen-local secondmate excludes the unused pi-web-access tools"
+}
+
 test_pi_exclude_tools_worker_registry_reports() {
   local harness kindflag scenario case_name rec id out status report
   command -v node >/dev/null 2>&1 || fail "node is required to drive Pi worker exclusion reporting"
@@ -2483,6 +2505,7 @@ test_pi_approve_probe_omits_unsupported_flag
 test_pi_exclude_tools_reach_ship_and_scout_launches
 test_qwen_local_model_excludes_web_tools
 test_qwen_local_model_exclusion_merges_with_config_list
+test_qwen_local_secondmate_config_model_excludes_web_tools
 test_web_tool_exclusion_is_model_and_harness_scoped
 test_pi_exclude_tools_worker_registry_reports
 test_pi_exclude_tools_absent_and_empty_lists

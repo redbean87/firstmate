@@ -2408,6 +2408,28 @@ if [ "$KIND" = secondmate ] && [ "$HARNESS" = rovo ]; then
   exit 1
 fi
 
+# config/secondmate-harness may carry optional model/effort tokens alongside the
+# harness ("<harness> [<model>] [<effort>]"). They apply only when this is a
+# --secondmate spawn and no explicit per-spawn harness/raw launch was supplied, so
+# the harness itself came from the secondmate config fallback chain. Resolving
+# here on every spawn makes the pin durable across respawns. Precedence: explicit
+# --model/--effort flags still win over the file's tokens.
+if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
+  if [ "$MODEL_SET" -eq 0 ]; then
+    SM_MODEL=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model)
+    [ -z "$SM_MODEL" ] || MODEL=$SM_MODEL
+  fi
+  if [ "$EFFORT_SET" -eq 0 ]; then
+    SM_EFFORT=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort)
+    if [ -n "$SM_EFFORT" ]; then
+      case "$SM_EFFORT" in
+      low | medium | high | xhigh | max | ultra) EFFORT=$SM_EFFORT ;;
+      *) echo "warning: config/secondmate-harness effort token '$SM_EFFORT' is not one of low, medium, high, xhigh, max, ultra; ignoring" >&2 ;;
+      esac
+    fi
+  fi
+fi
+
 # config/crew-exclude-tools (header above): refuse before worker provisioning
 # if this launch cannot honor the list. Secondmate agents are not covered.
 EXCLUDE_TOOLS=
@@ -2497,27 +2519,6 @@ agy)
   ;;
 esac
 
-# config/secondmate-harness may carry optional model/effort tokens alongside the
-# harness ("<harness> [<model>] [<effort>]"). They apply only when this is a
-# --secondmate spawn and no explicit per-spawn harness/raw launch was supplied, so
-# the harness itself came from the secondmate config fallback chain. Resolving
-# here on every spawn makes the pin durable across respawns. Precedence: explicit
-# --model/--effort flags still win over the file's tokens.
-if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
-  if [ "$MODEL_SET" -eq 0 ]; then
-    SM_MODEL=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model)
-    [ -z "$SM_MODEL" ] || MODEL=$SM_MODEL
-  fi
-  if [ "$EFFORT_SET" -eq 0 ]; then
-    SM_EFFORT=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort)
-    if [ -n "$SM_EFFORT" ]; then
-      case "$SM_EFFORT" in
-      low | medium | high | xhigh | max | ultra) EFFORT=$SM_EFFORT ;;
-      *) echo "warning: config/secondmate-harness effort token '$SM_EFFORT' is not one of low, medium, high, xhigh, max, ultra; ignoring" >&2 ;;
-      esac
-    fi
-  fi
-fi
 # Ultra is an explicit native capability, never a Pi thinking-level alias.
 # Validate the fully resolved profile before worktree or endpoint provisioning.
 if [ "$EFFORT" = ultra ]; then
