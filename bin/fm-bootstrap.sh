@@ -8,6 +8,9 @@
 #          Lines: "MISSING: <tool> (install: <command>)",
 #                 "PRESENTATION_UNAVAILABLE: lavish-axi (requires >=<floor>; install: <command>) - nonvisual work may proceed with plain-text decisions and reports; install or upgrade before using Lavish",
 #                 "MISSING_MANUAL: <tool> (instructions: <url>)", "NEEDS_GH_AUTH",
+#                 "CHATGPT_BRIDGE: unreachable <detail>",
+#                 "CHATGPT_BRIDGE: unhealthy <detail>",
+#                 "CHATGPT_BRIDGE: misconfigured <reason>",
 #                 "BACKEND_INVALID: <name> (known: <names>)",
 #                 "STARTUP_MEMORY_BUDGET: invalid config/startup-memory-budget - <reason>",
 #                 "CREW_DISPATCH: invalid config/crew-dispatch.json - <reason>",
@@ -23,6 +26,20 @@
 #                 "SECONDMATE_LIVENESS: secondmate <id>: skipped: <reason>|respawn failed after <cause>: <reason>",
 #                 "SECONDMATE_HANDOFF: secondmate <id>: pending delivery: <n> item(s)",
 #                 "FMX: X mode on ..." or "FMX: X mode off ...".
+#          The ChatGPT consultation bridge probe runs only in the network phase
+#          and only when curl and jq are present. It resolves the same loopback
+#          URL bin/fm-chatgpt-bridge-lib.sh resolves for every consultation, so
+#          the health it reports is the health a consultation would find. A
+#          healthy bridge and a bridge this home never configured both stay
+#          silent; unreachable-but-configured, listening-but-unhealthy (a test
+#          turn that could not complete), and misconfigured overrides print the
+#          CHATGPT_BRIDGE lines above, so a configured-but-broken channel is
+#          never silent. FM_CHATGPT_HEALTH_PROBE=0 skips the probe (the test
+#          suite sets it to stay hermetic), and
+#          FM_CHATGPT_HEALTH_PROBE_TIMEOUT bounds the test turn in seconds
+#          (default 30). docs/configuration.md "ChatGPT consultation channel"
+#          owns the channel contract; the probe only observes and never
+#          installs, authenticates, starts, or repairs the bridge.
 #          When a RUNNING secondmate home is fast-forwarded, its target is
 #          firstmate's own current default-branch commit. A local worktree uses
 #          a purely local fast-forward with no origin fetch; a remote route hands
@@ -203,6 +220,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
+# shellcheck source=bin/fm-chatgpt-bridge-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-chatgpt-bridge-lib.sh"
 # Shared secondmate endpoint probe + guarded relaunch; the watcher's poll tick
 # drives the same library so session start and ordinary supervision recover
 # from identical evidence through an identical path.
@@ -1559,6 +1578,26 @@ detect_home_summary_publication() {
   fi
 }
 
+# ChatGPT consultation bridge health (network phase only). The probe lives in
+# bin/fm-chatgpt-bridge-lib.sh - the channel contract owner - and is loopback-
+# only, so this wrapper only decides what startup printing looks like: healthy
+# and never-configured stay silent under bootstrap's "silent = all good"
+# contract, while the three actionable verdicts become CHATGPT_BRIDGE lines
+# that the deferred stage transports inline or as a durable wake.
+chatgpt_bridge_probe() {
+  [ "${FM_CHATGPT_HEALTH_PROBE:-1}" = 0 ] && return 0
+  if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+  local out verdict
+  out=$(fm_chatgpt_bridge_health 2>/dev/null) || true
+  verdict=${out%% *}
+  case "$verdict" in
+    unreachable|unhealthy|misconfigured) printf 'CHATGPT_BRIDGE: %s\n' "$out" ;;
+  esac
+  return 0
+}
+
 # The order below is the order the diagnostics have always printed in, so a
 # `skip` run is the same output with the network lines removed rather than a
 # reshuffle. `gh auth status` sits between the two local blocks because that is
@@ -1577,6 +1616,9 @@ if network_phase; then
   __fm_timing_stamp=$(fm_timing_now_ms)
   gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
   fm_timing_record phase gh-auth "$__fm_timing_stamp"
+  __fm_timing_stamp=$(fm_timing_now_ms)
+  chatgpt_bridge_probe
+  fm_timing_record phase chatgpt-bridge "$__fm_timing_stamp"
 fi
 local_phase && detect_local_config
 

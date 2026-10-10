@@ -54,6 +54,7 @@ command -v curl >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs curl
 command -v jq >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs jq\n' >&2; exit 1; }
 
 BRIDGE_URL=$(fm_chatgpt_bridge_url) || exit 1
+fm_chatgpt_record_channel_use
 
 case "$MODE" in
   audit)
@@ -88,7 +89,7 @@ case "$HTTP" in
     ;;
 esac
 
-TEXT=$(jq -r '[(.output // [])[] | select(.type == "message") | (.content // [])[] | select(.type == "output_text" or .type == "text") | .text] | join("\n")' "$RESPONSE")
+TEXT=$(fm_chatgpt_response_text "$RESPONSE")
 [ -n "$TEXT" ] || {
   printf 'fm-chatgpt: bridge returned no response text (HTTP %s)\n' "$HTTP" >&2
   exit 1

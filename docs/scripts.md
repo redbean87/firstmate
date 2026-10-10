@@ -171,4 +171,4 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm_voice_records.py`    | What a spoken answer may read, and the handover that queues real work                |
 | `fm-chatgpt-loop.sh`    | Firstmate-owned ChatGPT worker loop state machine: per-task audit and plan consultations, worker dispatch with per-stage effort selection, findings and result recording, and Firstmate-owned bridge start and stop |
 | `fm-chatgpt-consult.sh`  | Run one self-contained ChatGPT audit or plan consultation over the loopback codex-chatgpt-web bridge and print the answer |
-| `fm-chatgpt-bridge-lib.sh` | Single owner of the ChatGPT consultation bridge contract: bridge URL resolution, model slug handling, and Codex turn-metadata stamping |
+| `fm-chatgpt-bridge-lib.sh` | Single owner of the ChatGPT consultation bridge contract: bridge URL resolution, model slug handling, Codex turn-metadata stamping, and the bounded loopback health probe |

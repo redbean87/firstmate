@@ -295,7 +295,15 @@ test_worker_never_touches_bridge() {
   [ ! -f "$dir/argv.txt" ] || fail "a guard refusal must launch nothing"
   bash "$LOOP" dispatch --stage audit --task boundary -- t p --mode local-only --yolo off >/dev/null
   grep -Eiq 'CHATGPT_WEB_BRIDGE_URL|codex-chatgpt-web|17841|17911|fm-chatgpt-(consult|bridge)' "$dir/argv.txt" && fail "spawn argv must carry no bridge reference"
-  grep -Ev '^(STUB_SPAWN_DIR|FM_CHATGPT_LOOP_SPAWN|FM_TASK_ID|FM_TASK_INBOX|GOTMPDIR|GIT_CONFIG_VALUE_)=' "$dir/env.txt" | grep -Eiq 'CHATGPT_WEB_BRIDGE_URL|codex-chatgpt-web|17841|17911|FM_CHATGPT_LOOP|fm-chatgpt-(consult|bridge)' && fail "spawn environment must carry no bridge reference"
+  # The worker environment must carry none of the loop's bridge configuration.
+  # Scope this to the variables the loop owns and the configured URL value:
+  # ambient host/CI metadata such as GITHUB_HEAD_REF (which names this very
+  # branch) can hold bridge-like substrings the loop never passed through, so a
+  # whole-environment substring scan reports a false leak.
+  grep -Eq '^(CHATGPT_WEB_BRIDGE_URL|FM_CHATGPT_LOOP_SPAWN|FM_CHATGPT_LOOP_CONSULT|FM_CHATGPT_LOOP_SEND)=' "$dir/env.txt" \
+    && fail "spawn environment must carry no bridge reference"
+  grep -Fq "$CHATGPT_WEB_BRIDGE_URL" "$dir/env.txt" \
+    && fail "spawn environment must carry no bridge reference"
   local out2 rc2
   out2=$(bash "$LOOP" bridge status 2>&1); rc2=$?
   [ "$rc2" -ne 0 ] || fail "bridge status must exit nonzero while no bridge is running"

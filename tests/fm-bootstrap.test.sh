@@ -1244,6 +1244,74 @@ ROWS
   pass "bootstrap gates resolver fields and additive harnesses on the typed key"
 }
 
+# The ChatGPT consultation bridge probe runs only in the network phase, prints
+# an actionable CHATGPT_BRIDGE line only for a configured-but-broken channel,
+# and stays off under FM_CHATGPT_HEALTH_PROBE=0 (the suite-wide default that
+# tests/lib.sh exports).
+test_chatgpt_bridge_probe_reporting() {
+  local case_dir fakebin toolbin out
+  case_dir="$TMP_ROOT/chatgpt-bridge-probe"
+  mkdir -p "$case_dir/home/config" "$case_dir/quiet-home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  printf '%s\n' manual > "$case_dir/quiet-home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  # The probe's turn needs real curl and jq, which the curated BASE_PATH may
+  # not resolve on every host.
+  toolbin="$case_dir/probe-tools"
+  mkdir -p "$toolbin"
+  ln -s "$(command -v curl)" "$toolbin/curl"
+  ln -s "$(command -v jq)" "$toolbin/jq"
+
+  # Configured (the override is configuration evidence) but nothing listens:
+  # the full run must surface the actionable line.
+  out=$(PATH="$fakebin:$toolbin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_CHATGPT_HEALTH_PROBE=1 \
+    CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:1/v1" "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "CHATGPT_BRIDGE: unreachable" \
+    "a configured-but-unreachable bridge must print an actionable startup line"
+
+  # The local half must not run it: the probe is a network-phase step.
+  out=$(PATH="$fakebin:$toolbin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_CHATGPT_HEALTH_PROBE=1 FM_BOOTSTRAP_NETWORK=skip \
+    CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:1/v1" "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "CHATGPT_BRIDGE" \
+    "the local half must not run the bridge probe"
+
+  # The kill switch silences it even when the channel is configured and down.
+  out=$(PATH="$fakebin:$toolbin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_CHATGPT_HEALTH_PROBE=0 \
+    CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:1/v1" "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "CHATGPT_BRIDGE" \
+    "FM_CHATGPT_HEALTH_PROBE=0 must skip the probe"
+
+  # The default-URL cases need nothing listening at the default port; a dev
+  # machine with a live bridge occupying it cannot observe them.
+  if curl -s -m 1 -o /dev/null "http://127.0.0.1:17841/v1" 2>/dev/null; then
+    pass "bootstrap: the bridge probe reports a configured-but-broken channel from the network phase only (default-URL cases skipped: a live bridge occupies the default port)"
+    return 0
+  fi
+
+  # A home with no override, no consult-loop state, and no channel evidence
+  # never configured the channel, so the probe stays silent even when enabled.
+  out=$(env -u CHATGPT_WEB_BRIDGE_URL PATH="$fakebin:$toolbin:$BASE_PATH" \
+    FM_HOME="$case_dir/quiet-home" FM_ROOT_OVERRIDE="$case_dir/quiet-home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_CHATGPT_HEALTH_PROBE=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "CHATGPT_BRIDGE" \
+    "a never-configured channel must stay silent"
+
+  # A home that recorded channel use reads as configured, so a dead bridge at
+  # the default address surfaces an actionable line.
+  mkdir -p "$case_dir/marked-home/config"
+  printf '%s\n' manual > "$case_dir/marked-home/config/backlog-backend"
+  : > "$case_dir/marked-home/config/chatgpt-consultation"
+  out=$(env -u CHATGPT_WEB_BRIDGE_URL PATH="$fakebin:$toolbin:$BASE_PATH" \
+    FM_HOME="$case_dir/marked-home" FM_ROOT_OVERRIDE="$case_dir/marked-home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_CHATGPT_HEALTH_PROBE=1 "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "CHATGPT_BRIDGE: unreachable" \
+    "a home that used the channel must surface a dead default-address bridge"
+  pass "bootstrap: the bridge probe reports a configured-but-broken channel from the network phase only"
+}
+
 test_bootstrap_reporting
 test_no_mistakes_min_version
 test_gh_axi_min_version
@@ -1267,6 +1335,7 @@ test_fleet_sync_timeout_is_computed_before_launch
 test_routine_bootstrap_confirmations_are_silent
 test_routine_bootstrap_contract_runs_under_system_bash
 test_network_phase_partitions_the_run
+test_chatgpt_bridge_probe_reporting
 test_network_sweeps_recheck_lock_ownership
 test_network_phases_record_per_step_elapsed_times
 test_tasks_axi_verdict_handoff_is_consumed_once
