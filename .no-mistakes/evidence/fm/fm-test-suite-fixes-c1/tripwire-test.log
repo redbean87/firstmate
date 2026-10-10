@@ -1,0 +1,6 @@
+ok - a cut-off shard log is annotated with the running script and its weight
+ok - a completed run is annotated with nothing
+ok - a missing shard log stays silent
+ok - a shard cut off before its first script is annotated without a script
+ok - a weightless FM_TEST_BEGIN degrades only the modeled figure
+ok - invoking the tripwire without a log is a usage error
