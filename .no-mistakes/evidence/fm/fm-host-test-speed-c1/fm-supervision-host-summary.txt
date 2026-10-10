@@ -1,0 +1,36 @@
+Live validation of commit c1c8b19 (branch fm/fm-host-test-speed-c1)
+Change under test: tests/fm-supervision-host.test.sh — reap each case's fixture
+homes in pass() and drop FM_ARM_ATTACH_POLL to 0.1s.
+
+Preconditions:
+- Untracked scratch file tests/zz-base-supervision-host.test.sh already absent.
+- git status --porcelain: clean; untracked files: 0.
+- HEAD == c1c8b19ba36f9bb45947f6f99984060354339629 (target commit).
+
+Command:
+  bin/fm-test-run.sh tests/fm-supervision-host.test.sh \
+    --per-script-timeout-secs 850 \
+    --json <evidence>/fm-supervision-host-timing.json
+
+Product output markers:
+  FM_TEST_BEGIN 2026-10-10T16:29:01Z tests/fm-supervision-host.test.sh family=afk
+  ... 75x "ok - <case>" and 0x "not ok" ...
+  FM_TEST_END   2026-10-10T16:42:36Z tests/fm-supervision-host.test.sh exit=0 duration_ms=815243 gate_skip=false
+  FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=815376
+
+Interpretation:
+- 815243 ms = ~13.6 min wall, under the 30-minute CI shard cap (1800000 ms).
+  Host was under real load during the run (load avg 3.18/4.88/6.69 on 8 cores;
+  two operator fleet worker sessions were active), so this is a conservative
+  local figure.
+- 75 case-level "ok" lines match the file's 75 pass calls; "not ok" = 0, exit = 0.
+
+Coverage parity (base c951378f vs head c1c8b19):
+  pass calls:                 75  -> 75
+  assertion-helper usages:   382 -> 382
+  diff: only +17/-1 in tests/fm-supervision-host.test.sh (reap loop + pass
+  override + FM_ARM_ATTACH_POLL export).
+
+Leak check after the run:
+  ps -Ao command | grep -E '/tests/fm-supervision-host\.test\.sh|engine-stub|fm-watch'
+  (fixture-tree, excluding the operator's real checkout) -> 0 processes.
