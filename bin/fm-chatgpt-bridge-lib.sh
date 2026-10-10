@@ -139,7 +139,7 @@ fm_chatgpt_bridge_health() {
     printf 'unconfigured no bridge listening at %s and this home never configured the consultation channel\n' "$url"
     return 0
   fi
-  local timeout work req resp http rc err detail
+  local timeout work req resp http rc err text detail
   timeout=${FM_CHATGPT_HEALTH_PROBE_TIMEOUT:-30}
   case "$timeout" in ''|*[!0-9]*|0) timeout=30 ;; esac
   work=$(mktemp -d "${TMPDIR:-/tmp}/fm-chatgpt-probe.XXXXXX") || {
@@ -185,13 +185,26 @@ fm_chatgpt_bridge_health() {
     return 1
   fi
   err=$(jq -r '.error.message // empty' "$resp" 2>/dev/null)
+  text=$(fm_chatgpt_response_text "$resp" 2>/dev/null)
   rm -rf "$work"
   if [ -n "$err" ]; then
     printf 'unhealthy bridge listening at %s but the bounded test turn failed: %s\n' "$url" "$err"
     return 1
   fi
+  if [ -z "$text" ]; then
+    printf 'unhealthy bridge listening at %s but the bounded test turn failed: the response carried no output text (HTTP %s)\n' "$url" "$http"
+    return 1
+  fi
   printf 'healthy a bounded test turn completed at %s\n' "$url"
   return 0
+}
+
+# fm_chatgpt_response_text <response-json-file>
+# Prints the assistant output text a bridge response carries, the single
+# extraction every consumer uses to decide a turn produced an answer. Empty
+# output means the turn produced no response text, a failure even at HTTP 2xx.
+fm_chatgpt_response_text() {
+  jq -r '[(.output // [])[] | select(.type == "message") | (.content // [])[] | select(.type == "output_text" or .type == "text") | .text] | join("\n")' "$1"
 }
 
 # fm_chatgpt_hash <content>

@@ -1285,7 +1285,13 @@ test_chatgpt_bridge_probe_reporting() {
     "FM_CHATGPT_HEALTH_PROBE=0 must skip the probe"
 
   # A home with no override and no consult-loop state never configured the
-  # channel, so the probe stays silent even when enabled.
+  # channel, so the probe stays silent even when enabled. The reachability
+  # probe goes to the default port, so a dev machine with a live bridge
+  # occupying it cannot observe this case; CI has no bridge.
+  if curl -s -m 1 -o /dev/null "http://127.0.0.1:17841/v1" 2>/dev/null; then
+    pass "bootstrap: the bridge probe reports a configured-but-broken channel from the network phase only (never-configured case skipped: a live bridge occupies the default port)"
+    return 0
+  fi
   out=$(env -u CHATGPT_WEB_BRIDGE_URL PATH="$fakebin:$toolbin:$BASE_PATH" \
     FM_HOME="$case_dir/quiet-home" FM_ROOT_OVERRIDE="$case_dir/quiet-home" \
     FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_CHATGPT_HEALTH_PROBE=1 "$ROOT/bin/fm-bootstrap.sh")

@@ -88,7 +88,7 @@ case "$HTTP" in
     ;;
 esac
 
-TEXT=$(jq -r '[(.output // [])[] | select(.type == "message") | (.content // [])[] | select(.type == "output_text" or .type == "text") | .text] | join("\n")' "$RESPONSE")
+TEXT=$(fm_chatgpt_response_text "$RESPONSE")
 [ -n "$TEXT" ] || {
   printf 'fm-chatgpt: bridge returned no response text (HTTP %s)\n' "$HTTP" >&2
   exit 1

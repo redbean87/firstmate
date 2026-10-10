@@ -42,6 +42,9 @@ class H(http.server.BaseHTTPRequestHandler):
         elif kind == "error200":
             body = json.dumps({"error": {"message": "stub failure"}}).encode()
             self.send_response(200)
+        elif kind == "empty":
+            body = json.dumps({}).encode()
+            self.send_response(200)
         elif status != 200:
             body = json.dumps({"error": {"message": "stub failure"}}).encode()
             self.send_response(status)
@@ -114,6 +117,14 @@ test_bridge_health_probe_verdicts() {
   expect_code 1 "$rc" "an unparseable test-turn response must exit 1"
   assert_contains "$out" "unhealthy" "an unparseable response must print the unhealthy verdict"
   assert_contains "$out" "unparseable" "the unhealthy verdict must say the response could not be parsed"
+
+  dir="$TMP_ROOT/health-empty"; mkdir -p "$dir"
+  pid=$(start_stub "$dir" 200 empty)
+  out=$(fm_chatgpt_bridge_health); rc=$?
+  stop_stub "$pid"
+  expect_code 1 "$rc" "a 2xx response carrying no output text must exit 1"
+  assert_contains "$out" "unhealthy" "a bridge that answers without response text must print the unhealthy verdict"
+  assert_contains "$out" "no output text" "the unhealthy verdict must say the response carried no output text"
 
   out=$(CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:1/v1" fm_chatgpt_bridge_health); rc=$?
   expect_code 1 "$rc" "a configured-but-unreachable bridge must exit 1"
