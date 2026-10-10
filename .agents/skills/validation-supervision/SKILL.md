@@ -30,3 +30,16 @@ Judge validation by the resolved state line from [`bin/fm-crew-state.sh`](../../
 Workers parked at approval or fix-review must follow the active gate help.
 A worker hand-editing, committing, aborting, or restarting during an active validation run duplicates pipeline ownership outside the supersession sequence above; steer it back to the gate response flow.
 The worker reports the PR when CI first becomes green rather than waiting for merge monitoring to finish.
+
+## Common gate decision table
+
+A gate kind that has already recurred follows this lookup instead of being reasoned out again:
+
+| Gate kind | Default action |
+| --- | --- |
+| Ask-user finding on a docs/prose-only change reporting no live-validatable surface | Approve without live validation, with the finding decision per `ask-user-authority` |
+| A required CI check cancelled by the provider without a verdict | Re-run that single job on a fresh runner, and never count the cancellation as a pass |
+| A job or test step cut off by its own time budget from provider slowness or an outage | Re-run that one step or job, not the whole run |
+| A genuine red result or failing check | Surface and fix the real failure, never re-running to force green; `bin/fm-pr-merge.sh`'s header owns any merge waiver |
+
+A gate matching no row falls back to the existing gate flow in this file.
