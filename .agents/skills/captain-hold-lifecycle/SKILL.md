@@ -21,6 +21,9 @@ For a Lavish board-backed handoff, pass the reply through `bin/fm-procevent-lavi
 Prefer holding the work item the question gates over minting a new row; create a new task only when no work item exists to hold.
 The originating investigation or review is never its own inventory entry, so hold a separate task for the call and pass `--origin <origin-id>` so `complete` can check it.
 Put the question and its options in the hold reason, and keep one held task per genuine gate: a multi-question review is one held task pointing at its report, not a row per question. Represent that task with exactly one board card that consolidates its questions and options; never fan one task id into duplicate same-key cards.
+The inventory is fog-of-war bounded: hold a task only for a question the surface sharpens enough to state precisely now, and the test is whether the question can be stated precisely, not whether it can be answered now.
+A dim follow-up that cannot yet be stated as a question stays in the originating report as a named not-yet-specified line instead of being pre-sliced into a held task; a later pass that sharpens it into a stateable question promotes it to a hold.
+Give every held question a short plain name in its hold reason and refer to the decision by that name in reports, status, and captain chat; the task id remains the durable key, never the way the decision is named to humans.
 Register or re-hold through `bin/fm-captain-hold.sh hold`, which is idempotent per task id.
 After inventorying the whole report and review surface, run `bin/fm-captain-hold.sh complete` with every captain-held task id, or with `--none` only when the reviewed surface leaves nothing waiting on the captain.
 A completed investigation and an ended visual review use this same owner and completion command; a visual tool, including Lavish, never owns a parallel completion policy.
@@ -59,7 +62,7 @@ The absence of a routed work item is not a divergence and the guard never requir
 ## Operating sequence
 
 1. Read the complete investigation result and complete the visual review before declaring either complete.
-2. Inventory only genuine unresolved choices that require the captain, and find the task each one gates.
+2. Inventory only genuine unresolved choices that require the captain and can be stated precisely now, and find the task each one gates; dim follow-ups stay as named not-yet-specified lines in the originating report.
 3. Hold that task - or create one captain-held task for the review's open questions - with a concise reason carrying the question and options.
 4. Run `complete` with the full captain-held inventory for that review pass.
 5. Relay the choices to the captain as decisions from Bearings' Captain's Call section under `AGENTS.md` section 9; do not use the word hold in captain chat.

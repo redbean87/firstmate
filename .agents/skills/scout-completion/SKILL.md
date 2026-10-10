@@ -10,6 +10,9 @@ metadata:
 
 A completed scout must leave a self-contained report before its scratch worktree can be discarded; read and relay its findings, record the report as the Done artifact, and re-evaluate the queue.
 A report may recommend implementation but does not authorize it.
+For an investigation expected to span multiple sessions, deciding is the default deliverable, not building: each session resolves the decisions it can state and names the handoff - what remains to decide and where the next session picks up - and executes none of the planned work unless the brief explicitly says to.
+Follow-up scouts continuing one effort resolve one decision at a time, so each session starts from the decisions already named instead of re-deriving them.
+The fog-of-war boundary between a stateable question and a dim follow-up, and the hold mechanics, live in `captain-hold-lifecycle`.
 Before treating the investigation or any visual review as complete, load `captain-hold-lifecycle`; teardown enforces that shared completion gate.
 When a scout's deliverable is a visual artifact the captain will iterate on, keep it alive and follow the crew-hosted Lavish board contract in `docs/configuration.md` rather than arming or polling the board from firstmate.
 When implementation is separately authorized, promote the existing scout through `bin/fm-promote.sh` rather than creating a duplicate task.
