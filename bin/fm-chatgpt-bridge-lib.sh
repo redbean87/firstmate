@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fm-chatgpt-bridge-lib.sh - the single owner of Firstmate's ChatGPT
 # consultation bridge contract: bridge URL resolution, model slug handling,
-# and Codex turn-metadata stamping.
+# Codex turn-metadata stamping, and the bounded health probe.
 # Usage: . bin/fm-chatgpt-bridge-lib.sh
 #
 # The bridge is the already-installed codex-chatgpt-web daemon, loopback only.
@@ -79,6 +79,119 @@ fm_chatgpt_model_slug() {
       return 0
       ;;
   esac
+}
+
+# fm_chatgpt_bridge_configured
+# Returns 0 when this home has configuration evidence that the consultation
+# channel is meant to work here: an explicit CHATGPT_WEB_BRIDGE_URL override,
+# or consult-loop state under the home's data directory (bin/fm-chatgpt-loop.sh
+# writes data/<task>/chatgpt-loop.json for every task it has run). Returns 1
+# when the channel was never configured on this home.
+fm_chatgpt_bridge_configured() {
+  [ -n "${CHATGPT_WEB_BRIDGE_URL:-}" ] && return 0
+  local home data f
+  home="${FM_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  data="${FM_DATA_OVERRIDE:-$home/data}"
+  for f in "$data"/*/chatgpt-loop.json; do
+    [ -e "$f" ] && return 0
+  done
+  return 1
+}
+
+# fm_chatgpt_bridge_health
+# Bounded loopback-only health probe for the consultation bridge. It resolves
+# the bridge URL through fm_chatgpt_bridge_url (the same resolution every
+# consultation uses, so a non-loopback override is refused here too) and never
+# contacts anything else. Prints one verdict word, a space, and a detail
+# phrase, and returns:
+#   0 - healthy:    a bounded test turn completed at <url>
+#   0 - unconfigured: nothing is listening at <url> and this home has no
+#         consultation-channel configuration (quiet by contract: never
+#         configured, nothing to report)
+#   1 - unreachable: nothing is listening at <url> though this home configures
+#         the channel (actionable: configured but down)
+#   1 - unhealthy:  a bridge is listening at <url> but the bounded test turn
+#         failed (actionable: present but broken)
+#   1 - misconfigured: fm_chatgpt_bridge_url refused the override (the detail
+#         carries the refusal)
+#   2 - the probe needs curl and jq, or its own setup failed (diagnostic on
+#         stderr, no verdict on stdout)
+# When a bridge answers the reachability probe, one minimal stamped test turn
+# is POSTed with FM_CHATGPT_HEALTH_PROBE_TIMEOUT seconds to complete (default
+# 30); that is what separates a present-but-unhealthy bridge from a healthy
+# one. The probe only ever observes: it installs, authenticates, starts, and
+# repairs nothing.
+fm_chatgpt_bridge_health() {
+  if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    printf 'fm-chatgpt: the bridge health probe needs curl and jq\n' >&2
+    return 2
+  fi
+  local url
+  if ! url=$(fm_chatgpt_bridge_url 2>&1); then
+    printf 'misconfigured %s\n' "$url"
+    return 1
+  fi
+  if ! curl -s -m 5 -o /dev/null "$url" 2>/dev/null; then
+    if fm_chatgpt_bridge_configured; then
+      printf 'unreachable no bridge listening at %s though this home configures the consultation channel\n' "$url"
+      return 1
+    fi
+    printf 'unconfigured no bridge listening at %s and this home never configured the consultation channel\n' "$url"
+    return 0
+  fi
+  local timeout work req resp http rc err detail
+  timeout=${FM_CHATGPT_HEALTH_PROBE_TIMEOUT:-30}
+  case "$timeout" in ''|*[!0-9]*|0) timeout=30 ;; esac
+  work=$(mktemp -d "${TMPDIR:-/tmp}/fm-chatgpt-probe.XXXXXX") || {
+    printf 'fm-chatgpt: the bridge health probe could not create its work directory\n' >&2
+    return 2
+  }
+  req="$work/request.json"
+  resp="$work/response.json"
+  jq -n --arg m "$FM_CHATGPT_WEB_MODEL" \
+    '{model: $m, instructions: "Health probe: reply with the single word ok.", input: [{role: "user", content: "ping"}]}' >"$req" || {
+    rm -rf "$work"
+    printf 'fm-chatgpt: the bridge health probe could not build its test turn\n' >&2
+    return 2
+  }
+  fm_chatgpt_stamp_turn "health-probe" "$req" >/dev/null 2>&1 || {
+    rm -rf "$work"
+    printf 'fm-chatgpt: the bridge health probe could not stamp its test turn\n' >&2
+    return 2
+  }
+  http=$(curl -s -o "$resp" -w '%{http_code}' -m "$timeout" \
+    -X POST "$url/responses" \
+    -H 'content-type: application/json' \
+    --data-binary "@$req" 2>/dev/null); rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 28 ]; then
+      detail="the bounded test turn did not complete within ${timeout}s"
+    else
+      detail="the bridge stopped answering the test turn (curl exit $rc)"
+    fi
+    rm -rf "$work"
+    printf 'unhealthy bridge listening at %s but the bounded test turn failed: %s\n' "$url" "$detail"
+    return 1
+  fi
+  case "$http" in ''|*[!0-9]*) http=000 ;; esac
+  if [ "$http" -lt 200 ] || [ "$http" -ge 300 ]; then
+    rm -rf "$work"
+    printf 'unhealthy bridge listening at %s but the bounded test turn failed: HTTP %s\n' "$url" "$http"
+    return 1
+  fi
+  if ! jq -e . >/dev/null 2>&1 "$resp"; then
+    rm -rf "$work"
+    printf 'unhealthy bridge listening at %s but the bounded test turn failed: unparseable response (HTTP %s)\n' "$url" "$http"
+    return 1
+  fi
+  err=$(jq -r '.error.message // empty' "$resp" 2>/dev/null)
+  rm -rf "$work"
+  if [ -n "$err" ]; then
+    printf 'unhealthy bridge listening at %s but the bounded test turn failed: %s\n' "$url" "$err"
+    return 1
+  fi
+  printf 'healthy a bounded test turn completed at %s\n' "$url"
+  return 0
 }
 
 # fm_chatgpt_hash <content>

@@ -52,6 +52,13 @@ export FM_GATE_REFUSE_BYPASS=1
 # leaked harness pin alone stays inert outside a suite.
 export FM_TEST_SEAM=1
 
+# Keeps the ChatGPT consultation bridge probe out of every suite that runs
+# bootstrap: without this, a developer machine with a live bridge (or an
+# exported CHATGPT_WEB_BRIDGE_URL) would answer or fail probe cases that are
+# meant to be hermetic. Cases that pin the probe set FM_CHATGPT_HEALTH_PROBE=1
+# themselves, which overrides this default.
+export FM_CHATGPT_HEALTH_PROBE=0
+
 # Clear the task-worker marker bin/fm-spawn.sh exports into ship and scout
 # panes. This suite builds git-init fixture repositories whose primary checkout
 # it runs a copied bin/fm-test-run.sh in, and that runner refuses the primary

@@ -295,7 +295,7 @@ test_worker_never_touches_bridge() {
   [ ! -f "$dir/argv.txt" ] || fail "a guard refusal must launch nothing"
   bash "$LOOP" dispatch --stage audit --task boundary -- t p --mode local-only --yolo off >/dev/null
   grep -Eiq 'CHATGPT_WEB_BRIDGE_URL|codex-chatgpt-web|17841|17911|fm-chatgpt-(consult|bridge)' "$dir/argv.txt" && fail "spawn argv must carry no bridge reference"
-  grep -Ev '^(STUB_SPAWN_DIR|FM_CHATGPT_LOOP_SPAWN|FM_TASK_ID|FM_TASK_INBOX|GOTMPDIR|GIT_CONFIG_VALUE_)=' "$dir/env.txt" | grep -Eiq 'CHATGPT_WEB_BRIDGE_URL|codex-chatgpt-web|17841|17911|FM_CHATGPT_LOOP|fm-chatgpt-(consult|bridge)' && fail "spawn environment must carry no bridge reference"
+  grep -Ev '^(STUB_SPAWN_DIR|FM_CHATGPT_LOOP_SPAWN|FM_TASK_ID|FM_TASK_INBOX|GOTMPDIR|GIT_CONFIG_VALUE_[0-9]*)=' "$dir/env.txt" | grep -Eiq 'CHATGPT_WEB_BRIDGE_URL|codex-chatgpt-web|17841|17911|FM_CHATGPT_LOOP|fm-chatgpt-(consult|bridge)' && fail "spawn environment must carry no bridge reference"
   local out2 rc2
   out2=$(bash "$LOOP" bridge status 2>&1); rc2=$?
   [ "$rc2" -ne 0 ] || fail "bridge status must exit nonzero while no bridge is running"

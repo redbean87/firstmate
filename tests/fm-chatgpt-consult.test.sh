@@ -20,19 +20,29 @@ TMP_ROOT=$(fm_test_tmproot fm-chatgpt-consult)
 STUB_PORT=17899
 export CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:$STUB_PORT/v1"
 
-# start_stub <case-dir>: serves one canned Responses payload and records the
-# request body at <case-dir>/request.json. Prints the server pid.
+# start_stub <case-dir> [status] [kind]: serves one canned Responses payload
+# and records the request body at <case-dir>/request.json. kind is `ok` (a
+# successful turn), `error200` (HTTP 200 carrying an error payload), or
+# `garbage` (HTTP 200 carrying unparseable text); a non-200 status serves its
+# error payload at that status. Prints the server pid.
 start_stub() {
-  local dir=$1 status=${2:-200}
+  local dir=$1 status=${2:-200} kind=${3:-ok}
   cat > "$dir/stub.py" <<PY
 import http.server, json, sys
 d = "$dir"
 status = $status
+kind = "$kind"
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
         open(d + "/request.json", "wb").write(self.rfile.read(n))
-        if status != 200:
+        if kind == "garbage":
+            body = b"not json"
+            self.send_response(200)
+        elif kind == "error200":
+            body = json.dumps({"error": {"message": "stub failure"}}).encode()
+            self.send_response(200)
+        elif status != 200:
             body = json.dumps({"error": {"message": "stub failure"}}).encode()
             self.send_response(status)
         else:
@@ -66,6 +76,88 @@ new_prompt() {
 
 request_meta() {
   jq -r '.client_metadata["x-codex-turn-metadata"] | fromjson | "\(.thread_id) \(.turn_id)"' "$TMP_ROOT/$1/request.json"
+}
+
+# The bounded health probe (fm_chatgpt_bridge_health) is what startup
+# diagnostics run to keep a configured-but-broken consultation channel from
+# going silent; these cases pin its verdicts through the lib's own interface.
+test_bridge_health_probe_verdicts() {
+  local dir pid out rc
+  dir="$TMP_ROOT/health-healthy"; mkdir -p "$dir"
+  pid=$(start_stub "$dir")
+  out=$(fm_chatgpt_bridge_health); rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "a bridge that completes a test turn must exit 0"
+  assert_contains "$out" "healthy" "the probe must print the healthy verdict"
+  assert_contains "$out" "http://127.0.0.1:$STUB_PORT/v1" "the healthy verdict must name the resolved URL"
+
+  dir="$TMP_ROOT/health-http"; mkdir -p "$dir"
+  pid=$(start_stub "$dir" 500)
+  out=$(fm_chatgpt_bridge_health); rc=$?
+  stop_stub "$pid"
+  expect_code 1 "$rc" "a listening bridge whose test turn fails must exit 1"
+  assert_contains "$out" "unhealthy" "a listening-but-broken bridge must print the unhealthy verdict"
+  assert_contains "$out" "HTTP 500" "the unhealthy verdict must carry the failing status"
+
+  dir="$TMP_ROOT/health-error"; mkdir -p "$dir"
+  pid=$(start_stub "$dir" 200 error200)
+  out=$(fm_chatgpt_bridge_health); rc=$?
+  stop_stub "$pid"
+  expect_code 1 "$rc" "an error payload at HTTP 200 must exit 1"
+  assert_contains "$out" "unhealthy" "a bridge answering with an error must print the unhealthy verdict"
+  assert_contains "$out" "stub failure" "the unhealthy verdict must carry the bridge's error message"
+
+  dir="$TMP_ROOT/health-garbage"; mkdir -p "$dir"
+  pid=$(start_stub "$dir" 200 garbage)
+  out=$(fm_chatgpt_bridge_health); rc=$?
+  stop_stub "$pid"
+  expect_code 1 "$rc" "an unparseable test-turn response must exit 1"
+  assert_contains "$out" "unhealthy" "an unparseable response must print the unhealthy verdict"
+  assert_contains "$out" "unparseable" "the unhealthy verdict must say the response could not be parsed"
+
+  out=$(CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:1/v1" fm_chatgpt_bridge_health); rc=$?
+  expect_code 1 "$rc" "a configured-but-unreachable bridge must exit 1"
+  assert_contains "$out" "unreachable" "nothing listening at a configured channel must print the unreachable verdict"
+  assert_contains "$out" "though this home configures" "the unreachable verdict must say the channel is configured"
+
+  out=$(CHATGPT_WEB_BRIDGE_URL="http://example.com/v1" fm_chatgpt_bridge_health); rc=$?
+  expect_code 1 "$rc" "a non-loopback bridge URL must be refused"
+  assert_contains "$out" "misconfigured" "a refused non-loopback override must print the misconfigured verdict"
+  assert_contains "$out" "loopback-only" "the misconfigured verdict must carry the refusal reason"
+  pass "the health probe distinguishes healthy, unhealthy, unreachable, and misconfigured bridges"
+}
+
+test_bridge_health_unconfigured_stays_quiet() {
+  local out rc home
+  # Nothing listening AND no configuration evidence is the quiet verdict. The
+  # reachability probe goes to the default port, so a dev machine with a live
+  # bridge occupying it cannot observe this case; CI has no bridge.
+  if curl -s -m 1 -o /dev/null "http://127.0.0.1:17841/v1" 2>/dev/null; then
+    pass "the unconfigured verdict (skipped here: a live bridge occupies the default port)"
+    return 0
+  fi
+  home="$TMP_ROOT/health-unconfigured-home"
+  mkdir -p "$home"
+  out=$(unset CHATGPT_WEB_BRIDGE_URL; FM_HOME="$home"; fm_chatgpt_bridge_health); rc=$?
+  expect_code 0 "$rc" "a never-configured channel must exit 0"
+  assert_contains "$out" "unconfigured" "the probe must print the unconfigured verdict"
+  assert_not_contains "$out" "unreachable" "an unconfigured channel must not read as unreachable"
+  pass "a channel that was never configured reads as unconfigured, not unreachable"
+}
+
+test_bridge_health_configuration_evidence() {
+  local home rc
+  home="$TMP_ROOT/health-evidence-home"
+  mkdir -p "$home"
+  ( unset CHATGPT_WEB_BRIDGE_URL; FM_HOME="$home"; fm_chatgpt_bridge_configured ); rc=$?
+  expect_code 1 "$rc" "no override and no consult-loop state must read as never configured"
+  mkdir -p "$home/data/task-1"
+  printf '{}\n' > "$home/data/task-1/chatgpt-loop.json"
+  ( unset CHATGPT_WEB_BRIDGE_URL; FM_HOME="$home"; fm_chatgpt_bridge_configured ); rc=$?
+  expect_code 0 "$rc" "existing consult-loop state must count as channel configuration"
+  fm_chatgpt_bridge_configured; rc=$?
+  expect_code 0 "$rc" "the exported bridge URL override must count as channel configuration"
+  pass "configuration evidence is a bridge URL override or prior consult-loop state"
 }
 
 test_audit_request_shape() {
@@ -178,3 +270,6 @@ test_model_slug
 test_thread_propagation
 test_bridge_unavailable_fails_closed
 test_bridge_failure_fails_closed
+test_bridge_health_probe_verdicts
+test_bridge_health_unconfigured_stays_quiet
+test_bridge_health_configuration_evidence
