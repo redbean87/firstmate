@@ -219,6 +219,67 @@ puts steps[index].fetch("timeout-minutes", "none")
   pass "Herdr keeps a $step minute step tripwire under a $heavy minute job backstop"
 }
 
+# Recommendation 1 of the test-suite health report, held as workflow contract:
+# every CI serial shard carries a per-script bound so a wedged script fails
+# bounded with its output instead of consuming the whole job cap as a silent
+# cancellation, and every serial shard step is followed by the cap-kill
+# tripwire step under always() so a cancelled check names the script that was
+# running instead of reading like flakiness. The run steps are reduced to
+# their executable argv (comments and continuations removed) so a
+# commented-out flag or program cannot satisfy the contract.
+test_serial_shards_carry_a_per_script_bound_and_a_cap_kill_tripwire() {
+  ruby -ryaml -rshellwords - "$CI_WORKFLOW" <<'RUBY' || fail "serial shard bound/tripwire contract"
+# The executable words of a shell run block: drop comments and join line
+# continuations, so text that only appears in a comment is not an argument.
+def shell_code(text)
+  uncommented = text.each_line.map do |line|
+    quote = nil
+    escaped = false
+    cut = line.length
+    line.each_char.with_index do |char, i|
+      if escaped
+        escaped = false
+      elsif quote == '"' && char == "\\"
+        escaped = true
+      elsif quote
+        quote = nil if char == quote
+      elsif char == "'" || char == '"'
+        quote = char
+      elsif char == "#" && (i.zero? || line[i - 1].match?(/\s/))
+        cut = i
+        break
+      end
+    end
+    line[0...cut]
+  end.join
+  uncommented.gsub(/\\\n/, " ")
+end
+
+steps = YAML.load_file(ARGV[0]).fetch("jobs").fetch("tests-portable-serial").fetch("steps")
+run_index = steps.index { |s| s["name"].to_s.start_with?("Run portable serial shard") }
+raise "no serial shard run step" unless run_index
+run_argv = Shellwords.split(shell_code(steps[run_index].fetch("run")))
+bound_index = run_argv.index("--per-script-timeout-secs")
+raise "serial shard step has no --per-script-timeout-secs" unless bound_index
+bound = run_argv[bound_index + 1]
+raise "per-script bound must be a whole number of seconds" unless bound&.match?(/\A\d+\z/)
+bound = bound.to_i
+raise "per-script bound must be positive" unless bound.positive?
+# The bound must stay under the 30-minute normal-tier cap or it can never
+# fire before the job is cancelled.
+raise "per-script bound (#{bound}s) must stay under the 1800s job cap" unless bound < 1800
+pipe = run_argv.index("|")
+raise "serial shard step must pipe its log into tee for the tripwire" unless pipe && run_argv[pipe + 1] == "tee"
+tripwire_index = steps.index { |s| s["name"].to_s.start_with?("Annotate a cut-off serial shard") }
+raise "no cap-kill tripwire step" unless tripwire_index
+raise "tripwire must follow the run step" unless tripwire_index == run_index + 1
+raise "tripwire must run under always()" unless steps[tripwire_index]["if"].to_s.strip == "always()"
+tripwire_argv = Shellwords.split(shell_code(steps[tripwire_index].fetch("run")))
+raise "tripwire must call bin/fm-test-shard-tripwire.sh" unless tripwire_argv.include?("bin/fm-test-shard-tripwire.sh")
+RUBY
+  pass "serial shards carry a per-script bound and an always() cap-kill tripwire"
+}
+
 test_ci_matrices_match_executable_partitions() {
   ruby -ryaml -ropen3 - "$CI_WORKFLOW" "$ROOT" <<'RUBY' || fail "CI partition contract"
 jobs = YAML.load_file(ARGV[0]).fetch("jobs")
@@ -288,4 +349,5 @@ test_every_job_belongs_to_exactly_one_timeout_tier
 test_fast_tier_shares_one_short_tripwire
 test_normal_tier_shares_one_budget
 test_heavy_tier_keeps_a_step_tripwire_under_a_job_backstop
+test_serial_shards_carry_a_per_script_bound_and_a_cap_kill_tripwire
 test_heavy_lanes_gate_on_change_scope

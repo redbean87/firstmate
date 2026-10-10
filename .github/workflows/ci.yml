@@ -338,13 +338,33 @@ jobs:
           FM_SERIAL_LANE: portable-serial-${{ matrix.shard }}of${{ strategy.job-total }}
           FM_SERIAL_SHARD: ${{ matrix.shard }}
         run: |
-          set -eu
+          # pipefail so the tee below cannot swallow the runner's verdict.
+          set -euo pipefail
           mkdir -p "$RUNNER_TEMP/fm-test"
           # The Pi package is installed above and CI provides npm and tsc, so
           # any missing typecheck prerequisite is a broken lane, not a valid skip.
+          # The per-script bound matches the runner's --changed default (1500s,
+          # see bin/fm-test-run.sh): above the slowest modeled shard member with
+          # margin, so a wedged script fails bounded with its output here
+          # instead of consuming the whole 30-minute job cap as a silent
+          # cancellation. The tee feeds the cap-kill tripwire step below.
           bin/fm-test-run.sh --lane "$FM_SERIAL_LANE" \
             --fail-on-gate-skip 'Pi extension typecheck prerequisite not found' \
-            --json "$RUNNER_TEMP/fm-test/fm-test-timing-portable-serial-${FM_SERIAL_SHARD}.json"
+            --per-script-timeout-secs 1500 \
+            --json "$RUNNER_TEMP/fm-test/fm-test-timing-portable-serial-${FM_SERIAL_SHARD}.json" \
+            2>&1 | tee "$RUNNER_TEMP/fm-test/fm-test-shard-log-${FM_SERIAL_SHARD}.txt"
+      # A shard cut off by the job cap leaves no verdict and no timing artifact,
+      # so a cancelled check would read like flakiness. This step survives the
+      # kill and annotates the step summary with the script that was running
+      # (the last FM_TEST_BEGIN) and its modeled-versus-actual runtime.
+      - name: Annotate a cut-off serial shard ${{ matrix.shard }}
+        if: always()
+        env:
+          FM_SERIAL_SHARD: ${{ matrix.shard }}
+        run: |
+          set -eu
+          bin/fm-test-shard-tripwire.sh \
+            "$RUNNER_TEMP/fm-test/fm-test-shard-log-${FM_SERIAL_SHARD}.txt"
       - name: Upload portable serial shard ${{ matrix.shard }} timing artifact
         if: always()
         uses: actions/upload-artifact@v4

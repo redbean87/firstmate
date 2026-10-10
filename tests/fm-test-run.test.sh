@@ -790,8 +790,8 @@ SH
   end_n=$(grep -c '^FM_TEST_END ' "$out" || true)
   [ "$begin_n" -eq 1 ] || fail "expected one FM_TEST_BEGIN, got $begin_n"
   [ "$end_n" -eq 1 ] || fail "expected one FM_TEST_END, got $end_n"
-  grep -Eq '^FM_TEST_BEGIN .+ family=unclassified expected_gate_skip=none$' "$out" \
-    || fail "BEGIN line missing family/expected_gate_skip: $(grep '^FM_TEST_BEGIN' "$out")"
+  grep -Eq '^FM_TEST_BEGIN .+ family=unclassified expected_gate_skip=none weight_ms=[0-9]+$' "$out" \
+    || fail "BEGIN line missing family/expected_gate_skip/weight_ms: $(grep '^FM_TEST_BEGIN' "$out")"
   grep -Eq '^FM_TEST_END .+ exit=0 duration_ms=[0-9]+ gate_skip=false$' "$out" \
     || fail "END line missing exit/duration/gate_skip: $(grep '^FM_TEST_END' "$out")"
   summary=$(grep '^FM_TEST_SUMMARY ' "$out" || true)
@@ -816,6 +816,50 @@ assert "family" in doc["scripts"][0]
 ' "$json" || { rm -rf "$tmp"; fail "JSON timing artifact missing required fields"; }
   rm -rf "$tmp"
   pass "timing markers and JSON artifact are valid"
+}
+
+# The cap-kill tripwire (bin/fm-test-shard-tripwire.sh) reports modeled-versus-
+# actual from the FM_TEST_BEGIN line alone, because a killed shard writes
+# nothing else. Hold that the marker carries the runner's own modeled weight:
+# the seeded hint when the script has one, the default weight when it does not.
+test_begin_marker_carries_modeled_weight() {
+  local tmp repo hinted unhinted out
+  tmp=$(fm_test_tmproot fm-test-run-weight-marker)
+  repo="$tmp/repo"
+  mkdir -p "$repo/bin" "$repo/tests"
+  cp "$RUNNER" "$repo/bin/fm-test-run.sh"
+  cp "$ROOT/tests/git-config-helpers.sh" "$repo/tests/"
+  hinted=tests/fm-weight-marker-hinted.test.sh
+  unhinted=tests/fm-weight-marker-unhinted.test.sh
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/$hinted"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/$unhinted"
+  python3 - "$repo/bin/fm-test-run.sh" <<'PY' \
+    || fail "could not seed the fixture hint table"
+from pathlib import Path
+import sys
+runner = Path(sys.argv[1])
+text = runner.read_text()
+marker = "portable_serial_weight_hints() {\n  cat <<'EOF'\n"
+assert marker in text, "hint table shape changed"
+runner.write_text(text.replace(
+    marker,
+    marker + "tests/fm-weight-marker-hinted.test.sh 123456\n",
+    1,
+))
+PY
+  chmod +x "$repo/bin/fm-test-run.sh" "$repo/$hinted" "$repo/$unhinted"
+  (cd "$repo" && bin/fm-test-run.sh --jobs 1 "$hinted" "$unhinted") \
+    >"$tmp/out" 2>"$tmp/err" \
+    || fail "weight-marker fixture run failed: $(cat "$tmp/err")"
+  out=$(cat "$tmp/out")
+  assert_contains "$out" \
+    "$hinted family=unclassified expected_gate_skip=none weight_ms=123456" \
+    "BEGIN marker must carry the seeded modeled hint as weight_ms"
+  assert_contains "$out" \
+    "$unhinted family=unclassified expected_gate_skip=none weight_ms=45000" \
+    "BEGIN marker must fall back to the default weight when unhinted"
+  rm -rf "$tmp"
+  pass "FM_TEST_BEGIN stamps the modeled weight for the cap-kill tripwire"
 }
 
 test_aggregate_exit_behavior() {
@@ -1380,7 +1424,7 @@ test_unmapped_new_test_never_inherits_family_concurrency() {
   set -e
   [ "$rc" -eq 0 ] \
     || fail "an unclassified test must still run serially, got $rc: $(cat "$tmp/serial.err")"
-  grep -Eq '^FM_TEST_BEGIN .+ family=unclassified expected_gate_skip=none$' "$tmp/serial.out" \
+  grep -Eq '^FM_TEST_BEGIN .+ family=unclassified expected_gate_skip=none weight_ms=[0-9]+$' "$tmp/serial.out" \
     || fail "the unmapped fixture did not land in the catch-all family: $(cat "$tmp/serial.out")"
   rm -rf "$tmp"
   pass "an unclassified new test stays serial while the proven residual family runs concurrently"
@@ -1841,6 +1885,7 @@ test_script_list_uses_bounded_automatic_concurrency
 test_family_proofs_run_in_separate_concurrent_phases
 test_empty_selection_emits_summary
 test_timing_markers_and_json
+test_begin_marker_carries_modeled_weight
 test_aggregate_exit_behavior
 test_gate_skip_accounting
 test_gate_skip_reason_is_recorded

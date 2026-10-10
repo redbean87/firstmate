@@ -86,8 +86,11 @@
 #   -h, --help      print this header
 #
 # Per-script machine-parseable markers (stdout):
-#   FM_TEST_BEGIN <iso8601> <script> family=<family> expected_gate_skip=<class>
+#   FM_TEST_BEGIN <iso8601> <script> family=<family> expected_gate_skip=<class> weight_ms=<n>
 #   FM_TEST_END <iso8601> <script> exit=<code> duration_ms=<n> gate_skip=<true|false>
+# weight_ms on FM_TEST_BEGIN is the modeled duration the scheduler assigned
+# the script, so a shard its job cap cut off still reports modeled-versus-
+# actual for the script that was running (bin/fm-test-shard-tripwire.sh).
 #
 # After all scripts (stdout):
 #   FM_TEST_SUMMARY total=<n> failed=<n> skipped_gate=<n> duration_ms=<n>
@@ -922,6 +925,21 @@ portable_parallel_weight_for() {
     return 0
   fi
   portable_serial_weight_for "$want"
+}
+
+# The weight the scheduler is using for <script> under the current selection:
+# the parallel hint for the two portable parallel lanes, the serial weight
+# everywhere else. One owner for that choice, shared by --list-scheduled and
+# the weight_ms field on FM_TEST_BEGIN so the two can never disagree.
+scheduled_weight_for() {
+  case "$MODE:$LANE" in
+    lane:portable-parallel-1|lane:portable-parallel-2)
+      portable_parallel_weight_for "$1"
+      ;;
+    *)
+      portable_serial_weight_for "$1"
+      ;;
+  esac
 }
 
 portable_serial_weight_for() {
@@ -2197,14 +2215,7 @@ fi
 if [ "$LIST_ONLY" -eq 1 ] || [ "$LIST_SCHEDULED" -eq 1 ]; then
   if [ "$LIST_SCHEDULED" -eq 1 ]; then
     for s in "${SCRIPTS[@]+"${SCRIPTS[@]}"}"; do
-      case "$MODE:$LANE" in
-        lane:portable-parallel-1|lane:portable-parallel-2)
-          printf '%s\t%s\n' "$(portable_parallel_weight_for "$s")" "$s"
-          ;;
-        *)
-          printf '%s\t%s\n' "$(portable_serial_weight_for "$s")" "$s"
-          ;;
-      esac
+      printf '%s\t%s\n' "$(scheduled_weight_for "$s")" "$s"
     done | LC_ALL=C sort -t"$(printf '\t')" -k1,1nr -k2,2 | cut -f2-
   else
     for s in "${SCRIPTS[@]+"${SCRIPTS[@]}"}"; do
@@ -2500,8 +2511,8 @@ run_one_serial() {
   begin_iso=$(now_iso)
   begin_ms=$(now_ms)
 
-  printf 'FM_TEST_BEGIN %s %s family=%s expected_gate_skip=%s\n' \
-    "$begin_iso" "$script" "$family" "$expected"
+  printf 'FM_TEST_BEGIN %s %s family=%s expected_gate_skip=%s weight_ms=%s\n' \
+    "$begin_iso" "$script" "$family" "$expected" "$(scheduled_weight_for "$script")"
 
   set +e
   # Stream live output while retaining a copy for gate-skip detection.
@@ -2616,8 +2627,8 @@ else
     base=$(basename "$script")
     family=$(family_for_basename "$base")
     expected=$(expected_gate_skip_for_family "$family")
-    printf 'FM_TEST_BEGIN %s %s family=%s expected_gate_skip=%s\n' \
-      "$(now_iso)" "$script" "$family" "$expected"
+    printf 'FM_TEST_BEGIN %s %s family=%s expected_gate_skip=%s weight_ms=%s\n' \
+      "$(now_iso)" "$script" "$family" "$expected" "$(scheduled_weight_for "$script")"
     (
       trap - EXIT HUP INT TERM
       set +e
