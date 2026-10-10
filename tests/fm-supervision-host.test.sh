@@ -155,6 +155,9 @@ export FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999
 # Keep the real engine watchdog/reaping path, but not its production grace in fixtures.
 export FM_SUPERVISION_ENGINE_GRACE=1
 export FM_ARM_CONFIRM_TIMEOUT=30
+# Attach readiness polls fast so every close's successor handoff waits on the
+# real watcher boot rather than on the default half-second attach cadence.
+export FM_ARM_ATTACH_POLL=0.1
 unset FM_SUPERVISION_ACTOR FM_BRANCH_REPORT_TURN FM_LEASE_HOLDER_PID PI_CODING_AGENT
 
 # Homes are registered in a file: make_home runs in a command substitution,
@@ -188,14 +191,27 @@ stop_home_processes() {  # <home>
     kill -TERM "$pid" 2>/dev/null || true
   done < <(cat "$home/orphan-pid" 2>/dev/null)
 }
-suite_cleanup() {
+reap_test_homes() {
   local home
   while IFS= read -r home; do
     [ -n "$home" ] && stop_home_processes "$home"
   done < <(cat "$HOMES_FILE" 2>/dev/null)
+}
+suite_cleanup() {
+  reap_test_homes
   fm_test_cleanup
 }
 trap suite_cleanup EXIT
+
+# pass is each case's final statement, so it is the one place every case's
+# still-running home processes - parked host, successor watcher, arm, fake
+# harness session - can be reaped immediately. Reaped only at the suite's
+# exit they accumulate into hundreds of polling processes, and later cases
+# measured several times slower than the same case run alone.
+pass() {
+  reap_test_homes
+  printf 'ok - %s\n' "$1"
+}
 
 make_home() {  # <name> <attended|away|quiet> [config line]
   local home="$TMP_ROOT/$1"
