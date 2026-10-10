@@ -881,6 +881,10 @@ The file is read from this home's own configuration directory on every launch, s
 It is not in the inherited configuration set, so no other home, including a secondmate home, receives it; create the file in each home that wants it.
 It does not apply to a secondmate's own agent, which neither reads nor refuses on it.
 
+Independently of this file, a `pi` or `pi-signed` launch whose resolved model uses the local Qwen server (`qwen-local/<id>`) always excludes the four `pi-web-access` tools (`web_search`, `source_check`, `fetch_content`, `get_search_content`): local Qwen workers never call them, and on their small context window the saved schema weight matters.
+That built-in list merges with this file's entries without duplicates, applies on launch and relaunch alike, and leaves every other model, every other runtime, and the primary session unchanged.
+[`bin/fm-spawn.sh`](../bin/fm-spawn.sh)'s header owns its launch-flag mechanics.
+
 ### Runtime support
 
 | Runtime | With a non-empty list |

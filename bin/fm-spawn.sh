@@ -397,7 +397,12 @@
 #                  trust for the launch cwd only, never a trust.json rewrite)
 #     __PIEXCLUDE__ optional ` --exclude-tools '<comma-joined names>'` from
 #                  config/crew-exclude-tools on Pi/pi-signed ship and scout
-#                  launches (supplies its own leading space, empty otherwise)
+#                  launches, plus the built-in model-scoped exclusion a
+#                  qwen-local/ model always adds (the pi-web-access tools
+#                  web_search, source_check, fetch_content, get_search_content:
+#                  never called by local Qwen workers, ~3,200 tokens of schema
+#                  per turn on their small window); merged, deduplicated
+#                  (supplies its own leading space, empty otherwise)
 #     __PIRESUME__ optional relaunch-only `--session <reference>` that keeps a
 #                  Pi replacement on the session the endpoint's runtime already
 #                  reports (relaunch_resume_args below owns it; it supplies its
@@ -2437,7 +2442,23 @@ pi | pi-signed)
   fi
   LAUNCH=${LAUNCH//__PIAPPROVE__/$PI_APPROVE}
   PI_EXCLUDE=
-  [ -z "$EXCLUDE_TOOLS" ] || PI_EXCLUDE=" --exclude-tools $(shell_quote "$EXCLUDE_TOOLS")"
+  # Model-scoped exclusion, merged with (never replacing) the home's
+  # config/crew-exclude-tools list: a Pi/pi-signed launch on the local Qwen
+  # server (the qwen-local/ provider) drops the pi-web-access tools' schemas
+  # (~3,200 tokens per turn the worker never uses). Every other model and
+  # every other harness keeps the tools; the primary session is unaffected.
+  PI_EXCLUDE_NAMES=$EXCLUDE_TOOLS
+  case "$MODEL" in
+  qwen-local/*)
+    for PI_TOOL in web_search source_check fetch_content get_search_content; do
+      case ",$PI_EXCLUDE_NAMES," in
+      *,"$PI_TOOL",*) ;;
+      *) PI_EXCLUDE_NAMES="${PI_EXCLUDE_NAMES:+$PI_EXCLUDE_NAMES,}$PI_TOOL" ;;
+      esac
+    done
+    ;;
+  esac
+  [ -z "$PI_EXCLUDE_NAMES" ] || PI_EXCLUDE=" --exclude-tools $(shell_quote "$PI_EXCLUDE_NAMES")"
   LAUNCH=${LAUNCH//__PIEXCLUDE__/$PI_EXCLUDE}
   LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
   ;;
