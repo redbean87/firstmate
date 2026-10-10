@@ -1,0 +1,1 @@
+CHATGPT_BRIDGE: unhealthy bridge listening at http://127.0.0.1:17932/v1 but the bounded test turn failed: HTTP 500

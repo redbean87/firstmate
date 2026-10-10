@@ -1,0 +1,39 @@
+probe: healthy a bounded test turn completed at http://127.0.0.1:17931/v1
+
+bootstrap: 
+stub-received-request=True
+Healthy-case test turn the probe POSTed (stub received):
+--- request ---
+{
+  "model": "chatgpt-web/gpt-5.6-luna",
+  "instructions": "Health probe: reply with the single word ok.",
+  "input": [
+    {
+      "role": "user",
+      "content": "ping",
+      "type": "message",
+      "id": "msg_aad9cd821fc8c04f858c7c209c8c2099"
+    }
+  ],
+  "client_metadata": {
+    "x-codex-turn-metadata": "{\"thread_id\":\"health-probe\",\"turn_id\":\"turn_a89f804ac3a28cb56507bb15616b6e2f\",\"cwd\":\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M4JCYKDPENGH89GV33ZZ4K2Y\",\"workspace_roots\":[\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M4JCYKDPENGH89GV33ZZ4K2Y\"],\"sandbox\":\"dangerFullAccess\"}"
+  }
+}
+
+--- request ---
+{
+  "model": "chatgpt-web/gpt-5.6-luna",
+  "instructions": "Health probe: reply with the single word ok.",
+  "input": [
+    {
+      "role": "user",
+      "content": "ping",
+      "type": "message",
+      "id": "msg_aad9cd821fc8c04f858c7c209c8c2099"
+    }
+  ],
+  "client_metadata": {
+    "x-codex-turn-metadata": "{\"thread_id\":\"health-probe\",\"turn_id\":\"turn_a89f804ac3a28cb56507bb15616b6e2f\",\"cwd\":\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M4JCYKDPENGH89GV33ZZ4K2Y\",\"workspace_roots\":[\"/Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M4JCYKDPENGH89GV33ZZ4K2Y\"],\"sandbox\":\"dangerFullAccess\"}"
+  }
+}
+

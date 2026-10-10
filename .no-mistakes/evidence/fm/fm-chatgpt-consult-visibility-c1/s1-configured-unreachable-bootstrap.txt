@@ -1,0 +1,1 @@
+CHATGPT_BRIDGE: unreachable no bridge listening at http://127.0.0.1:17990/v1 though this home configures the consultation channel

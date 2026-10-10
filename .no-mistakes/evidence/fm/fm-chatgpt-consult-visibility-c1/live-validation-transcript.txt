@@ -1,0 +1,97 @@
+Firstmate ChatGPT consultation-channel live validation
+worktree: /Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M4JCYKDPENGH89GV33ZZ4K2Y
+lab home: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.TSj9LB
+date: 2026-10-10T06:49:56.645317
+operator's live bridge at 127.0.0.1:17841 is never contacted by these scenarios.
+========================================================================
+
+SCENARIO 1: configured-but-unreachable bridge surfaces an actionable line at startup
+--- bootstrap with a configured dead bridge ---
+$ [command shown above]  exit=0
+stdout:
+CHATGPT_BRIDGE: unreachable no bridge listening at http://127.0.0.1:17990/v1 though this home configures the consultation channel
+
+SCENARIO 2: a healthy bridge stays silent at startup and the probe reports healthy
+--- probe against healthy stub ---
+$ [command shown above]  exit=0
+stdout:
+healthy a bounded test turn completed at http://127.0.0.1:17931/v1
+
+--- bootstrap with a healthy bridge ---
+$ [command shown above]  exit=0
+
+stub received a POST test turn: True
+
+SCENARIO 3: a listening-but-broken bridge (HTTP 500) is reported unhealthy at startup
+--- bootstrap with a listening HTTP 500 bridge ---
+$ [command shown above]  exit=0
+stdout:
+CHATGPT_BRIDGE: unhealthy bridge listening at http://127.0.0.1:17932/v1 but the bounded test turn failed: HTTP 500
+
+SCENARIO 4: HTTP 200 with no output text is unhealthy and the real consult fails the same way
+--- probe against a 200-with-empty-output bridge ---
+$ [command shown above]  exit=1
+stdout:
+unhealthy bridge listening at http://127.0.0.1:17933/v1 but the bounded test turn failed: the response carried no output text (HTTP 200)
+
+--- real consult against the same 200-with-empty-output bridge ---
+$ [command shown above]  exit=1
+stderr:
+fm-chatgpt: bridge returned no response text (HTTP 200)
+
+--- bootstrap against the same 200-with-empty-output bridge ---
+$ [command shown above]  exit=0
+stdout:
+CHATGPT_BRIDGE: unhealthy bridge listening at http://127.0.0.1:17933/v1 but the bounded test turn failed: the response carried no output text (HTTP 200)
+
+SCENARIO 5: a never-configured home reads unconfigured (quiet), not unreachable
+--- probe on a never-configured home, default pinned to a dead port ---
+$ [command shown above]  exit=0
+stdout:
+unconfigured no bridge listening at http://127.0.0.1:17991/v1 and this home never configured the consultation channel
+
+SCENARIO 6: a real consult records durable evidence, then a dead default bridge is reported
+--- real consult against a dead bridge (records channel evidence, fails closed) ---
+$ [command shown above]  exit=1
+stderr:
+fm-chatgpt: bridge unreachable at http://127.0.0.1:17990/v1; start the codex-chatgpt-web bridge before consulting
+
+evidence marker /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.TSj9LB/home-s6-consult-used/config/chatgpt-consultation exists: True
+fm_chatgpt_bridge_configured (no override) exit=0
+--- probe on that home with the default pinned to a dead port ---
+$ [command shown above]  exit=1
+stdout:
+unreachable no bridge listening at http://127.0.0.1:17992/v1 though this home configures the consultation channel
+
+
+--- probe contrast on a never-used home, same pinned dead default ---
+$ [command shown above]  exit=0
+stdout:
+unconfigured no bridge listening at http://127.0.0.1:17992/v1 and this home never configured the consultation channel
+
+SCENARIO 7: a non-loopback override is refused and reported misconfigured
+--- bootstrap with a non-loopback override ---
+$ [command shown above]  exit=0
+stdout:
+CHATGPT_BRIDGE: misconfigured fm-chatgpt: refusing non-loopback bridge URL http://example.com/v1 (loopback-only contract)
+
+SCENARIO 8: FM_CHATGPT_HEALTH_PROBE=0 silences the startup probe
+--- bootstrap with the kill switch set ---
+$ [command shown above]  exit=0
+
+SCENARIO 9: the probe runs only in the network phase (local/skip half stays silent)
+--- bootstrap with FM_BOOTSTRAP_NETWORK=skip ---
+$ [command shown above]  exit=0
+
+========================================================================
+SUMMARY
+  s1: PASS
+  s2_boot: PASS
+  s2_probe: PASS
+  s3: PASS
+  s4: PASS
+  s5: PASS
+  s6: PASS
+  s7: PASS
+  s8: PASS
+  s9: PASS

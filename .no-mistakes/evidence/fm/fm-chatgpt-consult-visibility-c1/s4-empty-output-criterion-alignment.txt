@@ -1,0 +1,6 @@
+probe: unhealthy bridge listening at http://127.0.0.1:17933/v1 but the bounded test turn failed: the response carried no output text (HTTP 200)
+
+consult exit=1: fm-chatgpt: bridge returned no response text (HTTP 200)
+
+bootstrap: CHATGPT_BRIDGE: unhealthy bridge listening at http://127.0.0.1:17933/v1 but the bounded test turn failed: the response carried no output text (HTTP 200)
+

@@ -1,0 +1,3 @@
+probe: unconfigured no bridge listening at http://127.0.0.1:17991/v1 and this home never configured the consultation channel
+
+bridge_configured exit=1
