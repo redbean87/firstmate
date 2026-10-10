@@ -219,6 +219,35 @@ puts steps[index].fetch("timeout-minutes", "none")
   pass "Herdr keeps a $step minute step tripwire under a $heavy minute job backstop"
 }
 
+# Recommendation 1 of the test-suite health report, held as workflow contract:
+# every CI serial shard carries a per-script bound so a wedged script fails
+# bounded with its output instead of consuming the whole job cap as a silent
+# cancellation, and every serial shard step is followed by the cap-kill
+# tripwire step under always() so a cancelled check names the script that was
+# running instead of reading like flakiness.
+test_serial_shards_carry_a_per_script_bound_and_a_cap_kill_tripwire() {
+  ruby -ryaml - "$CI_WORKFLOW" <<'RUBY' || fail "serial shard bound/tripwire contract"
+steps = YAML.load_file(ARGV[0]).fetch("jobs").fetch("tests-portable-serial").fetch("steps")
+run_index = steps.index { |s| s["name"].to_s.start_with?("Run portable serial shard") }
+raise "no serial shard run step" unless run_index
+run = steps[run_index].fetch("run")
+bound = run[/--per-script-timeout-secs\s+(\d+)/, 1]
+raise "serial shard step has no --per-script-timeout-secs" unless bound
+bound = Integer(bound)
+raise "per-script bound must be positive" unless bound.positive?
+# The bound must stay under the 30-minute normal-tier cap or it can never
+# fire before the job is cancelled.
+raise "per-script bound (#{bound}s) must stay under the 1800s job cap" unless bound < 1800
+raise "serial shard step must tee its log for the tripwire" unless run.include?("tee ")
+tripwire_index = steps.index { |s| s["name"].to_s.start_with?("Annotate a cut-off serial shard") }
+raise "no cap-kill tripwire step" unless tripwire_index
+raise "tripwire must follow the run step" unless tripwire_index == run_index + 1
+raise "tripwire must run under always()" unless steps[tripwire_index]["if"].to_s.strip == "always()"
+raise "tripwire must call bin/fm-test-shard-tripwire.sh" unless steps[tripwire_index].fetch("run").include?("bin/fm-test-shard-tripwire.sh")
+RUBY
+  pass "serial shards carry a per-script bound and an always() cap-kill tripwire"
+}
+
 test_ci_matrices_match_executable_partitions() {
   ruby -ryaml -ropen3 - "$CI_WORKFLOW" "$ROOT" <<'RUBY' || fail "CI partition contract"
 jobs = YAML.load_file(ARGV[0]).fetch("jobs")
@@ -288,4 +317,5 @@ test_every_job_belongs_to_exactly_one_timeout_tier
 test_fast_tier_shares_one_short_tripwire
 test_normal_tier_shares_one_budget
 test_heavy_tier_keeps_a_step_tripwire_under_a_job_backstop
+test_serial_shards_carry_a_per_script_bound_and_a_cap_kill_tripwire
 test_heavy_lanes_gate_on_change_scope
