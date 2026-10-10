@@ -1,0 +1,15 @@
+{
+  "case": "baseline",
+  "n_tools": 8,
+  "tool_names": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "web_search",
+    "source_check",
+    "fetch_content",
+    "get_search_content"
+  ],
+  "tools_schema_bytes": 14211
+}

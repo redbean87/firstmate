@@ -1,0 +1,11 @@
+{
+  "case": "excluded",
+  "n_tools": 4,
+  "tool_names": [
+    "read",
+    "bash",
+    "edit",
+    "write"
+  ],
+  "tools_schema_bytes": 2956
+}
