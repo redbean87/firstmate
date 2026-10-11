@@ -98,8 +98,12 @@
 # Every scaffold's status protocol distinguishes the configured
 # declared-external-wait verb (FM_CLASSIFY_PAUSED_VERB, default "paused") from
 # "blocked:": pause for a known wait expected to clear on its own, including
-# the worker's own background work, pipeline or long command; blocked when
-# firstmate must act. The first-sight alert remains; repeats use the long cadence.
+# the worker's own background work, a still-running pipeline step, or a long
+# command; blocked when firstmate must act. A pipeline parked at a review gate
+# awaiting a decision is never a pause - it is escalated as `needs-decision`
+# naming the gate key and its finding ids - because a declared pause would park
+# the run unanswered on the long recheck cadence. The first-sight alert remains;
+# repeats use the long cadence.
 # Emission-time syntax and legacy unknown-time handling are owned by
 # bin/fm-classify-lib.sh; each scaffold renders the stamp as a literal <epoch>
 # placeholder the worker replaces with a numeric Unix time as it appends, so a
