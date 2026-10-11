@@ -1,0 +1,7 @@
+# Promoted scout -> ship (no-mistakes) live via real bin/fm-promote.sh
+# The promoted worker is a pipeline-driving ship worker, so its
+# ship-instructions.md also carries the one-line pointer.
+
+promote_rc=0 (mode=no-mistakes yolo=off)
+pointer_count=1
+47:The skill is not advertised in this session's skill list, so read it directly: [/Users/cortezashley/.agents/skills/no-mistakes/SKILL.md](</Users/cortezashley/.agents/skills/no-mistakes/SKILL.md>).

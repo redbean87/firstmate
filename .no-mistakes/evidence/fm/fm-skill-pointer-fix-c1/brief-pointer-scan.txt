@@ -1,0 +1,18 @@
+# Live fm-brief.sh skill-pointer scan (target commit 4c4a875b)
+HOME at generation: /Users/cortezashley
+
+ev-nm          pointer_count=1
+ev-nmgerrit    pointer_count=1
+ev-direct      pointer_count=0
+ev-local       pointer_count=0
+ev-scout       pointer_count=0
+ev-mate        pointer_count=0
+
+## Pointer line as rendered in the no-mistakes ship brief
+102-Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke /no-mistakes, and `no-mistakes axi run --help` plus the `help` lines in each `axi` response are authoritative and version-matched to the installed binary.
+103:The skill is not advertised in this session's skill list, so read it directly: [/Users/cortezashley/.agents/skills/no-mistakes/SKILL.md](</Users/cortezashley/.agents/skills/no-mistakes/SKILL.md>).
+104-When starting no-mistakes, pass `--intent` as only this brief's `## Captain's intent` subsection body, not its heading, plus any later words the captain actually said.
+
+## The named file exists and is the installed skill
+-rw-r--r--@ 1 cortezashley  staff  28184 Oct 10 15:59 /Users/cortezashley/.agents/skills/no-mistakes/SKILL.md
+   28184 /Users/cortezashley/.agents/skills/no-mistakes/SKILL.md

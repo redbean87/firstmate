@@ -1,0 +1,14 @@
+# Base 37fdc52b regression: same drive, base fm-spawn.sh
+# Reproduces the failure the grant fixes: the skill path is not covered,
+# so the modeled Claude outside-read gate refuses it (rc=42).
+
+spawn_status=0
+--- --add-dir values emitted by BASE fm-spawn.sh ---
+ADD_DIR /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-base.oJ1SAJ/case/home/state/operational-inbox
+ADD_DIR /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-base.oJ1SAJ/case/home/state/base-skill-1.inbox
+ADD_DIR /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-base.oJ1SAJ/case/home/data/base-skill-1
+ADD_DIR /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-base.oJ1SAJ/base-tree/.agents/skills
+base_gate_rc=42
+fake-claude: would prompt outside working directories on:
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-base.oJ1SAJ/case/home/user-home/.agents/skills/no-mistakes/SKILL.md
+LAB=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-base.oJ1SAJ

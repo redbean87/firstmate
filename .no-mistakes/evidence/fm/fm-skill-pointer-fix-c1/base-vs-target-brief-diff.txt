@@ -1,0 +1,51 @@
+# Base (37fdc52b) vs target (4c4a875b) generated brief diff
+# Same task id and FM_HOME; base root path normalized to the target root.
+# Only the no-mistakes arms should differ, by exactly the one pointer line.
+
+===================================================================
+### d-nm  (Delivery contract: mode=no-mistakes)
+===================================================================
+--- /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-ev-diff.o8AG9l/out/d-nm.base	2026-10-10 23:16:55
++++ /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-ev-diff.o8AG9l/out/d-nm.target	2026-10-10 23:16:55
+@@ -100,6 +100,7 @@
+ 
+ You drive no-mistakes by responding to its gates, not by implementing fixes.
+ Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke /no-mistakes, and `no-mistakes axi run --help` plus the `help` lines in each `axi` response are authoritative and version-matched to the installed binary.
++The skill is not advertised in this session's skill list, so read it directly: [/Users/cortezashley/.agents/skills/no-mistakes/SKILL.md](</Users/cortezashley/.agents/skills/no-mistakes/SKILL.md>).
+ When starting no-mistakes, pass `--intent` as only this brief's `## Captain's intent` subsection body, not its heading, plus any later words the captain actually said.
+ Preserve the actual words without adding speaker labels or direct address; the subsection heading supplies provenance outside the pipeline input.
+ For a legacy brief with no such subsection, include only words on lines marked `[captain] `, excluding that metadata prefix; never copy its mixed `# Task` wholesale.
+
+===================================================================
+### d-nmgerrit  (Delivery contract: mode=no-mistakes forge=gerrit shape=squash)
+===================================================================
+--- /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-ev-diff.o8AG9l/out/d-nmgerrit.base	2026-10-10 23:16:55
++++ /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-ev-diff.o8AG9l/out/d-nmgerrit.target	2026-10-10 23:16:55
+@@ -103,6 +103,7 @@
+ 
+ You drive no-mistakes by responding to its gates, not by implementing fixes.
+ Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke /no-mistakes, and `no-mistakes axi run --help` plus the `help` lines in each `axi` response are authoritative and version-matched to the installed binary.
++The skill is not advertised in this session's skill list, so read it directly: [/Users/cortezashley/.agents/skills/no-mistakes/SKILL.md](</Users/cortezashley/.agents/skills/no-mistakes/SKILL.md>).
+ When starting no-mistakes, pass `--intent` as only this brief's `## Captain's intent` subsection body, not its heading, plus any later words the captain actually said.
+ Preserve the actual words without adding speaker labels or direct address; the subsection heading supplies provenance outside the pipeline input.
+ For a legacy brief with no such subsection, include only words on lines marked `[captain] `, excluding that metadata prefix; never copy its mixed `# Task` wholesale.
+
+===================================================================
+### d-direct  (Delivery contract: mode=direct-PR)
+===================================================================
+(identical)
+
+===================================================================
+### d-local  (Delivery contract: mode=local-only)
+===================================================================
+(identical)
+
+===================================================================
+### d-scout  (scout/secondmate)
+===================================================================
+(identical)
+
+===================================================================
+### d-mate  (scout/secondmate)
+===================================================================
+(identical)
