@@ -154,6 +154,7 @@ PAUSED_VERB=${FM_CLASSIFY_PAUSED_VERB:-$FM_CLASSIFY_PAUSED_VERB_DEFAULT}
 IFS= read -r -d '' CREWMATE_PAUSE_INSTRUCTIONS <<EOF || true
    Use \`$PAUSED_VERB: {why}\` - distinct from \`blocked:\` - when deliberately waiting for work or an external condition expected to clear on its own, including your own validation round.
    Before ending your turn with your own background shell or monitor still running, or before waiting on your own pipeline run or a long foreground command, append \`$PAUSED_VERB [at=<epoch>]: {job and completion condition}\` to the status file.
+   A pipeline step that is genuinely still running may be reported as \`$PAUSED_VERB\` under this rule. A pipeline parked at a review gate awaiting a decision is never \`$PAUSED_VERB\`: inspect the gate your drive call returned, then append \`needs-decision [at=<epoch>]: {gate and options}\` (on a no-mistakes ship task, rule 6's ask-user format with \`[key=nm-<run>-<step>]\`, naming every finding id from that gate) and stop.
    Name what you are waiting for and what will let you resume; do not repeat the declaration on every poll.
    Do not declare active implementation or reasoning as a wait.
    Firstmate may still raise one first-sight alert; the declared wait then uses the existing long recheck cadence instead of repeated possible-wedge alarms.
