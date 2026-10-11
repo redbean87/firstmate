@@ -404,6 +404,53 @@ test_no_mistakes_dod_wording() {
   pass "fm-brief.sh: no-mistakes DOD keeps its apostrophe prose and bans --yes outright"
 }
 
+# The no-mistakes skill's disable-model-invocation flag (2026-10-10) removed it
+# from the advertised skill list, so a pipeline-driving worker only finds the
+# 28 KB mechanics text if the brief names its path. The pointer is one line
+# inside fm_nm_driving_block(), so it must render exactly once in a
+# no-mistakes brief and must stay absent from every non-pipeline scaffold.
+test_no_mistakes_dod_skill_pointer() {
+  local home id brief count mode
+  home="$TMP_ROOT/skill-pointer-home"
+  mkdir -p "$home/data"
+  id="brief-pointer-p1"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj --mode no-mistakes >/dev/null 2>&1
+  brief="$home/data/$id/brief.md"
+  assert_present "$brief" "brief was not scaffolded"
+  count=$(grep -F -c "no-mistakes/SKILL.md" "$brief")
+  [ "$count" -eq 1 ] \
+    || fail "no-mistakes DOD must render the skill path pointer exactly once (got $count)"
+  # shellcheck disable=SC2016  # single quotes are deliberate: the backticks and brackets must stay literal
+  assert_grep 'The skill is not advertised in this session'"'"'s skill list, so read it directly: [~/.agents/skills/no-mistakes/SKILL.md](<~/.agents/skills/no-mistakes/SKILL.md>).' "$brief" \
+    "no-mistakes DOD lost the one-line skill path pointer"
+  assert_grep "no-mistakes itself provides for the mechanics" "$brief" \
+    "skill pointer edit displaced the guidance-reference sentence"
+
+  for mode in direct-PR local-only; do
+    id="brief-pointer-$mode"
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj --mode "$mode" >/dev/null 2>&1
+    brief="$home/data/$id/brief.md"
+    assert_present "$brief" "$mode: brief was not scaffolded"
+    assert_no_grep "no-mistakes/SKILL.md" "$brief" \
+      "$mode: non-pipeline brief must not point at the no-mistakes skill"
+  done
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-pointer-scout some-proj --scout >/dev/null 2>&1
+  brief="$home/data/brief-pointer-scout/brief.md"
+  assert_present "$brief" "scout: brief was not scaffolded"
+  assert_no_grep "no-mistakes/SKILL.md" "$brief" \
+    "scout: report contract must not point at the no-mistakes skill"
+
+  FM_SECONDMATE_CHARTER='Supervise the alpha domain.' \
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-pointer-mate --secondmate alpha >/dev/null 2>&1
+  brief="$home/data/brief-pointer-mate/brief.md"
+  assert_present "$brief" "secondmate: charter was not scaffolded"
+  assert_no_grep "no-mistakes/SKILL.md" "$brief" \
+    "secondmate: charter must not point at the no-mistakes skill"
+
+  pass "fm-brief.sh: the skill path pointer renders only in pipeline-driving briefs"
+}
+
 # The green-PR report must not depend on a status poll: `axi status` never
 # reports `checks-passed` while the ci step monitors the PR for merge, so a
 # worker told to wait on it for the next gate or outcome never learned its PR
@@ -1477,6 +1524,7 @@ test_ship_mode_is_explicit_not_registry
 test_delivery_flags_are_refused_where_they_do_not_apply
 test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
+test_no_mistakes_dod_skill_pointer
 test_no_mistakes_dod_green_detection
 test_pr_based_dod_requires_non_draft
 test_ask_user_escalation_format
