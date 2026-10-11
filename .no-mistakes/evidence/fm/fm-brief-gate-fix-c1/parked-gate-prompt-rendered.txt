@@ -1,0 +1,32 @@
+# Rendered worker prompt: parked-gate vs running-step distinction
+# source: bin/fm-brief.sh CREWMATE_PAUSE_INSTRUCTIONS (shared by ship and scout)
+
+===== SHIP brief (--mode no-mistakes), pause instruction block =====
+   Use `paused: {why}` - distinct from `blocked:` - when deliberately waiting for work or an external condition expected to clear on its own, including your own validation round.
+   Before ending your turn with your own background shell or monitor still running, or before waiting on your own pipeline run or a long foreground command, append `paused [at=<epoch>]: {job and completion condition}` to the status file.
+   A pipeline step that is genuinely still running may be reported as `paused` under this rule. A pipeline parked at a review gate awaiting a decision is never `paused`: inspect the gate your drive call returned, then append `needs-decision [at=<epoch>]: {gate and options}` (on a no-mistakes ship task, rule 6's ask-user format with `[key=nm-<run>-<step>]`, naming every finding id from that gate) and stop.
+   Name what you are waiting for and what will let you resume; do not repeat the declaration on every poll.
+   Do not declare active implementation or reasoning as a wait.
+   Firstmate may still raise one first-sight alert; the declared wait then uses the existing long recheck cadence instead of repeated possible-wedge alarms.
+   When you know when the wait clears, include `until <YYYY-MM-DDTHH:MMZ>` (UTC) for a recheck at that time.
+   Follow the resolution rule below when the wait clears, then resume the task.
+
+===== SCOUT brief (--scout), pause instruction block =====
+   Use `paused: {why}` - distinct from `blocked:` - when deliberately waiting for work or an external condition expected to clear on its own, including your own validation round.
+   Before ending your turn with your own background shell or monitor still running, or before waiting on your own pipeline run or a long foreground command, append `paused [at=<epoch>]: {job and completion condition}` to the status file.
+   A pipeline step that is genuinely still running may be reported as `paused` under this rule. A pipeline parked at a review gate awaiting a decision is never `paused`: inspect the gate your drive call returned, then append `needs-decision [at=<epoch>]: {gate and options}` (on a no-mistakes ship task, rule 6's ask-user format with `[key=nm-<run>-<step>]`, naming every finding id from that gate) and stop.
+   Name what you are waiting for and what will let you resume; do not repeat the declaration on every poll.
+   Do not declare active implementation or reasoning as a wait.
+   Firstmate may still raise one first-sight alert; the declared wait then uses the existing long recheck cadence instead of repeated possible-wedge alarms.
+   When you know when the wait clears, include `until <YYYY-MM-DDTHH:MMZ>` (UTC) for a recheck at that time.
+   Follow the resolution rule below when the wait clears, then resume the task.
+
+===== SHIP brief (--mode no-mistakes), rule 6 ask-user wiring the new line points at =====
+6. If a decision belongs above the implementation worker (product choices, destructive actions),
+   append `needs-decision [at=<epoch>]: {summary of options}` and stop. Firstmate will reply with the decision.
+   For a no-mistakes ask-user gate specifically, escalate all ask-user findings as one event plus one snapshot file, using that same shape even when the gate holds only a single ask-user finding: write only the ask-user findings, verbatim and unparaphrased (id, severity, file, line, description, authority), to `/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.VC89HD/data/park-nm/nm-<run>-findings.txt`, then report the gate with
+   `needs-decision [at=<epoch>] [key=nm-<run>-<step>]: ask-user findings=<id1>,<id2>,... file=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.VC89HD/data/park-nm/nm-<run>-findings.txt`
+   naming every ask-user finding id from that gate. The status line only points at the file; it never restates or summarizes a finding's content.
+   A decision or blocker you opened stays open until a `resolved` line carrying its exact key lands; a later `done:` or `working:` line never closes it, even when the answer is what started that work.
+   Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append `resolved [at=<epoch>]: {how it cleared}` yourself (same `[key=<slug>]` if you opened it with one) as you resume.
+7. Never administer infrastructure that every lane shares. Two things are shared:

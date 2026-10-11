@@ -1,0 +1,3 @@
+# Custom-classify-verb rendering (FM_CLASSIFY_PAUSED_VERB=waiting)
+44:   Use `waiting: {why}` - distinct from `blocked:` - when deliberately waiting for work or an external condition expected to clear on its own, including your own validation round.
+46:   A pipeline step that is genuinely still running may be reported as `waiting` under this rule. A pipeline parked at a review gate awaiting a decision is never `waiting`: inspect the gate your drive call returned, then append `needs-decision [at=<epoch>]: {gate and options}` (on a no-mistakes ship task, rule 6's ask-user format with `[key=nm-<run>-<step>]`, naming every finding id from that gate) and stop.
