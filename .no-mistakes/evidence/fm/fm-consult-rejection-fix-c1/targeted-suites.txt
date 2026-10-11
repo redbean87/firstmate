@@ -1,0 +1,11 @@
+### Targeted suites on the FIXED worktree (target commit ed5a0127)
+
+----- bash tests/fm-chatgpt-consult.test.sh -----
+ok - an HTTP-200 structured rejection exits nonzero with the bridge's own diagnostic and empty stdout
+ok - a rejection without a reported size relays the bridge message and invents no number
+suite_exit=0
+
+----- bash tests/fm-chatgpt-loop.test.sh -----
+ok - a rejected plan consult fails, holds the phase, stores no plan, and records the bridge's diagnostic
+ok - a rejected audit consult fails, holds audit-consult, and stores no audit result
+suite_exit=0

@@ -1,0 +1,14 @@
+### Regression check: NEW tests run against BASE commit e45fdd6 code (no .error handling)
+### Expectation: the new rejection tests FAIL, proving the fix is what makes them pass.
+
+----- tests/fm-chatgpt-consult.test.sh (base bin + new tests) -----
+not ok - the failure must identify a bridge rejection (missing: 'bridge rejected')
+--- output ---
+fm-chatgpt: bridge returned no response text (HTTP 200)
+suite_exit=1
+
+----- tests/fm-chatgpt-loop.test.sh (base bin + new tests) -----
+not ok - last_error must identify the bridge rejection (missing: 'bridge rejected')
+--- output ---
+fm-chatgpt: bridge returned no response text (HTTP 200)
+suite_exit=1

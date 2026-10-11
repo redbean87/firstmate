@@ -1,0 +1,67 @@
+
+===== consult --mode plan against bridge mode 'ok' =====
+exit=0
+stdout=[STUB ANSWER: proceed with the plan]
+stderr=[]
+
+===== consult --mode plan against bridge mode 'reject200' =====
+exit=1
+stdout=[]
+stderr=[fm-chatgpt: bridge rejected the request (context_length_exceeded): This request exceeds the browser transport budget (102400 tokens).]
+
+===== consult --mode plan against bridge mode 'reject_nosize' =====
+exit=1
+stdout=[]
+stderr=[fm-chatgpt: bridge rejected the request: bridge refused this turn outright]
+
+===== consult --mode plan against bridge mode 'error_no_message' =====
+exit=1
+stdout=[]
+stderr=[fm-chatgpt: bridge returned no response text (HTTP 200)]
+
+===== consult --mode plan against bridge mode 'http500' =====
+exit=1
+stdout=[]
+stderr=[fm-chatgpt: bridge request failed with HTTP 500: {"error": {"message": "stub failure"}}]
+
+===== consult --mode plan against bridge mode 'garbage' =====
+exit=1
+stdout=[]
+stderr=[jq: parse error: Invalid numeric literal at line 1, column 4
+fm-chatgpt: bridge returned no response text (HTTP 200)]
+CONSULT-ASSERTS-OK
+
+===== loop: audit consult rejected (HTTP 200 structured rejection) =====
+exit=1
+output=[fm-chatgpt: bridge rejected the request (context_length_exceeded): This request exceeds the browser transport budget (102400 tokens).]
+phase=audit-consult
+audit_prompt=[]
+audit_result=[]
+last_error=[fm-chatgpt: bridge rejected the request (context_length_exceeded): This request exceeds the browser transport budget (102400 tokens).]
+ASSERT_OK audit rejection: phase held, nothing stored, bridge diagnostic in last_error
+
+===== loop: plan consult rejected (HTTP 200 structured rejection) =====
+exit=1
+output=[fm-chatgpt: bridge rejected the request (context_length_exceeded): This request exceeds the browser transport budget (102400 tokens).]
+phase=audit-consult
+plan=[]
+last_error=[fm-chatgpt: bridge rejected the request (context_length_exceeded): This request exceeds the browser transport budget (102400 tokens).]
+ASSERT_OK plan rejection: phase held, no plan stored, bridge diagnostic in last_error
+
+===== loop: rejection without a reported size invents no number =====
+exit=1
+output=[fm-chatgpt: bridge rejected the request: bridge refused this turn outright]
+last_error=[fm-chatgpt: bridge rejected the request: bridge refused this turn outright]
+ASSERT_OK no-size rejection: message relayed verbatim, no number invented
+
+===== loop: successful audit consult is unaffected (no false rejection) =====
+exit=0 phase=audit-dispatch
+audit_prompt=[STUB ANSWER: proceed with the plan]
+ASSERT_OK successful audit: answer stored, phase advanced, no rejection
+
+===== loop: successful plan consult is unaffected (no false rejection) =====
+exit=0 phase=plan-dispatch
+plan=[STUB ANSWER: proceed with the plan]
+ASSERT_OK successful plan: answer stored, phase advanced, no rejection
+
+ALL LIVE SCENARIO ASSERTIONS PASSED
