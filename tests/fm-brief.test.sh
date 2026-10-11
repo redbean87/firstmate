@@ -410,7 +410,7 @@ test_no_mistakes_dod_wording() {
 # inside fm_nm_driving_block(), so it must render exactly once in a
 # no-mistakes brief and must stay absent from every non-pipeline scaffold.
 test_no_mistakes_dod_skill_pointer() {
-  local home id brief count mode
+  local home id brief count mode expected_pointer
   home="$TMP_ROOT/skill-pointer-home"
   mkdir -p "$home/data"
   id="brief-pointer-p1"
@@ -420,8 +420,8 @@ test_no_mistakes_dod_skill_pointer() {
   count=$(grep -F -c "no-mistakes/SKILL.md" "$brief")
   [ "$count" -eq 1 ] \
     || fail "no-mistakes DOD must render the skill path pointer exactly once (got $count)"
-  # shellcheck disable=SC2016  # single quotes are deliberate: the backticks and brackets must stay literal
-  assert_grep 'The skill is not advertised in this session'"'"'s skill list, so read it directly: [~/.agents/skills/no-mistakes/SKILL.md](<~/.agents/skills/no-mistakes/SKILL.md>).' "$brief" \
+  expected_pointer="The skill is not advertised in this session's skill list, so read it directly: [$HOME/.agents/skills/no-mistakes/SKILL.md](<$HOME/.agents/skills/no-mistakes/SKILL.md>)."
+  assert_grep "$expected_pointer" "$brief" \
     "no-mistakes DOD lost the one-line skill path pointer"
   assert_grep "no-mistakes itself provides for the mechanics" "$brief" \
     "skill pointer edit displaced the guidance-reference sentence"

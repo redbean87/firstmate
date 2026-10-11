@@ -2948,12 +2948,14 @@ rovo_config_override_flag() {
 # Firstmate worker always reads outside its cwd - a secondmate's steers live
 # in the PARENT home's state/<id>.inbox, and a ship or scout worker's launch
 # record, steers, and brief live in this home's state/operational-inbox,
-# state/<id>.inbox, and data/<id>, plus the code root's .agents/skills so the
-# worker can read the skill file the launch role names as the fallback for a
-# session where the skill name does not resolve - so every Claude launch,
+# state/<id>.inbox, and data/<id>, plus the skill files those briefs name as
+# the fallback for a session where the skill name does not resolve: the code
+# root's .agents/skills, and the user-level .agents/skills/no-mistakes the
+# no-mistakes brief points at when it is installed - so every Claude launch,
 # fresh spawn and relaunch, in both permission modes, grants exactly those
-# task-channel directories. The skills grant is that directory, not the
-# checkout root, so the grant does not open the whole checkout. Paths resolve
+# task-channel directories. The skills grant is each named skill directory,
+# not the checkout root or the whole user skills tree, so the grant does not
+# open the whole checkout or every user skill. Paths resolve
 # the way rovo_config_override_flag resolves them
 # (real paths under the task's home). The state channel dirs are created
 # lazily by their first record, so they are made here: an --add-dir naming a
@@ -2962,7 +2964,7 @@ rovo_config_override_flag() {
 # internals live there) or anything wider.
 claude_add_dirs_flag() {  # <kind> <state-dir> <data-dir> <code-root> <task-id>
   local kind=$1 state_dir=$2 data_dir=$3 code_root=$4 id=$5
-  local state_real data_real root_real out='' d
+  local state_real data_real root_real nm_skill_real='' out='' d
   local dirs=()
   state_real=$(cd "$state_dir" && pwd -P) || return 1
   case "$kind" in
@@ -2976,6 +2978,10 @@ claude_add_dirs_flag() {  # <kind> <state-dir> <data-dir> <code-root> <task-id>
     [ -d "$root_real/.agents/skills" ] || return 1
     mkdir -p "$state_real/operational-inbox" "$state_real/$id.inbox/handled" "$data_real/$id" || return 1
     dirs=("$state_real/operational-inbox" "$state_real/$id.inbox" "$data_real/$id" "$root_real/.agents/skills")
+    if [ -n "${HOME:-}" ] && [ -d "$HOME/.agents/skills/no-mistakes" ]; then
+      nm_skill_real=$(cd "$HOME/.agents/skills/no-mistakes" && pwd -P) || return 1
+      dirs+=("$nm_skill_real")
+    fi
     ;;
   esac
   for d in "${dirs[@]}"; do

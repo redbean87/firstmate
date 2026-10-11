@@ -2389,9 +2389,10 @@ test_claude_permission_mode_auto_reaches_scout_launch() {
 # them under --permission-mode auto parks the pane on a one-time interactive
 # question; a "Block" answer on the machine then refuses the same reads even
 # under bypass. Drive the real emitted launch through a claude stub that
-# models that working-directory check: every channel path must resolve inside
-# the pane cwd or an --add-dir, under both permission modes, for ships and
-# scouts alike.
+# models that working-directory check: every channel path, plus the
+# user-level no-mistakes skill file a pipeline brief names, must resolve
+# inside the pane cwd or an --add-dir, under both permission modes, for ships
+# and scouts alike.
 test_claude_worker_launch_covers_task_channel_dirs() {
   local mode kind rec id out status launch reqs eval_out eval_rc
   for mode in bypass auto; do
@@ -2401,8 +2402,10 @@ test_claude_worker_launch_covers_task_channel_dirs() {
       read_case_record "$rec"
       printf '%s\n' "$mode" > "$HOME_DIR/config/claude-permission-mode"
       fm_fake_claude_outside_read_gate "$FAKEBIN_DIR"
+      mkdir -p "$HOME_DIR/user-home/.agents/skills/no-mistakes"
       reqs="$CASE_DIR/channel-requirements.txt"
-      printf '%s\n' "$HOME_DIR/state/$id.inbox" "$HOME_DIR/data/$id" "$ROOT/.agents/skills" > "$reqs"
+      printf '%s\n' "$HOME_DIR/state/$id.inbox" "$HOME_DIR/data/$id" "$ROOT/.agents/skills" \
+        "$HOME_DIR/user-home/.agents/skills/no-mistakes/SKILL.md" > "$reqs"
 
       if [ "$kind" = ship ]; then
         out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
