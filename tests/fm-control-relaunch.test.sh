@@ -2597,11 +2597,41 @@ test_relaunch_with_an_unavailable_channel_refuses_before_stopping() {
   pass "fm-control relaunch: an unavailable channel refuses before the agent is stopped"
 }
 
+# The waiver's recording half must answer before the stop too: an explicit
+# --consult-waived whose reason has nowhere to land in this home's backlog
+# refuses while the running agent is still exactly where it was.
+test_relaunch_with_an_unrecordable_waiver_refuses_before_stopping() {
+  local dir out rc
+  command -v tasks-axi >/dev/null 2>&1 || {
+    pass "skipped: tasks-axi is not installed, so the backlog transition is inert"
+    return 0
+  }
+  fm_tasks_axi_compatible || {
+    pass "skipped: installed tasks-axi predates ${FM_TASKS_AXI_MIN}, so dispatch refuses automatic backlog transitions"
+    return 0
+  }
+  dir=$(new_case consultgate-unrecordable rl53)
+  add_ship_task "$dir" rl53 claude
+  # A live markdown backlog with no row for this task: the waiver note is
+  # applicable and cannot be written.
+  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$dir/home/data/backlog.md"
+
+  out=$(run_control "$dir" rl53 relaunch --note "x" --consult-waived "ops decision"); rc=$?
+  expect_code 1 "$rc" "a relaunch whose waiver cannot be recorded must refuse"$'\n'"$out"
+  assert_contains "$out" "backlog note" "the refusal must name the record that could not be written"
+  [ "$(cat "$dir/fake/command")" = claude ] \
+    || fail "an unrecordable-waiver refusal must not stop the running agent"
+  [ -z "$(cat "$dir/fake/literal")" ] \
+    || fail "an unrecordable-waiver refusal must send nothing to the endpoint"
+  pass "fm-control relaunch: an unrecordable waiver refuses before the agent is stopped"
+}
+
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
 test_relaunch_without_a_stored_prompt_refuses_before_stopping
 test_relaunch_with_a_stored_prompt_proceeds_normally
 test_relaunch_with_an_unavailable_channel_refuses_before_stopping
+test_relaunch_with_an_unrecordable_waiver_refuses_before_stopping
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven

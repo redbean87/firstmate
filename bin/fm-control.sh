@@ -95,10 +95,13 @@
 #              the record path and the bin/fm-chatgpt-loop.sh commands that create
 #              it, exactly as bin/fm-spawn.sh refuses a fresh launch. An
 #              unavailable channel refuses here too, with the probe verdict
-#              naming the cause. --consult-waived <reason> carries an explicit
-#              exception through to bin/fm-spawn.sh, which records it in the
-#              task record and backlog note, so nothing is ever waived without
-#              leaving its reason in the durable record.
+#              naming the cause. --consult-waived <reason> is an explicit
+#              exception this transaction records in the task's backlog note
+#              HERE, before the checkpoint and the exit, so a waiver the backlog
+#              cannot record refuses while the agent is still running, and then
+#              carries it through to bin/fm-spawn.sh, which records it in the
+#              task record, so nothing is ever waived without leaving its reason
+#              in the durable record.
 #              Records a durable checkpoint and that note, exits the old agent,
 #              then delegates the launch to its single owner,
 #              bin/fm-spawn.sh --relaunch. A failure before publication keeps
@@ -1157,14 +1160,26 @@ do_relaunch() {
   # Consultation gate (bin/fm-consult-gate-lib.sh): the same refusal
   # bin/fm-spawn.sh enforces on a fresh launch, run HERE because this
   # transaction stops the running agent before it delegates the replacement.
-  # An operator's --consult-waived <reason> is carried into bin/fm-spawn.sh
-  # below, which is what records it in the task record and the backlog note;
-  # an unavailable channel refuses here like any other missing prompt. Nothing
-  # is checkpointed, noted, or stopped until the gate has answered.
+  # An operator's --consult-waived <reason> is recorded in the backlog note
+  # HERE, before the checkpoint and the stop, exactly as bin/fm-spawn.sh records
+  # it before a fresh launch; an unavailable channel refuses here like any other
+  # missing prompt. Nothing is checkpointed, noted, or stopped until the gate
+  # has answered, including its waiver recording.
   if ! fm_consult_gate_check "$DATA" "$ID" "$KIND" "$CONSULT_WAIVED_SET" "$CONSULT_WAIVED"; then
     exit 1
   fi
   consult_waiver_reason=$FM_CONSULT_GATE_WAIVER_REASON
+  if [ -n "$consult_waiver_reason" ]; then
+    if ! declare -F fm_backlog_transition_applies >/dev/null 2>&1; then
+      # shellcheck source=bin/fm-tasks-axi-lib.sh
+      . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+      # shellcheck source=bin/fm-backlog-transition-lib.sh
+      . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+    fi
+    if ! fm_consult_gate_record_backlog "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" "$DATA" "$KIND" "$ID" "$consult_waiver_reason"; then
+      die "task $ID's consultation waiver could not be recorded in its backlog note ($FM_CONSULT_GATE_RECORD_ERROR); refusing a relaunch whose bypass is not durably visible, before the running agent is stopped"
+    fi
+  fi
   safe_checkpoint
   cp -p "$META" "$META_PRIOR" || die "could not preserve task $ID's durable record before relaunching"
   RELAUNCH_ACTIVE=1
