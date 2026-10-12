@@ -181,7 +181,7 @@ test_scout_is_gated_the_same_way() {
   pass "fm-spawn: a scout launch is gated exactly like a ship"
 }
 
-test_unavailable_channel_proceeds_under_a_recorded_waiver() {
+test_unavailable_channel_refuses_naming_the_cause() {
   local dir id out status meta body
   id=gate-down-c1
   dir=$(make_case gate-down "$id")
@@ -189,38 +189,61 @@ test_unavailable_channel_proceeds_under_a_recorded_waiver() {
   fm_test_use_dead_bridge
 
   out=$(run_ship "$dir" "$id"); status=$?
-  expect_code 0 "$status" "a launch must not be blocked by an unavailable channel"$'\n'"$out"
-  assert_contains "$out" "consultation channel is unavailable" \
-    "the unavailable channel must be reported on the launch"
-  assert_contains "$out" "under a recorded waiver" \
-    "the launch must say it proceeded under a recorded waiver"
-  meta="$dir/home/state/$id.meta"
-  assert_grep "consult_waived=consultation channel unavailable: unreachable" "$meta" \
-    "the recorded waiver must name the channel failure and the probe verdict"
+  expect_code 1 "$status" "an unreachable channel must refuse a launch with no stored prompt"$'\n'"$out"
+  assert_contains "$out" "$dir/home/data/$id/chatgpt-loop.json" \
+    "the refusal must still name the missing artifact"
+  assert_contains "$out" "the consultation channel is unavailable: unreachable" \
+    "the refusal must name the real cause from the probe verdict"
+  assert_contains "$out" "--consult-waived <reason>" \
+    "the refusal must print the waiver command"
+  assert_absent "$dir/home/state/$id.meta" "a refused launch must write no task record"
+  [ ! -s "$dir/launch.log" ] || fail "a refused launch must not launch a worker"
   body=$(tasks-axi show "$id" --full --file "$dir/home/data/backlog.md")
-  assert_contains "$body" "consultation channel unavailable: unreachable" \
-    "the backlog note must carry the same waiver"
-  assert_present "$dir/launch.log" "the launch must still launch its worker"
-  pass "fm-spawn: a verified-unavailable channel proceeds under a recorded waiver"
+  assert_not_contains "$body" "ChatGPT consultation gate waived" \
+    "a refused launch must not write a waiver note"
+  pass "fm-spawn: an unreachable channel refuses with the cause named, never a silent pass"
 }
 
-test_unhealthy_bridge_proceeds_under_a_recorded_waiver() {
-  local dir id out status meta
+test_unhealthy_bridge_refuses_naming_the_cause() {
+  local dir id out status
   id=gate-unhealthy-c1
   dir=$(make_case gate-unhealthy "$id")
-  seed_backlog "$dir" "$id"
   fm_test_start_bridge_stub "$dir" unhealthy
 
   out=$(run_ship "$dir" "$id"); status=$?
-  expect_code 0 "$status" "a launch must not be blocked by a listening-but-broken channel"$'\n'"$out"
-  assert_contains "$out" "consultation channel is unavailable (unhealthy" \
-    "the broken channel must be reported on the launch"
-  meta="$dir/home/state/$id.meta"
-  assert_grep "consult_waived=consultation channel unavailable: unhealthy" "$meta" \
-    "the recorded waiver must name the unhealthy verdict"
-  assert_present "$dir/launch.log" "the launch must still launch its worker"
+  expect_code 1 "$status" "a listening-but-broken channel must refuse a launch with no stored prompt"$'\n'"$out"
+  assert_contains "$out" "$dir/home/data/$id/chatgpt-loop.json" \
+    "the refusal must still name the missing artifact"
+  assert_contains "$out" "the consultation channel is unavailable: unhealthy" \
+    "the refusal must name the unhealthy verdict as the cause"
+  assert_contains "$out" "--consult-waived <reason>" \
+    "the refusal must print the waiver command"
+  assert_absent "$dir/home/state/$id.meta" "a refused launch must write no task record"
+  [ ! -s "$dir/launch.log" ] || fail "a refused launch must not launch a worker"
   fm_test_stop_bridge_stub
-  pass "fm-spawn: a listening-but-broken channel proceeds under a recorded waiver"
+  pass "fm-spawn: a listening-but-broken channel refuses with the cause named"
+}
+
+test_a_finished_rounds_prompt_never_satisfies_the_gate() {
+  local dir id out status
+  id=gate-stale-c1
+  dir=$(make_case gate-stale "$id")
+  fm_test_use_dead_bridge
+  # The exact record a finished round leaves at the next round's consult phase:
+  # phase back at audit-consult with round 1's prompt still stored. The gate
+  # must read it as "this round's consultation has not run", never as a stored
+  # prompt.
+  write_record "$dir" "$id" audit-consult "stale prompt from round 1" "stale plan from round 1"
+
+  out=$(run_ship "$dir" "$id"); status=$?
+  expect_code 1 "$status" "a consult-phase record must refuse even with a leftover prompt"$'\n'"$out"
+  assert_contains "$out" "--stage audit --task $id" \
+    "the refusal must point at the consultation that has not run"
+  assert_contains "$out" "waiting on this round's consultation" \
+    "the refusal must say this round's consultation has not run"
+  assert_absent "$dir/home/state/$id.meta" "a refused launch must write no task record"
+  [ ! -s "$dir/launch.log" ] || fail "a refused launch must not launch a worker"
+  pass "fm-spawn: a finished round's prompt never satisfies the gate at the next round's consult phase"
 }
 
 test_loop_dispatch_record_satisfies_the_gate() {
@@ -288,8 +311,9 @@ test_stored_prompt_launches_unchanged_and_pays_no_probe
 test_waiver_with_an_empty_reason_refuses
 test_waiver_reason_lands_in_the_record_and_the_backlog_note
 test_scout_is_gated_the_same_way
-test_unavailable_channel_proceeds_under_a_recorded_waiver
-test_unhealthy_bridge_proceeds_under_a_recorded_waiver
+test_unavailable_channel_refuses_naming_the_cause
+test_unhealthy_bridge_refuses_naming_the_cause
+test_a_finished_rounds_prompt_never_satisfies_the_gate
 test_loop_dispatch_record_satisfies_the_gate
 test_loop_dispatch_marker_alone_proves_nothing
 test_the_stage_in_play_decides_which_prompt_is_required

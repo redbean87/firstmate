@@ -49,7 +49,11 @@
 # the stage prompt to.
 # Phases: audit-consult -> audit-dispatch -> audit-worker -> plan-consult ->
 # plan-dispatch -> plan-worker -> complete. next-round increments iteration
-# and returns to audit-consult so further audit/plan cycles stay possible.
+# and returns to audit-consult so further audit/plan cycles stay possible, and
+# clears the finished round's scoped fields (audit_prompt, audit_result,
+# findings, findings_source, worker_task, plan, worker_result, last_error) so a
+# finished round's prompt can never pass bin/fm-consult-gate-lib.sh's dispatch
+# gate as the new round's consultation.
 # A wrong-phase call refuses with a nonzero exit and no state change.
 #
 # Findings feedback is part of stage completion, never a separate afterthought:
@@ -779,7 +783,11 @@ cmd_next_round() {
   require_phase "$file" complete "$task" || return 1
   iter=$(jq -r '.iteration // 1' "$file")
   tmp=$(mktemp) || return 1
-  jq --argjson i "$((iter + 1))" --arg u "$(now_iso)" '.iteration = $i | .phase = "audit-consult" | .updated_at = $u' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+  jq --argjson i "$((iter + 1))" --arg u "$(now_iso)" \
+    '.iteration = $i | .phase = "audit-consult"
+     | .audit_prompt = "" | .audit_result = "" | .findings = "" | .findings_source = ""
+     | .worker_task = "" | .plan = "" | .worker_result = "" | .last_error = ""
+     | .updated_at = $u' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$file"
   printf 'task %s advanced to round %s\n' "$task" "$((iter + 1))"
 }

@@ -24,19 +24,24 @@
 #     gated; passing --consult-waived to one is refused rather than ignored.
 #   - Stored prompt: data/<task-id>/chatgpt-loop.json must exist, parse as a
 #     JSON object, and carry a non-empty (whitespace-only counts as empty)
-#     prompt for the stage its phase puts in play: audit_prompt for an audit-*
-#     phase, plan for a plan-* phase or a completed loop. No particular phase
-#     name is required beyond that. A record whose phase names no stage, an
-#     unreadable record, and an empty stage prompt all fail closed.
+#     prompt for the stage its phase puts in play, with a phase that proves this
+#     round's consultation ran: audit_prompt at audit-dispatch or audit-worker,
+#     plan at plan-dispatch, plan-worker, or complete. No other phase name is
+#     required. A record whose phase names no stage, a record still waiting at
+#     its consult phase, an unreadable record, and an empty stage prompt all
+#     fail closed, so a prompt left over from a finished round can never satisfy
+#     the gate - bin/fm-chatgpt-loop.sh's next-round clears those round-scoped
+#     fields as well.
 #   - No usable record: the bounded channel probe (bin/fm-chatgpt-bridge-lib.sh)
 #     runs HERE and only here, so an ordinary launch pays no probe, and nothing
-#     here starts, stops, or repairs the bridge. A `healthy` verdict refuses and
-#     prints the exact record path plus the bin/fm-chatgpt-loop.sh init and
-#     consult commands that create the missing prompt. Any verified unavailable
-#     verdict - unreachable, unhealthy, misconfigured, unconfigured - does not
-#     block the work: the launch proceeds under a recorded waiver whose reason
-#     names the probe verdict, so a down channel is never silent either. A probe
-#     that cannot run leaves availability unverified and refuses.
+#     here starts, stops, or repairs the bridge. Every verdict refuses: a
+#     `healthy` channel, a channel the probe reports unavailable - unreachable,
+#     unhealthy, misconfigured, unconfigured - and a probe that cannot run. The
+#     refusal prints the exact record path, the bin/fm-chatgpt-loop.sh init and
+#     consult commands that create the prompt, the probe verdict that names the
+#     real cause, and the --consult-waived <reason> command, so an unavailable
+#     channel is a refusal with a named cause rather than a pass. The explicit
+#     waiver below is the only way past the gate.
 #   - Explicit waiver: --consult-waived <reason>. An empty or whitespace-only
 #     reason is refused, and so is a multi-line reason, which could not be
 #     recorded safely in a one-value-per-line task record. A supplied reason
@@ -75,10 +80,13 @@ fm_consult_gate_record_path() {
 
 # fm_consult_gate_record_verdict <record-file>
 # Prints one line classifying the record against the gate:
-#   ok <stage>              the stage in play has a non-empty stored prompt
+#   ok <stage>              the phase proves this round's consultation ran and
+#                           the stage prompt is non-empty
 #   missing                 no record exists at that path
 #   unreadable <detail>     the record cannot be read as a JSON object
 #   no-stage <phase>        the record's phase names no stage in play
+#   consult-pending <stage> the record waits at this round's <stage>-consult,
+#                           so no current-round prompt exists yet
 #   no-prompt <stage>       the stage in play has an empty or blank prompt
 fm_consult_gate_record_verdict() {
   local file=$1 phase prompt stage field
@@ -99,13 +107,17 @@ fm_consult_gate_record_verdict() {
     return 0
   fi
   case "$phase" in
-  audit-*)
+  audit-dispatch | audit-worker)
     stage=audit
     field=audit_prompt
     ;;
-  plan-* | complete)
+  plan-dispatch | plan-worker | complete)
     stage=plan
     field=plan
+    ;;
+  audit-consult | plan-consult)
+    printf 'consult-pending %s\n' "${phase%-consult}"
+    return 0
     ;;
   *)
     printf 'no-stage %s\n' "${phase:-<none>}"
@@ -213,6 +225,10 @@ fm_consult_gate_check() {
   missing)
     detail='no consultation record exists there'
     ;;
+  consult-pending\ *)
+    stage_hint=${verdict#consult-pending }
+    detail="its ${verdict#consult-pending } stage is waiting on this round's consultation, so no current prompt exists"
+    ;;
   no-stage\ *)
     detail="its phase '${verdict#no-stage }' names no stage in play"
     ;;
@@ -240,29 +256,27 @@ fm_consult_gate_check() {
     probe_out='the health probe returned no verdict'
   fi
   # A probe that cannot run leaves availability unverified, and unverified is
-  # not the same as unavailable: it refuses.
+  # not the same as unavailable: it refuses too.
   if [ "$probe_rc" -eq 2 ]; then
     fm_consult_gate_refuse "$task" "$record" "$detail" "$stage_hint" "availability could not be verified ($probe_out)"
     return 1
   fi
+  # Every verdict refuses. The probe only names the real cause inside the
+  # refusal text: a healthy channel, a channel the probe reports unavailable,
+  # and a probe whose verdict cannot be read are all refusals, and the explicit
+  # --consult-waived reason above is the only way past the gate.
   case "$probe_out" in
   healthy*)
     fm_consult_gate_refuse "$task" "$record" "$detail" "$stage_hint" "$probe_out"
-    return 1
     ;;
   unreachable* | unhealthy* | misconfigured* | unconfigured*)
+    fm_consult_gate_refuse "$task" "$record" "$detail" "$stage_hint" "the consultation channel is unavailable: $probe_out"
     ;;
   *)
     fm_consult_gate_refuse "$task" "$record" "$detail" "$stage_hint" "availability could not be verified ($probe_out)"
-    return 1
     ;;
   esac
-  # Verified unavailable: the work may proceed, but only with the failure named
-  # in the reason the caller records.
-  printf 'warning: task %s launches without a stored consultation prompt at %s (%s); the consultation channel is unavailable (%s), so this launch proceeds with caution under a recorded waiver\n' \
-    "$task" "$record" "$detail" "$probe_out" >&2
-  FM_CONSULT_GATE_WAIVER_REASON="consultation channel unavailable: $probe_out"
-  return 0
+  return 1
 }
 
 # fm_consult_gate_record_backlog <config-dir> <data-dir> <kind> <task-id> <reason>
@@ -314,24 +328,14 @@ fm_consult_gate_record_backlog() {
       FM_CONSULT_GATE_RECORD_ERROR="the backlog item $id could not be read"
     return "$command_status"
   fi
-  # The stored body reaches this reader as one YAML double-quoted line, whose
-  # escapes are JSON's; the decoder writes raw bytes so non-ASCII survives the
-  # rewrite (same decode as bin/fm-backlog-transition-lib.sh's retain path).
-  body=$(printf '%s\n' "$out" | sed -n 's/^  body: //p' | head -1 |
-    LC_ALL=C perl -MJSON::PP -e '
-      local $/;
-      my $shown = <STDIN>;
-      $shown =~ s/\s+\z//;
-      exit 0 if $shown eq "" || $shown eq "-";
-      my $value = $shown =~ /\A"/
-        ? JSON::PP->new->utf8->allow_nonref->decode($shown) : $shown;
-      binmode STDOUT, ":raw";
-      utf8::encode($value) if utf8::is_utf8($value);
-      print $value unless $value eq "-";
-    ') || {
+  # The body reaches this reader as one YAML double-quoted line; the single
+  # owner of that decode is bin/fm-backlog-transition-lib.sh's
+  # fm_backlog_row_body_decode, so a non-ASCII body can never decode differently
+  # on the two paths that rewrite it.
+  if ! body=$(fm_backlog_row_body_decode "$out"); then
     FM_CONSULT_GATE_RECORD_ERROR="the stored body of $id could not be decoded"
     return 1
-  }
+  fi
   line="ChatGPT consultation gate waived: $reason"
   case $'\n'"$body"$'\n' in
   *$'\n'"$line"$'\n'*) return 0 ;;

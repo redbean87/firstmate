@@ -156,6 +156,40 @@ test_full_loop_happy_path() {
   pass "objective to audit to worker to plan to worker to completion flows through every phase"
 }
 
+# next-round starts a fresh round, and a fresh round must hold no prompt: a
+# leftover audit prompt or plan is exactly what bin/fm-consult-gate-lib.sh's
+# dispatch gate could mistake for the new round's consultation.
+test_next_round_clears_the_finished_rounds_fields() {
+  local dir=$TMP_ROOT/nextround pid file field
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task nextround --objective-file "$TMP_ROOT/objective.txt" --context-file "$TMP_ROOT/context.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task nextround >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task nextround -- nrworker myproj --mode local-only --yolo off >/dev/null
+  printf 'worker found two flaky tests\n' > "$dir/findings.txt"
+  pid=$(start_stub "$dir")
+  bash "$LOOP" record-findings --task nextround --file "$dir/findings.txt" >/dev/null
+  bash "$LOOP" consult --stage plan --task nextround >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage plan --task nextround -- nrworker myproj --mode local-only --yolo off >/dev/null
+  printf 'worker fixed both checks\n' > "$dir/result.txt"
+  bash "$LOOP" record-result --task nextround --file "$dir/result.txt" >/dev/null
+  [ "$(loop_phase nextround)" = complete ] || fail "the fixture must complete before next-round"
+
+  bash "$LOOP" next-round --task nextround >/dev/null
+  file="$HOME_DIR/data/nextround/chatgpt-loop.json"
+  for field in audit_prompt audit_result findings findings_source worker_task plan worker_result last_error; do
+    [ "$(jq -r --arg f "$field" '.[$f]' "$file")" = "" ] \
+      || fail "next-round must clear the finished round's $field so a stale prompt can never satisfy the dispatch gate"
+  done
+  [ "$(jq -r '.iteration' "$file")" = 2 ] || fail "next-round must still advance the iteration"
+  [ "$(loop_phase nextround)" = "audit-consult" ] || fail "next-round must still return to audit-consult"
+  pass "next-round clears the finished round's scoped fields, so a stale prompt never satisfies the gate"
+}
+
 test_plan_consult_carries_explicit_context() {
   local dir=$TMP_ROOT/ctxcarry pid
   mkdir -p "$dir"
@@ -1046,6 +1080,7 @@ test_rejected_audit_consult_persists_nothing() {
 }
 
 test_full_loop_happy_path
+test_next_round_clears_the_finished_rounds_fields
 test_plan_consult_carries_explicit_context
 test_consult_failure_is_retryable
 test_worker_failure_recorded

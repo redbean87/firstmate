@@ -62,10 +62,12 @@
 #   always possible and never silent: an empty, whitespace-only, or multi-line
 #   reason is refused, and a reason that is supplied is written to
 #   state/<id>.meta as consult_waived= and to the task's backlog note before the
-#   launch proceeds (a waiver that cannot be recorded refuses). A launch without a
-#   record when the channel itself is verified unavailable proceeds under a waiver
-#   the gate derives from the probe verdict instead of blocking work; a secondmate
-#   is not gated, and --consult-waived on one is refused rather than ignored.
+#   launch proceeds (a waiver that cannot be recorded refuses). A channel that
+#   reads unavailable - unreachable, unhealthy, misconfigured, or unconfigured -
+#   refuses the same way a missing prompt does, with the probe verdict naming the
+#   cause and the waiver command printed; the explicit waiver is the only way past
+#   the gate. A secondmate is not gated, and --consult-waived on one is refused
+#   rather than ignored.
 #        fm-spawn.sh <task-id> --relaunch [--harness <name>] [--model <name>] [--effort <level>] [--consult-waived <reason>]
 #   --relaunch launches a replacement agent for an EXISTING task into that
 #   task's own recorded worktree, reusing its recorded endpoint when that

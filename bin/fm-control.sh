@@ -93,11 +93,12 @@
 #              before it delegates the launch: a task whose stored ChatGPT
 #              consultation prompt for the stage in play is missing is refused with
 #              the record path and the bin/fm-chatgpt-loop.sh commands that create
-#              it, exactly as bin/fm-spawn.sh refuses a fresh launch. --consult-waived
-#              <reason> carries an explicit exception through to bin/fm-spawn.sh,
-#              which records it; a reason the gate derives from an unavailable
-#              channel is passed the same way, so nothing is ever waived without
-#              leaving its reason in the task record and backlog note.
+#              it, exactly as bin/fm-spawn.sh refuses a fresh launch. An
+#              unavailable channel refuses here too, with the probe verdict
+#              naming the cause. --consult-waived <reason> carries an explicit
+#              exception through to bin/fm-spawn.sh, which records it in the
+#              task record and backlog note, so nothing is ever waived without
+#              leaving its reason in the durable record.
 #              Records a durable checkpoint and that note, exits the old agent,
 #              then delegates the launch to its single owner,
 #              bin/fm-spawn.sh --relaunch. A failure before publication keeps
@@ -1156,10 +1157,10 @@ do_relaunch() {
   # Consultation gate (bin/fm-consult-gate-lib.sh): the same refusal
   # bin/fm-spawn.sh enforces on a fresh launch, run HERE because this
   # transaction stops the running agent before it delegates the replacement.
-  # A reason - the operator's --consult-waived or the one the gate derives from
-  # an unavailable channel - is carried into bin/fm-spawn.sh below, which is
-  # what records it in the task record and the backlog note. Nothing is
-  # checkpointed, noted, or stopped until the gate has answered.
+  # An operator's --consult-waived <reason> is carried into bin/fm-spawn.sh
+  # below, which is what records it in the task record and the backlog note;
+  # an unavailable channel refuses here like any other missing prompt. Nothing
+  # is checkpointed, noted, or stopped until the gate has answered.
   if ! fm_consult_gate_check "$DATA" "$ID" "$KIND" "$CONSULT_WAIVED_SET" "$CONSULT_WAIVED"; then
     exit 1
   fi

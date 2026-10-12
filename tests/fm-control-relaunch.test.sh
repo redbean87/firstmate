@@ -1197,6 +1197,7 @@ test_promoted_scout_relaunch_receives_the_current_delivery_contract() {
     fm_git_worktree "$dir/proj" "$dir/wt" "task-$id"
     FM_HOME="$home" "$BRIEF" "$id" firstmate --scout >/dev/null \
       || fail "$mode: could not scaffold the scout brief"
+    fm_test_seed_consult_record "$home" "$id"
     brief="$home/data/$id/brief.md"
     sed 's/{TASK}/Fix the promotion relaunch contract./; s/{FIRSTMATE_SPEC}/Preserve the current delivery mode./' \
       "$brief" > "$brief.filled"
@@ -2160,6 +2161,7 @@ add_herdr_ship_task() {  # <case-dir> <id> [session] [surviving-pane]
   local home="$dir/home" proj="$dir/proj" wt="$dir/wt"
   fm_git_worktree "$proj" "$wt" "task-$id"
   mkdir -p "$home/data/$id"
+  fm_test_seed_consult_record "$home" "$id"
   cat > "$home/data/$id/brief.md" <<EOF
 # Task
 ## Captain's intent
@@ -2571,10 +2573,10 @@ test_relaunch_with_a_stored_prompt_proceeds_normally() {
   pass "fm-control relaunch: a task with a stored prompt relaunches normally"
 }
 
-# With no prompt and a channel that is verifiably down, the relaunch proceeds
-# with caution - and the waiver reason the gate derived travels through to the
-# task record, so the bypass is visible in the durable state either way.
-test_relaunch_carries_an_unavailable_channel_waiver_into_the_record() {
+# With no prompt and a channel that is verifiably down, the relaunch refuses
+# exactly like a healthy channel does, with the probe verdict naming the cause;
+# the explicit recorded waiver is the only way past the gate.
+test_relaunch_with_an_unavailable_channel_refuses_before_stopping() {
   local dir out rc
   dir=$(new_case consultgate-down rl52)
   add_ship_task "$dir" rl52 claude
@@ -2582,18 +2584,24 @@ test_relaunch_carries_an_unavailable_channel_waiver_into_the_record() {
   fm_test_use_dead_bridge
 
   out=$(run_control "$dir" rl52 relaunch --note "x"); rc=$?
-  expect_code 0 "$rc" "an unavailable channel must not block a relaunch"$'\n'"$out"
-  assert_grep "consult_waived=consultation channel unavailable: unreachable" \
-    "$dir/home/state/rl52.meta" \
-    "the waiver the gate derived must be recorded in the task record"
-  pass "fm-control relaunch: an unavailable channel proceeds with its waiver recorded"
+  expect_code 1 "$rc" "an unavailable channel must refuse a relaunch with no stored prompt"$'\n'"$out"
+  assert_contains "$out" "$dir/home/data/rl52/chatgpt-loop.json" \
+    "the refusal must name the exact missing artifact"
+  assert_contains "$out" "the consultation channel is unavailable: unreachable" \
+    "the refusal must name the real cause from the probe verdict"
+  assert_contains "$out" "--consult-waived <reason>" "the refusal must mention the waiver"
+  [ "$(cat "$dir/fake/command")" = claude ] \
+    || fail "an unavailable-channel refusal must not stop the running agent"
+  [ -z "$(cat "$dir/fake/literal")" ] \
+    || fail "an unavailable-channel refusal must send nothing to the endpoint"
+  pass "fm-control relaunch: an unavailable channel refuses before the agent is stopped"
 }
 
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
 test_relaunch_without_a_stored_prompt_refuses_before_stopping
 test_relaunch_with_a_stored_prompt_proceeds_normally
-test_relaunch_carries_an_unavailable_channel_waiver_into_the_record
+test_relaunch_with_an_unavailable_channel_refuses_before_stopping
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
