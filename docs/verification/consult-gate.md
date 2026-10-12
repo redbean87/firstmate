@@ -77,7 +77,7 @@ $ bin/fm-lint.sh bin/fm-consult-gate-lib.sh bin/fm-spawn.sh bin/fm-control.sh bi
 fm-lint.sh: ShellCheck 0.11.0 (pinned 0.11.0)
 fm-lint.sh: full ShellCheck extended analysis enabled
 $ bin/fm-doc-audience-check.sh
-fm-doc-audience-check: ok surfaces=123 local_links=756
+fm-doc-audience-check: ok surfaces=123 local_links=757
 ```
 
 ## Limits
