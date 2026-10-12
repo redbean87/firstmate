@@ -1686,6 +1686,10 @@ families_for_changed_path() {
       printf '%s\n' pure-contract-unit
       printf '%s\n' live-harness-optin
       ;;
+    .agents/skills/audit-brief/*)
+      printf '%s\n' pure-contract-unit
+      printf '%s\n' "__script__:fm-chatgpt-consult.test.sh"
+      ;;
     .agents/skills/*/*.md)
       printf '%s\n' pure-contract-unit
       ;;
