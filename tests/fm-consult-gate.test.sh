@@ -4,11 +4,12 @@
 # scout launch).
 #
 # A stubbed loopback bridge answers the health probe, so both gate branches are
-# hermetic on any machine: a verified-healthy channel refuses a launch that has
-# no stored prompt, and a verified-dead channel proceeds under a recorded
-# waiver instead of blocking work. Every case drives fm-spawn's executable
-# interface and asserts exit codes, recorded state, and launch side effects,
-# never source bytes. bin/fm-lint.sh owns the lint gate.
+# hermetic on any machine: every probe verdict refuses a launch that has no
+# stored prompt - healthy, unreachable, unhealthy, misconfigured, and
+# unconfigured alike - and only an explicit --consult-waived <reason> passes.
+# Every case drives fm-spawn's executable interface and asserts exit codes,
+# recorded state, and launch side effects, never source bytes. bin/fm-lint.sh
+# owns the lint gate.
 #
 # The relaunch half of the gate - bin/fm-control.sh refusing before it stops a
 # running agent - lives with its transaction in tests/fm-control-relaunch.test.sh.
