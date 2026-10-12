@@ -1,0 +1,23 @@
+Live audit consult against the real codex-chatgpt-web bridge (health: healthy).
+
+$ fm-chatgpt-loop.sh init --task fm-audit-live-c1 --objective-file ... --context-file ... --thread fm-audit-live-c1
+initialized task fm-audit-live-c1 in phase audit-consult
+$ fm-chatgpt-loop.sh consult --stage audit --task fm-audit-live-c1
+exit code: 0
+final phase: audit-dispatch
+stored audit_prompt bytes:    13404
+
+Template sections present in the generated brief (the shared audit-brief contract):
+  PRESENT: # Audit brief template
+  PRESENT: ## Audit objective
+  PRESENT: ## Threat model or defect class
+  PRESENT: this list is never a whitelist
+  PRESENT: ## Bounded initial reconnaissance
+  PRESENT: ## Reading budget
+  PRESENT: ## Expansion triggers
+  PRESENT: ## Verification required
+  PRESENT: ## Carry-forward discipline
+  PRESENT: ## Stop conditions
+  PRESENT: ## Report requirements
+  MISSING: scope sufficiency
+  PRESENT: Carry-forward state

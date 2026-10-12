@@ -1,0 +1,7 @@
+Boundary: the template is required only by --mode audit; --mode plan runs against the same template-free copy.
+exit: 0
+stdout: STUB-AUDIT-BRIEF
+
+## Audit objective
+stub
+audit template injected into plan instructions: no

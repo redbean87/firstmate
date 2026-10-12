@@ -1,0 +1,14 @@
+Scenario: a change confined to .agents/skills/audit-brief/audit-brief-template.md must still select its consumer suite under the repo's required --changed selection.
+
+$ git status --porcelain   # only the template touched
+ M .agents/skills/audit-brief/audit-brief-template.md
+$ bin/fm-test-run.sh --list --changed --base HEAD
+exit: 0 (no 'no changed-test mapping' refusal)
+selected scripts:       44
+contains tests/fm-chatgpt-consult.test.sh: yes
+stdout excerpt:
+tests/fm-agy-harness.test.sh
+tests/fm-arm-pretool-check.test.sh
+tests/fm-ask-user-authority.test.sh
+tests/fm-bearings-board.test.sh
+tests/fm-brief.test.sh

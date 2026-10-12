@@ -1,0 +1,7 @@
+=== fail-closed evidence ===
+command: fm-chatgpt-consult.sh --mode audit (copy without .agents/skills/audit-brief/audit-brief-template.md)
+exit code: 1
+output:
+fm-chatgpt: audit-brief template missing: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-test-consult.uJHTSX/notemplate/bin/../.agents/skills/audit-brief/audit-brief-template.md
+fm-chatgpt: the audit stage needs .agents/skills/audit-brief/audit-brief-template.md so every generated audit prompt carries the shared scope, expansion, and carry-forward contract
+bridge request recorded: no

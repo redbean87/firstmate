@@ -1,0 +1,15 @@
+Scenario: an audit consult posts the shared template verbatim so the script holds no second copy.
+
+$ CHATGPT_WEB_BRIDGE_URL=http://127.0.0.1:<stub>/v1 FM_HOME=<disposable> bin/fm-chatgpt-consult.sh --prompt-file prompt.txt --mode audit --thread t-live-stub
+exit: 0; stdout carried only the answer text
+
+Injected template diffed against .agents/skills/audit-brief/audit-brief-template.md: IDENTICAL (verbatim)
+Request instructions (decoded) begin with:
+You are a senior engineer writing audit instructions for a worker. Read the objective and context below and return only a self-contained audit prompt that the worker will follow; this is prompt generation, not the audit itself. The prompt must state the specific questions the worker must answer, the evidence and scope to inspect, the required report shape, and explicit stop rules, and it must carry the objective's essential details so it stands alone. Structure the returned prompt on the audit-brief template below, filling every field the objective and context support; where they supply no files, symbols, or line ranges, the prompt opens with the template's bounded reconnaissance phase to establish exact initial scope before deep inspection. This turn has no local tools and does not need any local tools: do not attempt tool use and never emit or discuss a tool-availability notice or banner. Return only the audit prompt.
+
+Audit-brief template the returned prompt must follow:
+...
+Script restatements of the three template rules (must be absent):
+  ABSENT (single owner holds it): never a whitelist
+  ABSENT (single owner holds it): reading budgets guide effort
+  ABSENT (single owner holds it): file:line citations while raw evidence

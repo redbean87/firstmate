@@ -1,0 +1,5 @@
+$ bin/fm-test-run.sh --list --changed --base ba8f29f4906a02c57918af8b491dec7019ff8ff6
+exit: 0 (the review round-1 failure was exit 2 'no changed-test mapping for .agents/skills/audit-brief/audit-brief-template.md')
+stderr: 
+selected scripts:       58
+contains tests/fm-chatgpt-consult.test.sh: yes
