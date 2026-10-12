@@ -1,0 +1,184 @@
+==============================================================
+LIVE consultation gate evidence - real bin/fm-spawn.sh + bin/fm-control.sh
+lab home: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M (marked disposable); real tmux on TMUX_TMPDIR=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M/tmux
+channel probe: real bridge on 127.0.0.1:17841 (healthy) unless overridden
+==============================================================
+
+### S1 REFUSE: ship launch with no stored consultation record (healthy channel)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+error: task live2-refuse cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M/data/live2-refuse/chatgpt-loop.json
+  no consultation record exists there
+  consultation channel: healthy a bounded test turn completed at http://127.0.0.1:17841/v1
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task live2-refuse --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit|plan --task live2-refuse
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
+EXIT=1
+  meta: absent (no launch record written)
+
+### S2 REFUSE: stored record still waiting at audit-consult (a finished round's prompt)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+error: task live2-stale cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M/data/live2-stale/chatgpt-loop.json
+  its audit stage is waiting on this round's consultation, so no current prompt exists
+  consultation channel: healthy a bounded test turn completed at http://127.0.0.1:17841/v1
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task live2-stale --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit --task live2-stale
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
+EXIT=1
+  meta: absent (no launch record written)
+
+### S3 REFUSE: no record and an unreachable channel names the real cause
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+error: task live2-down cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M/data/live2-down/chatgpt-loop.json
+  no consultation record exists there
+  consultation channel: the consultation channel is unavailable: unreachable no bridge listening at http://127.0.0.1:17914/v1 though this home configures the consultation channel
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task live2-down --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit|plan --task live2-down
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
+EXIT=1
+
+### S4 ADVERSE REFUSE: loop record names a DIFFERENT worker
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+error: task live2-other cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M/data/live2-other/chatgpt-loop.json
+  no consultation record exists there
+  consultation channel: healthy a bounded test turn completed at http://127.0.0.1:17841/v1
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task live2-other --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit|plan --task live2-other
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
+EXIT=1
+
+### S5 ADVERSE REFUSE: dispatch marker alone, record not at dispatch phase
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+error: task live2-markerbad cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M/data/live2-markerbad/chatgpt-loop.json
+  no consultation record exists there
+  consultation channel: healthy a bounded test turn completed at http://127.0.0.1:17841/v1
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task live2-markerbad --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit|plan --task live2-markerbad
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
+EXIT=1
+
+### S6 REFUSE: whitespace-only waiver reason
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+error: task live2-emptywaive may not launch under a waiver with no reason; --consult-waived needs a non-empty reason so the bypass is never unexplained
+EXIT=1
+
+### S7 ALLOW: explicit waiver launches and records its reason in meta AND backlog note
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+spawned live2-waive harness=sleep kind=ship mode=local-only yolo=off window=firstmate:fm-live2-waive worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.rQ4r4M/treehouse/.treehouse/notes-05d528/5/notes
+EXIT=0
+  meta harness=sleep
+  meta kind=ship
+  meta consult_waived=live rig: synthetic fixture, no consultation run
+  backlog body: "ChatGPT consultation gate waived: live rig: synthetic fixture, no consultation run"
+
+### S8 ALLOW: a stored ChatGPT prompt for the stage in play launches unchanged
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+spawned live2-stored harness=sleep kind=ship mode=local-only yolo=off window=firstmate:fm-live2-stored worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.rQ4r4M/treehouse/.treehouse/notes-05d528/6/notes
+EXIT=0
+  meta harness=sleep
+  meta kind=ship
+  no consult_waived= line (stored prompt needed no waiver)
+
+### S9 ALLOW: the consultation loop's own dispatch (marker + dispatch-phase record)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+spawned live2-loopworker harness=sleep kind=ship mode=local-only yolo=off window=firstmate:fm-live2-loopworker worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.rQ4r4M/treehouse/.treehouse/notes-05d528/7/notes
+EXIT=0
+
+### S10 ALLOW: a loop record naming the launched worker at audit-worker (latest fix)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+spawned live2-loopworker2 harness=sleep kind=ship mode=local-only yolo=off window=firstmate:fm-live2-loopworker2 worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.rQ4r4M/treehouse/.treehouse/notes-05d528/8/notes
+EXIT=0
+  no consult_waived= line (recovered loop record needed no waiver)
+
+### S11 RELAUNCH REFUSE BEFORE STOP: live agent, no record
+  pane before: fm-live2-waive pane_dead=0
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+error: task live2-waive cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M/data/live2-waive/chatgpt-loop.json
+  no consultation record exists there
+  consultation channel: healthy a bounded test turn completed at http://127.0.0.1:17841/v1
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task live2-waive --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit|plan --task live2-waive
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
+EXIT=1
+  pane after:  fm-live2-waive pane_dead=0
+  meta harness after: harness=claude
+
+### S12 RELAUNCH REFUSE BEFORE STOP: --consult-waived whose note cannot be recorded
+  pane before: fm-live2-waive pane_dead=0
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.rQ4r4M
+error: task live2-waive's consultation waiver could not be recorded in its backlog note (task live2-waive has no backlog item in this home to record the waiver in); refusing a relaunch whose bypass is not durably visible, before the running agent is stopped
+EXIT=1
+  pane after:  fm-live2-waive pane_dead=0
+
+### refused tasks must have left no task record
+  live2-refuse meta: absent
+  live2-stale meta: absent
+  live2-down meta: absent
+  live2-other meta: absent
+  live2-markerbad meta: absent
+  live2-emptywaive meta: absent
+
+### live tmux windows in the lab
+zsh pane_dead=0
+fm-gate-live-waive pane_dead=0
+fm-gate-live-stored pane_dead=0
+fm-gate-live-loopworker pane_dead=0
+fm-gate-live-loopworker2 pane_dead=0
+fm-live2-waive pane_dead=0
+fm-live2-stored pane_dead=0
+fm-live2-loopworker pane_dead=0
+fm-live2-loopworker2 pane_dead=0
+### live: multi-line --consult-waived reason must be refused (no launch, no meta)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.GLMWsn
+error: the --consult-waived reason for task live3-multiline spans more than one line, and a task record holds one value per line; give a single-line reason
+EXIT=1
+meta present: no
+
+### S13 REFUSE: a scout launch is gated exactly like a ship
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.Ari67s
+error: task live3-scout-refuse cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.Ari67s/data/live3-scout-refuse/chatgpt-loop.json
+  no consultation record exists there
+  consultation channel: healthy a bounded test turn completed at http://127.0.0.1:17841/v1
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task live3-scout-refuse --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit|plan --task live3-scout-refuse
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
+EXIT=1
+  meta: absent
+
+### S14 ALLOW: a scout launch with its stored prompt proceeds
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.Ari67s
+spawned live3-scout-ok harness=sleep kind=scout window=firstmate:fm-live3-scout-ok worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.Ari67s/treehouse/.treehouse/notes-6965c8/1/notes
+EXIT=0
+  meta kind=scout
+
+### S15 REFUSE: a listening-but-broken (unhealthy) channel names the cause
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.Ari67s
+error: task live3-unhealthy has no brief at inaccessible data path /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.Ari67s/data/live3-unhealthy/brief.md
+EXIT=1
+  meta: absent
+
+### S15 REFUSE: a listening-but-broken (unhealthy) channel names the cause
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.bZAUz4
+error: task live3-unhealthy cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.bZAUz4/data/live3-unhealthy/chatgpt-loop.json
+  no consultation record exists there
+  consultation channel: the consultation channel is unavailable: unhealthy bridge listening at http://127.0.0.1:17915/v1 but the bounded test turn failed: HTTP 500
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task live3-unhealthy --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit|plan --task live3-unhealthy
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
+EXIT=1
+  meta: absent

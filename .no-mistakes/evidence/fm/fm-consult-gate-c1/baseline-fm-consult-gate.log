@@ -1,0 +1,14 @@
+ok - fm-spawn: a healthy channel refuses a ship launch with no stored prompt
+ok - fm-spawn: a stored prompt leaves the launch unchanged and never probes the channel
+ok - fm-spawn: a waiver with an empty or whitespace-only reason is refused
+ok - fm-spawn: a waiver reason is recorded in the task record and the backlog note
+ok - fm-spawn: a scout launch is gated exactly like a ship
+ok - fm-spawn: an unreachable channel refuses with the cause named, never a silent pass
+ok - fm-spawn: a listening-but-broken channel refuses with the cause named
+ok - fm-spawn: a finished round's prompt never satisfies the gate at the next round's consult phase
+ok - fm-spawn: the consultation loop's own dispatch satisfies the gate
+ok - fm-spawn: the loop marker alone never satisfies the gate
+ok - fm-spawn: a loop record naming the launched worker satisfies the gate
+ok - fm-spawn: a loop record naming another worker or a pre-delivery phase still refuses
+ok - fm-spawn: the stage in play decides which stored prompt the gate requires
+# all fm-consult-gate tests passed
