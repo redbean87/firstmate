@@ -441,9 +441,11 @@ fm_test_run_spawn() {
     for seed_arg in "$@"; do
       case "$seed_arg" in
       --*) break ;;
-      */* | *' '*) continue ;;
       esac
       seed_id=${seed_arg%%=*}
+      case "$seed_id" in
+      */* | *' '*) continue ;;
+      esac
       fm_test_seed_consult_record "$home" "$seed_id"
       case "$seed_arg" in
       *=*) ;;
