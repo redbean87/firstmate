@@ -55,6 +55,13 @@
 #     its <stage>-dispatch phase with that stage's prompt non-empty - the
 #     consultation the loop already ran and is about to hand over. The marker
 #     alone proves nothing: without such a record the launch is still refused.
+#   - A loop-dispatched worker: a launch task with NO record of its own also
+#     satisfies the gate when this home holds a readable loop record whose
+#     worker_task is exactly that task id and whose phase is <stage>-worker,
+#     the phase the loop enters once dispatch delivered the stage prompt. This
+#     is what lets an ordinary relaunch recover a worker the loop already
+#     consulted without an ad-hoc waiver. No other phase proves delivery, and a
+#     record naming a different task proves nothing.
 #
 # fm_consult_gate_check returns 0 to proceed and 1 to refuse, printing its full
 # diagnostic on stderr. On a proceeding launch, FM_CONSULT_GATE_WAIVER_REASON
@@ -154,6 +161,32 @@ fm_consult_gate_loop_dispatch_valid() {
   return 1
 }
 
+# fm_consult_gate_loop_worker_valid <data-dir> <worker-task-id>
+# True when this home holds a readable loop record that names <worker-task-id>
+# as the worker its dispatch delivered the stage prompt to, at the phase the
+# loop enters once that handoff ran. That record is the recoverable
+# consultation behind an ordinary relaunch of a loop-dispatched worker.
+fm_consult_gate_loop_worker_valid() {
+  local data=$1 worker=$2 file verdict phase recorded
+  for file in "$data"/*/chatgpt-loop.json; do
+    [ -e "$file" ] || [ -L "$file" ] || continue
+    verdict=$(fm_consult_gate_record_verdict "$file")
+    case "$verdict" in
+    ok\ *) ;;
+    *) continue ;;
+    esac
+    phase=$(jq -r '.phase // ""' "$file" 2>/dev/null) || continue
+    case "$phase" in
+    audit-worker | plan-worker) ;;
+    *) continue ;;
+    esac
+    recorded=$(jq -r '.worker_task // ""' "$file" 2>/dev/null) || continue
+    [ "$recorded" = "$worker" ] || continue
+    return 0
+  done
+  return 1
+}
+
 # fm_consult_gate_refuse <task> <record-path> <detail> <stage-hint> <channel-line>
 # The one refusal text: the exact artifact, the exact commands that create it,
 # and the waiver that makes an exception possible without hiding it.
@@ -217,6 +250,12 @@ fm_consult_gate_check() {
   # the loop's record is the consultation this launch delivers.
   if [ "$verdict" = missing ] && [ -n "${FM_CHATGPT_LOOP_DISPATCH_TASK:-}" ] &&
     fm_consult_gate_loop_dispatch_valid "$data" "$FM_CHATGPT_LOOP_DISPATCH_TASK"; then
+    return 0
+  fi
+  # A loop-dispatched worker recovered by an ordinary relaunch carries no marker
+  # and no record of its own; the loop record that delivered its stage prompt is
+  # the consultation that already ran.
+  if [ "$verdict" = missing ] && fm_consult_gate_loop_worker_valid "$data" "$task"; then
     return 0
   fi
 

@@ -19,7 +19,7 @@ A ship or scout launch whose `data/<task-id>/chatgpt-loop.json` holds no non-emp
 The record's phase must also prove this round's consultation ran - `audit-dispatch`/`audit-worker` for the audit prompt, `plan-dispatch`/`plan-worker`/`complete` for the plan - so a record waiting at its consult phase or holding a prompt left by a finished round refuses (and `bin/fm-chatgpt-loop.sh next-round` clears those round-scoped fields as well).
 An empty, whitespace-only, or multi-line waiver reason is refused, and a reason that is accepted lands in `state/<id>.meta` as `consult_waived=` and in the task's backlog note before the launch proceeds.
 A channel the probe reports unavailable - `unreachable`, `unhealthy`, `misconfigured`, `unconfigured` - refuses the same way a missing prompt does, with the probe verdict naming the real cause, and a probe that cannot run refuses too: the explicit recorded waiver is the only way past the gate, so a down channel blocks no work silently and passes none silently either.
-`bin/fm-control.sh relaunch` applies the same refusal before it stops the agent it replaces, and the consultation loop's own dispatch passes through the record it already holds.
+`bin/fm-control.sh relaunch` applies the same refusal before it stops the agent it replaces, and the consultation loop's own dispatch passes through the record it already holds; a relaunch of a loop-dispatched worker with no record of its own also passes when the loop's record names that exact task in `worker_task` at `audit-worker` or `plan-worker`, the phase the loop enters once it delivered the prompt.
 
 ## Commands
 
@@ -44,6 +44,8 @@ ok - fm-spawn: a listening-but-broken channel refuses with the cause named
 ok - fm-spawn: a finished round's prompt never satisfies the gate at the next round's consult phase
 ok - fm-spawn: the consultation loop's own dispatch satisfies the gate
 ok - fm-spawn: the loop marker alone never satisfies the gate
+ok - fm-spawn: a loop record naming the launched worker satisfies the gate
+ok - fm-spawn: a loop record naming another worker or a pre-delivery phase still refuses
 ok - fm-spawn: the stage in play decides which stored prompt the gate requires
 # all fm-consult-gate tests passed
 ```
@@ -54,6 +56,7 @@ The relaunch half of the same gate, from `tests/fm-control-relaunch.test.sh`:
 ok - fm-control relaunch: the consultation gate refuses before the running agent is stopped
 ok - fm-control relaunch: a task with a stored prompt relaunches normally
 ok - fm-control relaunch: an unavailable channel refuses before the agent is stopped
+ok - fm-control relaunch: an unrecordable waiver refuses before the agent is stopped
 ```
 
 The refusal the healthy-channel case asserts, as it actually prints:

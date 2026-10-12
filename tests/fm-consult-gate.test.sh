@@ -38,11 +38,11 @@ make_case() {
 
 # write_record <case-dir> <id> <phase> <audit-prompt> <plan>: the exact stored
 # artifact shape, written directly so a case can hold an empty stage prompt too.
-write_record() { # <case-dir> <id> <phase> <audit-prompt> <plan>
+write_record() { # <case-dir> <id> <phase> <audit-prompt> <plan> [worker-task]
   local dir=$1 id=$2
   mkdir -p "$1/home/data/$2"
-  jq -n --arg t "$id" --arg p "$3" --arg a "$4" --arg pl "$5" \
-    '{task_id: $t, phase: $p, audit_prompt: $a, plan: $pl, updated_at: "2026-10-12T00:00:00Z"}' \
+  jq -n --arg t "$id" --arg p "$3" --arg a "$4" --arg pl "$5" --arg w "${6:-}" \
+    '{task_id: $t, phase: $p, audit_prompt: $a, plan: $pl, worker_task: $w, updated_at: "2026-10-12T00:00:00Z"}' \
     >"$dir/home/data/$id/chatgpt-loop.json"
 }
 
@@ -284,6 +284,50 @@ test_loop_dispatch_marker_alone_proves_nothing() {
   pass "fm-spawn: the loop marker alone never satisfies the gate"
 }
 
+test_loop_worker_record_satisfies_the_gate() {
+  local dir id out status
+  id=gate-loopworker-rl-c1
+  dir=$(make_case gate-loopworker-rl "$id")
+  fm_test_start_bridge_stub "$dir" healthy
+  # The loop dispatched this worker and advanced to audit-worker after handing
+  # over its audit prompt. The worker task has no record of its own and no
+  # dispatch marker at relaunch time, so the loop record naming it is the only
+  # recoverable proof that its consultation ran.
+  write_record "$dir" gate-loop-rl-task audit-worker "the delivered audit prompt" "" "$id"
+
+  out=$(run_ship "$dir" "$id"); status=$?
+  expect_code 0 "$status" "a loop record naming the launched worker must pass the gate"$'\n'"$out"
+  assert_no_grep "consult_waived=" "$dir/home/state/$id.meta" \
+    "a recovered loop worker record must not record a waiver"
+  assert_present "$dir/launch.log" "the launch with its recovered record must launch"
+  fm_test_stop_bridge_stub
+  pass "fm-spawn: a loop record naming the launched worker satisfies the gate"
+}
+
+test_loop_worker_record_for_another_task_still_refuses() {
+  local dir id out status
+  id=gate-loopworker-other-c1
+  dir=$(make_case gate-loopworker-other "$id")
+  fm_test_start_bridge_stub "$dir" healthy
+  # A loop record that delivered its prompt to a different worker proves nothing
+  # about this task.
+  write_record "$dir" gate-loop-other-task audit-worker "the delivered audit prompt" "" "some-other-worker"
+
+  out=$(run_ship "$dir" "$id"); status=$?
+  expect_code 1 "$status" "a loop record naming another worker must refuse"$'\n'"$out"
+  assert_absent "$dir/home/state/$id.meta" "a refused launch must write no task record"
+
+  # A matching worker_task at a pre-delivery phase has not proven the prompt was
+  # handed over, so it refuses too.
+  write_record "$dir" gate-loop-other-task audit-dispatch "the delivered audit prompt" "" "$id"
+  out=$(run_ship "$dir" "$id"); status=$?
+  expect_code 1 "$status" "a matching worker_task before delivery must refuse"$'\n'"$out"
+  assert_absent "$dir/home/state/$id.meta" "a refused launch must write no task record"
+  [ ! -s "$dir/launch.log" ] || fail "a refused launch must not launch a worker"
+  fm_test_stop_bridge_stub
+  pass "fm-spawn: a loop record naming another worker or a pre-delivery phase still refuses"
+}
+
 test_the_stage_in_play_decides_which_prompt_is_required() {
   local dir id out status
   id=gate-stage-c1
@@ -317,6 +361,8 @@ test_unhealthy_bridge_refuses_naming_the_cause
 test_a_finished_rounds_prompt_never_satisfies_the_gate
 test_loop_dispatch_record_satisfies_the_gate
 test_loop_dispatch_marker_alone_proves_nothing
+test_loop_worker_record_satisfies_the_gate
+test_loop_worker_record_for_another_task_still_refuses
 test_the_stage_in_play_decides_which_prompt_is_required
 
 echo "# all fm-consult-gate tests passed"
