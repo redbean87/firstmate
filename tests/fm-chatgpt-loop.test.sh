@@ -131,6 +131,8 @@ test_full_loop_happy_path() {
   bash "$LOOP" dispatch --stage audit --task happy -- mytask myproj --mode local-only --yolo off >/dev/null
   [ "$(loop_phase happy)" = "audit-worker" ] || fail "an audit dispatch must advance to audit-worker"
   assert_contains "$(cat "$dir/argv.txt")" "--effort low" "the audit stage must dispatch a low-thinking worker"
+  assert_contains "$(cat "$dir/env.txt")" "FM_CHATGPT_LOOP_DISPATCH_TASK=happy" \
+    "the loop's dispatch must mark the spawn with its loop task id, which is what bin/fm-consult-gate-lib.sh reads to satisfy the consultation gate for a worker task with no record of its own"
   assert_contains "$(cat "$dir/send.txt")" "target: mytask" "the audit prompt must be steered to the spawn's first positional task id"
   assert_contains "$(cat "$dir/send.txt")" "stubbed consultation answer" "the delivered audit prompt must be the ChatGPT-generated audit answer"
   grep -Eiq 'CHATGPT_WEB_BRIDGE_URL|codex-chatgpt-web|17841|17911|fm-chatgpt|127\.0\.0\.1' "$dir/send.txt" && fail "the delivered audit prompt must carry no bridge reference"

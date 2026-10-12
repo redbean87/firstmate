@@ -25,7 +25,12 @@
 # explicit FM_HOME and state root, addressed at the plain task id that must
 # lead the args after --, and refuses before launching when that leading
 # token is absent or not a plain task id (never a token scanned from option
-# values). A failed spawn records last_error, leaves the phase at
+# values). The spawn itself carries FM_CHATGPT_LOOP_DISPATCH_TASK=<this loop's
+# task id> so bin/fm-spawn.sh's consultation gate recognizes it as the loop's own
+# dispatch: a worker task with no record of its own satisfies the gate through
+# this loop record's dispatch-phase stage prompt, never through the marker alone
+# (bin/fm-consult-gate-lib.sh owns that rule).
+# A failed spawn records last_error, leaves the phase at
 # <stage>-dispatch, and
 # exits nonzero; record-worker-failure likewise returns the phase to
 # <stage>-dispatch (never toward the next stage) so the same stage retries
@@ -651,7 +656,8 @@ cmd_dispatch() {
     stage_prompt=$(read_field "$file" plan)
     phase_next=plan-worker
   fi
-  if env -u CHATGPT_WEB_BRIDGE_URL -u FM_CHATGPT_LOOP_SPAWN -u FM_CHATGPT_LOOP_CONSULT -u FM_CHATGPT_LOOP_SEND "$SPAWN" "${spawn_args[@]}"; then
+  if env -u CHATGPT_WEB_BRIDGE_URL -u FM_CHATGPT_LOOP_SPAWN -u FM_CHATGPT_LOOP_CONSULT -u FM_CHATGPT_LOOP_SEND \
+    FM_CHATGPT_LOOP_DISPATCH_TASK="$task" "$SPAWN" "${spawn_args[@]}"; then
     rc=0
   else
     rc=$?
