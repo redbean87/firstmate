@@ -383,6 +383,42 @@ test_failed_later_handoff_clears_the_earlier_delivery_record() {
   pass "a failed later handoff clears the earlier delivery record, so the gate refuses its relaunch"
 }
 
+# A later stage's launch attempt supersedes the earlier stage's recorded
+# delivery, so the clear must happen before the spawn is attempted: a plan
+# spawn that fails before fm-send ever runs must not leave the audit value
+# behind, or the gate would pass a plan-stage relaunch whose prompt never
+# reached the worker.
+test_failed_later_spawn_clears_the_earlier_delivery_record() {
+  local dir=$TMP_ROOT/stalespawn rc out
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  local pid
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task stalespawn --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task stalespawn >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task stalespawn -- fw myproj --mode local-only --yolo off >/dev/null; rc=$?
+  [ "$rc" -eq 0 ] || fail "the audit dispatch must succeed"
+  assert_grep "consult_delivered=audit" "$HOME_DIR/state/fw.meta" \
+    "the confirmed audit handoff must record its delivery"
+  printf 'worker found two flaky tests\n' > "$dir/findings.txt"
+  bash "$LOOP" record-findings --task stalespawn --file "$dir/findings.txt" >/dev/null
+  pid=$(start_stub "$dir")
+  bash "$LOOP" consult --stage plan --task stalespawn >/dev/null
+  stop_stub "$pid"
+  STUB_SPAWN_PRESERVE=1 STUB_SPAWN_EXIT=1 bash "$LOOP" dispatch --stage plan --task stalespawn -- fw myproj --mode local-only --yolo off >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 0 ] || fail "the failed plan spawn must exit nonzero"
+  [ "$(loop_phase stalespawn)" = "plan-dispatch" ] || fail "a failed plan spawn must hold plan-dispatch"
+  assert_no_grep "consult_delivered=" "$HOME_DIR/state/fw.meta" \
+    "a failed later spawn must leave no delivery record from an earlier stage"
+  out=$(gate_check fw); rc=$?
+  [ "$rc" -eq 1 ] || fail "the gate must refuse the worker whose plan spawn failed: $out"
+  assert_contains "$out" "cannot launch without its stored ChatGPT-generated prompt" \
+    "the refusal must be the ordinary consultation refusal"
+  pass "a failed later spawn clears the earlier delivery record, so the gate refuses its relaunch"
+}
+
 test_dispatch_requires_plain_task_id() {
   local dir=$TMP_ROOT/plainid
   mkdir -p "$dir"
@@ -1195,6 +1231,7 @@ test_spawn_failure_recorded
 test_dispatch_records_delivery_on_the_worker
 test_failed_handoff_leaves_no_delivery_record
 test_failed_later_handoff_clears_the_earlier_delivery_record
+test_failed_later_spawn_clears_the_earlier_delivery_record
 test_dispatch_requires_plain_task_id
 test_wrong_phase_refuses
 test_task_id_validated_before_state_paths

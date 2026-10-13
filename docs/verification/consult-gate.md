@@ -19,7 +19,7 @@ A ship or scout launch whose `data/<task-id>/chatgpt-loop.json` holds no non-emp
 The record's phase must also prove this round's consultation ran - `audit-dispatch`/`audit-worker` for the audit prompt, `plan-dispatch`/`plan-worker`/`complete` for the plan - so a record waiting at its consult phase or holding a prompt left by a finished round refuses (and `bin/fm-chatgpt-loop.sh next-round` clears those round-scoped fields as well).
 An empty, whitespace-only, or multi-line waiver reason is refused, and a reason that is accepted lands in `state/<id>.meta` as `consult_waived=` and in the task's backlog note before the launch proceeds.
 A channel the probe reports unavailable - `unreachable`, `unhealthy`, `misconfigured`, `unconfigured` - refuses the same way a missing prompt does, with the probe verdict naming the real cause, and a probe that cannot run refuses too: the explicit recorded waiver is the only way past the gate, so a down channel blocks no work silently and passes none silently either.
-`bin/fm-control.sh relaunch` applies the same refusal before it stops the agent it replaces, and the consultation loop's own dispatch passes through the record it already holds; a relaunch of a loop-dispatched worker with no record of its own also passes on the `consult_delivered=<stage>` field the loop wrote to that worker's own task record when its stage-prompt handoff confirmed, which names a delivered stage (`audit` or `plan`). The loop clears any earlier stage's value before a new handoff, so a successful audit handoff cannot satisfy a plan-stage relaunch and a failed later handoff leaves no delivery evidence, leaving that worker's relaunch refused.
+`bin/fm-control.sh relaunch` applies the same refusal before it stops the agent it replaces, and the consultation loop's own dispatch passes through the record it already holds; a relaunch of a loop-dispatched worker with no record of its own also passes on the `consult_delivered=<stage>` field the loop wrote to that worker's own task record when its stage-prompt handoff confirmed, which names a delivered stage (`audit` or `plan`). The loop clears any earlier stage's value before a new dispatch attempt, so a successful audit handoff cannot satisfy a plan-stage relaunch and a later spawn or handoff that fails leaves no delivery evidence, leaving that worker's relaunch refused.
 
 ## Commands
 
@@ -67,6 +67,7 @@ The loop half that writes and clears the durable field, from `tests/fm-chatgpt-l
 ok - a confirmed handoff records consult_delivered on the worker, and the gate passes on it
 ok - a failed handoff leaves no delivery record and the gate still refuses that worker
 ok - a failed later handoff clears the earlier delivery record, so the gate refuses its relaunch
+ok - a failed later spawn clears the earlier delivery record, so the gate refuses its relaunch
 ```
 
 The refusal the healthy-channel case asserts, as it actually prints:

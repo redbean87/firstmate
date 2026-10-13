@@ -60,8 +60,9 @@
 #   - Delivered handoff: bin/fm-chatgpt-loop.sh writes consult_delivered=<stage>
 #     onto the dispatched worker's own task record (state/<task id>.meta) at
 #     the moment fm-send confirms the stage-prompt handoff, and never otherwise,
-#     clearing any earlier stage's value before a new handoff. A launch task
-#     with NO record of its own satisfies the gate when its own task record
+#     clearing any earlier stage's value before the launch is attempted. A
+#     launch task with NO record of its own satisfies the gate when its own
+#     task record
 #     carries a consult_delivered= value naming a deliverable stage - audit or
 #     plan - which is what lets an ordinary relaunch recover a worker the loop
 #     already delivered to with no dispatch marker and no loop-record lookup.

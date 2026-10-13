@@ -35,9 +35,10 @@
 # consult_delivered=<stage> onto the worker's own task record
 # (state/<worker task id>.meta), and that field - not any loop phase - is what
 # bin/fm-consult-gate-lib.sh reads as proof of delivery when the worker is
-# relaunched. A new handoff clears any earlier stage's value first, so only the
-# most recently delivered stage is ever recorded and a failed handoff leaves
-# none, so the gate still refuses that worker's next launch.
+# relaunched. A new dispatch attempt clears any earlier stage's value before
+# the spawn, so only the most recently delivered stage is ever recorded and a
+# spawn or handoff that fails leaves none, so the gate still refuses that
+# worker's next launch.
 # A failed spawn records last_error, leaves the phase at
 # <stage>-dispatch, and
 # exits nonzero; record-worker-failure likewise returns the phase to
@@ -735,6 +736,15 @@ cmd_dispatch() {
     stage_prompt=$(read_field "$file" plan)
     phase_next=plan-worker
   fi
+  # This stage's launch supersedes any earlier stage's recorded delivery, so
+  # the field is cleared before the spawn is even attempted: a spawn that
+  # fails before the handoff cannot leave an earlier stage's value standing in
+  # for a prompt that never reached the worker.
+  if ! clear_delivery "$worker_task"; then
+    write_field "$file" last_error "worker $stage handoff to $worker_task not sent: its earlier delivery record could not be cleared" || return 1
+    printf 'fm-chatgpt-loop: could not clear the earlier delivery record on %s before the %s handoff; nothing launched, the prompt was not sent\n' "$worker_task" "$stage" >&2
+    return 1
+  fi
   if env -u CHATGPT_WEB_BRIDGE_URL -u FM_CHATGPT_LOOP_SPAWN -u FM_CHATGPT_LOOP_CONSULT -u FM_CHATGPT_LOOP_SEND \
     FM_CHATGPT_LOOP_DISPATCH_TASK="$task" "$SPAWN" "${spawn_args[@]}"; then
     rc=0
@@ -750,15 +760,8 @@ cmd_dispatch() {
   # before the handoff; record-findings resolves this worker's report.
   write_field "$file" worker_task "$worker_task" || return 1
   # Handoff: deliver the stored stage prompt to the spawned worker through the
-  # ordinary durable steering path, right after launch. This stage's handoff
-  # supersedes any earlier stage's recorded delivery, so the field is cleared
-  # before the send; a failure below writes no field, leaving the consultation
-  # gate to refuse the worker's relaunch.
-  if ! clear_delivery "$worker_task"; then
-    write_field "$file" last_error "worker $stage handoff to $worker_task not sent: its earlier delivery record could not be cleared" || return 1
-    printf 'fm-chatgpt-loop: could not clear the earlier delivery record on %s before the %s handoff; the prompt was not sent\n' "$worker_task" "$stage" >&2
-    return 1
-  fi
+  # ordinary durable steering path, right after launch. A failure below writes
+  # no field, leaving the consultation gate to refuse the worker's relaunch.
   if send_err=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SEND" "$worker_task" "$stage_prompt" 2>&1); then
     :
   else
