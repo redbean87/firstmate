@@ -1,0 +1,15 @@
+-- lock holder --
+HOLDER_ACQUIRED /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lockprobe2.BjAlEI/home/state/.meta-w9.lock
+-- w9.meta while the lock is held (consult_delivered must be absent) --
+window=stub:fm-w9
+kind=ship
+RESULT: write is waiting on the lock (field absent)
+dispatch rc=0 elapsed=3.7s (holder held 3s)
+-- w9.meta after dispatch --
+window=stub:fm-w9
+kind=ship
+consult_delivered=audit
+-- holder final --
+HOLDER_ACQUIRED /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lockprobe2.BjAlEI/home/state/.meta-w9.lock
+HOLDER_RELEASED
+RESULT: PASS - delivery landed after the lock was released

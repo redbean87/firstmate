@@ -1,0 +1,80 @@
+############ S1: confirmed audit handoff records delivery on the worker; gate passes ############
+dispatched audit worker for task probe with --effort low and delivered the audit prompt to w1
+dispatch rc=0
+-- w1.meta --
+window=stub:fm-w1
+kind=ship
+consult_delivered=audit
+-- gate w1 --
+gate rc=0
+
+############ S2: audit handoff fails at fm-send -> no delivery record; gate refuses ############
+fm-chatgpt-loop: spawned the audit worker for task probe, but the prompt handoff to w2 failed: stub send: simulated handoff failure
+dispatch rc=1
+-- w2.meta (must hold no consult_delivered) --
+window=stub:fm-w2
+kind=ship
+-- gate w2 --
+gate rc=1 (1 = refused)
+
+############ S3: stale audit, then a later PLAN handoff fails at fm-send ############
+audit dispatch rc=0 (confirmed audit delivery to w3)
+fm-chatgpt-loop: spawned the plan worker for task probe, but the prompt handoff to w3 failed: stub send: simulated handoff failure
+plan dispatch rc=1 (send failure)
+-- w3.meta (earlier audit delivery must be gone) --
+kind=ship
+window=stub:fm-w3
+-- gate w3 --
+gate rc=1 (1 = refused)
+
+############ S4 (ADVERSARIAL, the round-1 failure): later PLAN attempt fails at SPAWN ############
+audit dispatch rc=0 (confirmed audit delivery to w4)
+-- w4.meta before the failed plan attempt --
+window=stub:fm-w4
+kind=ship
+consult_delivered=audit
+stub spawn: simulated failure
+fm-chatgpt-loop: plan worker spawn failed for task probe (exit 1); phase unchanged at plan-dispatch
+plan dispatch rc=1 (spawn failure)
+loop phase: plan-dispatch
+-- w4.meta (stale audit delivery must NOT survive the failed plan attempt) --
+kind=ship
+window=stub:fm-w4
+-- gate w4: the plan-stage launch this worker is awaiting --
+gate rc=1 -> refused (required)
+error: task w4 cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-probe2.6bLkJc/home/data/w4/chatgpt-loop.json
+  no consultation record exists there
+
+############ S5: a loop record's worker phase alone is NOT delivery evidence ############
+-- w5.meta (no consult_delivered field) --
+window=stub:fm-w5
+kind=ship
+-- gate w5 (loop record names w5 at audit-worker) --
+gate rc=1 -> refused (required)
+
+############ S6: a consult_delivered value naming no delivered stage is not evidence ############
+-- gate w6 (value=pending) --
+gate rc=1 (1 = refused)
+-- gate w7 (value blank) --
+gate rc=1 (1 = refused)
+-- gate w8 (value=audit) --
+gate rc=0 (0 = passes)
+
+############ S7: the explicit recorded waiver still passes; unwaived still refuses ############
+-- gate w9 without a waiver --
+gate rc=1 (1 = refused)
+waived gate rc=0
+reason=captain approved
+blank-reason waiver gate rc=1 (1 = refused, required)
+
+############ S8: next-round clears the finished round's delivery record ############
+audit dispatch rc=0 (w10 delivery recorded)
+next-round rc=0
+-- w10.meta (delivery must be cleared for the new round) --
+window=stub:fm-w10
+kind=ship
+-- gate w10 after next-round --
+gate rc=1 (1 = refused, required)
+
+############ transcript complete ############

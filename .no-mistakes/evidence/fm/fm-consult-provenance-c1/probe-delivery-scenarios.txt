@@ -1,0 +1,35 @@
+############ S1: audit handoff confirmed -> delivery recorded, gate passes ############
+dispatched audit worker for task probe with --effort low and delivered the audit prompt to w1
+dispatch rc=0
+-- w1.meta --
+window=stub:fm-w1
+kind=ship
+consult_delivered=audit
+-- gate w1 --
+gate rc=0
+
+############ S2: later plan handoff to the SAME worker fails at fm-send ############
+fm-chatgpt-loop: spawned the plan worker for task probe, but the prompt handoff to w1 failed: stub send: simulated handoff failure
+dispatch rc=1
+-- w1.meta (earlier audit delivery must be gone) --
+kind=ship
+window=stub:fm-w1
+-- gate w1 --
+gate rc=1 (1 = refused, as required)
+
+############ S3 (ADVERSARIAL): later plan attempt fails at SPAWN, before clear ############
+audit dispatch rc=0 (confirmed audit delivery to w2)
+-- w2.meta --
+window=stub:fm-w2
+kind=ship
+consult_delivered=audit
+stub spawn: simulated failure
+fm-chatgpt-loop: plan worker spawn failed for task probe (exit 1); phase unchanged at plan-dispatch
+plan dispatch rc=1 (spawn failure)
+loop phase: plan-dispatch
+-- w2.meta (stale audit delivery survives the failed plan attempt) --
+kind=ship
+consult_delivered=audit
+window=stub:fm-w2
+-- gate w2: the plan-stage launch this worker is awaiting --
+gate rc=0 -> PASSES on the stale audit delivery (BUG)

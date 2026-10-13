@@ -1,0 +1,10 @@
+-- lock holder --
+HOLDER_ACQUIRED /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lockprobe.yqGODB/home/state/.meta-w9.lock
+dispatch rc=0 elapsed=3.4s (holder held 3s)
+-- w9.meta after dispatch --
+window=stub:fm-w9
+kind=ship
+consult_delivered=audit
+-- holder final --
+HOLDER_ACQUIRED /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lockprobe.yqGODB/home/state/.meta-w9.lock
+HOLDER_RELEASED
