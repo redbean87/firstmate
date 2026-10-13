@@ -112,12 +112,16 @@ pass 'a shrunk log breaks continuity as truncated with the remaining hash'
 
 # A same-size in-place rewrite changes only mtime/ctime: the stat gate must
 # still take the snapshot, where the prefix hash catches the changed bytes.
-# This rewrite lands in a later epoch second.
+# This rewrite lands in a later epoch second. Overwrite the bytes in place
+# instead of through a truncation redirect: the redirect's truncate-then-write
+# window is a genuinely empty file, and a poll that lands inside it must (and
+# does) report a correct truncation break rather than prefix-changed.
 printf 'alpha\nbeta\n' > "$DELTA_HOME/$DELTA_LOG_REL"
 run_reader 11 "$PREFIX_SHA" 4 > "$TMP_ROOT/rewrite.out" &
 READER_PID=$!
 sleep 1.1
-printf 'OMEGA\nbeta\n' > "$DELTA_HOME/$DELTA_LOG_REL"
+perl -e 'open my $f, "+<", $ARGV[0] or die "$ARGV[0]: $!\n"; seek $f, 0, 0 or die "seek: $!\n"; print {$f} "OMEGA\nbeta\n" or die "write: $!\n"; close $f or die "close: $!\n"' \
+  "$DELTA_HOME/$DELTA_LOG_REL" || fail 'the in-place same-size rewrite could not be written'
 wait "$READER_PID" || fail 'the rewritten read did not exit 0'
 OUT=$(<"$TMP_ROOT/rewrite.out")
 assert_contains "$OUT" 'status=continuity-broken' 'a same-size rewrite did not produce a break'
