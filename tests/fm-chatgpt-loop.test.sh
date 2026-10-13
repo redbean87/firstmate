@@ -18,7 +18,7 @@ STUB_PORT=17911
 export CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:$STUB_PORT/v1"
 
 HOME_DIR="$TMP_ROOT/home"
-mkdir -p "$HOME_DIR"
+mkdir -p "$HOME_DIR/state"
 export FM_HOME="$HOME_DIR"
 export FM_DATA_OVERRIDE="$HOME_DIR/data"
 export FM_STATE_OVERRIDE="$HOME_DIR/state"
@@ -74,7 +74,9 @@ stop_stub() {
 }
 
 # make_spawn_stub <dir>: writes a stub spawn that records its argv and
-# environment, then exits 0, plus a stub fm-send that records the steering
+# environment, publishes the worker's task record the way a real fm-spawn does
+# (state/<id>.meta is where dispatch records consult_delivered= after a
+# confirmed handoff), then exits 0, plus a stub fm-send that records the steering
 # target and delivered message, then exits 0. Exports FM_CHATGPT_LOOP_SPAWN
 # and FM_CHATGPT_LOOP_SEND at them.
 make_spawn_stub() {
@@ -83,6 +85,7 @@ make_spawn_stub() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$STUB_SPAWN_DIR/argv.txt"
 env > "$STUB_SPAWN_DIR/env.txt"
+printf 'window=stub:fm-%s\nkind=ship\n' "$1" > "${FM_STATE_OVERRIDE:?}/$1.meta"
 exit "${STUB_SPAWN_EXIT:-0}"
 SH
   chmod +x "$dir/fm-spawn-stub.sh"
@@ -114,6 +117,14 @@ new_task_files() {
 
 loop_phase() {
   jq -r '.phase' "$HOME_DIR/data/$1/chatgpt-loop.json"
+}
+
+# gate_check <task-id>: run the consultation gate exactly as a ship launch
+# would - data dir, state dir, task id, no dispatch marker in the environment -
+# and echo its output while returning its exit code (0 proceed, 1 refuse).
+gate_check() {
+  bash -c '. "$0"; fm_consult_gate_check "$1" "$2" "$3" ship 0 ""' \
+    "$ROOT/bin/fm-consult-gate-lib.sh" "$HOME_DIR/data" "$HOME_DIR/state" "$1" 2>&1
 }
 
 test_full_loop_happy_path() {
@@ -274,6 +285,53 @@ test_spawn_failure_recorded() {
   [ "$rc" -eq 0 ] || fail "a failed spawn must leave the same stage re-dispatchable"
   [ "$(loop_phase spawnfail)" = "audit-worker" ] || fail "the retry dispatch must advance to audit-worker"
   pass "a failed spawn records last_error, holds the dispatch phase, and the stage retries"
+}
+
+test_dispatch_records_delivery_on_the_worker() {
+  local dir=$TMP_ROOT/delivery rc out
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  local pid
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task delivery --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task delivery >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task delivery -- dw myproj --mode local-only --yolo off >/dev/null; rc=$?
+  [ "$rc" -eq 0 ] || fail "a dispatched handoff must exit 0"
+  assert_grep "consult_delivered=audit" "$HOME_DIR/state/dw.meta" \
+    "a confirmed handoff must record consult_delivered=<stage> on the worker's own task record"
+  # The gate reads that field as the delivery evidence: the worker has no
+  # consultation record of its own and no dispatch marker is in this
+  # environment, so only the recorded field can let it through.
+  out=$(gate_check dw); rc=$?
+  [ "$rc" -eq 0 ] || fail "the consultation gate must pass on the worker's recorded delivery field: $out"
+  pass "a confirmed handoff records consult_delivered on the worker, and the gate passes on it"
+}
+
+test_failed_handoff_leaves_no_delivery_record() {
+  local dir=$TMP_ROOT/handofffail rc out
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  local pid
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task handofffail --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task handofffail >/dev/null
+  stop_stub "$pid"
+  STUB_SEND_EXIT=1 bash "$LOOP" dispatch --stage audit --task handofffail -- hw myproj --mode local-only --yolo off >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 0 ] || fail "a failed handoff must exit nonzero"
+  [ -f "$HOME_DIR/state/hw.meta" ] || fail "the worker's task record must exist after its spawn"
+  assert_no_grep "consult_delivered=" "$HOME_DIR/state/hw.meta" \
+    "a failed handoff must leave no delivery record on the worker"
+  # With no delivery record, no own consultation record, and no marker, the
+  # gate still refuses this worker's launch - a loop record at its worker
+  # phase is not delivery evidence.
+  out=$(gate_check hw); rc=$?
+  [ "$rc" -eq 1 ] || fail "the consultation gate must refuse a worker whose handoff failed: $out"
+  assert_contains "$out" "cannot launch without its stored ChatGPT-generated prompt" \
+    "the refusal must be the ordinary consultation refusal"
+  pass "a failed handoff leaves no delivery record and the gate still refuses that worker"
 }
 
 test_dispatch_requires_plain_task_id() {
@@ -1085,6 +1143,8 @@ test_plan_consult_carries_explicit_context
 test_consult_failure_is_retryable
 test_worker_failure_recorded
 test_spawn_failure_recorded
+test_dispatch_records_delivery_on_the_worker
+test_failed_handoff_leaves_no_delivery_record
 test_dispatch_requires_plain_task_id
 test_wrong_phase_refuses
 test_task_id_validated_before_state_paths

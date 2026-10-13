@@ -30,6 +30,13 @@
 # dispatch: a worker task with no record of its own satisfies the gate through
 # this loop record's dispatch-phase stage prompt, never through the marker alone
 # (bin/fm-consult-gate-lib.sh owns that rule).
+# The durable delivery record belongs to the same handoff: only after fm-send
+# confirms the stage prompt reached the worker does dispatch write
+# consult_delivered=<stage> onto the worker's own task record
+# (state/<worker task id>.meta), and that field - not any loop phase - is what
+# bin/fm-consult-gate-lib.sh reads as proof of delivery when the worker is
+# relaunched. A failed handoff writes no such field, so the gate still refuses
+# that worker's next launch.
 # A failed spawn records last_error, leaves the phase at
 # <stage>-dispatch, and
 # exits nonzero; record-worker-failure likewise returns the phase to
@@ -170,6 +177,29 @@ need_state() {
   file=$(loop_state_file "$1")
   [ -f "$file" ] || { printf 'fm-chatgpt-loop: no loop state for task %s (run init first)\n' "$1" >&2; return 1; }
   printf '%s\n' "$file"
+}
+
+# record_delivery <worker-task-id> <stage>: append consult_delivered=<stage> to
+# the worker's OWN task record (state/<id>.meta), the consultation gate's one
+# durable field of delivery evidence. The record must already exist - the
+# successful spawn published it - and this never creates one; the write is a
+# temp-plus-rename in the same directory, so a reader sees either the old
+# record or the record carrying the field, never a partial file.
+record_delivery() {
+  local meta="$STATE/$1.meta" stage=$2 tmp
+  if [ ! -f "$meta" ]; then
+    printf 'fm-chatgpt-loop: no task record at %s to record the delivered %s prompt on\n' "$meta" "$stage" >&2
+    return 1
+  fi
+  tmp=$(mktemp "$STATE/.$1.meta.delivery.XXXXXX") || return 1
+  if ! { cat "$meta" && printf 'consult_delivered=%s\n' "$stage"; } >"$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  if ! mv -f -- "$tmp" "$meta"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
 }
 
 require_phase() {
@@ -675,7 +705,9 @@ cmd_dispatch() {
   # before the handoff; record-findings resolves this worker's report.
   write_field "$file" worker_task "$worker_task" || return 1
   # Handoff: deliver the stored stage prompt to the spawned worker through the
-  # ordinary durable steering path, right after launch.
+  # ordinary durable steering path, right after launch. The branches below
+  # never write consult_delivered, so a failed handoff leaves no delivery
+  # record on the worker and the consultation gate still refuses its relaunch.
   if send_err=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" "$SEND" "$worker_task" "$stage_prompt" 2>&1); then
     :
   else
@@ -684,6 +716,16 @@ cmd_dispatch() {
     write_field "$file" last_error "worker $stage prompt delivery failed: $send_err" || return 1
     printf 'fm-chatgpt-loop: spawned the %s worker for task %s, but the prompt handoff to %s failed: %s\n' "$stage" "$task" "$worker_task" "$send_err" >&2
     return "$rc"
+  fi
+  # The handoff genuinely succeeded: this is the one place delivery is
+  # recorded, on the worker's own task record. The worker exists, so the phase
+  # still advances when the record cannot be written - loudly, with the reason,
+  # rather than leaving a delivered prompt looking undeliverable.
+  if ! record_delivery "$worker_task" "$stage"; then
+    write_field "$file" phase "$phase_next" || return 1
+    write_field "$file" last_error "worker $stage prompt delivered to $worker_task, but its delivery record could not be written" || return 1
+    printf 'fm-chatgpt-loop: the %s prompt reached %s, but the delivery record on its task record could not be written; a relaunch of %s will be refused until that record exists\n' "$stage" "$worker_task" "$worker_task" >&2
+    return 1
   fi
   write_field "$file" phase "$phase_next" || return 1
   write_field "$file" last_error "" || return 1
