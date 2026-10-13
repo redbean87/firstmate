@@ -59,15 +59,17 @@
 #     alone proves nothing: without such a record the launch is still refused.
 #   - Delivered handoff: bin/fm-chatgpt-loop.sh writes consult_delivered=<stage>
 #     onto the dispatched worker's own task record (state/<task id>.meta) at
-#     the moment fm-send confirms the stage-prompt handoff, and never otherwise.
-#     A launch task with NO record of its own satisfies the gate when its own
-#     task record carries a non-empty consult_delivered= value, which is what
-#     lets an ordinary relaunch recover a worker the loop already delivered to
-#     with no dispatch marker and no loop-record lookup. Nothing else
-#     establishes delivery: a *-dispatch or *-worker loop phase, the dispatch
-#     marker, or a loop record naming the worker all say nothing about whether
-#     the prompt reached it, and a failed handoff writes no field, so that
-#     worker's next launch is still refused.
+#     the moment fm-send confirms the stage-prompt handoff, and never otherwise,
+#     clearing any earlier stage's value before a new handoff. A launch task
+#     with NO record of its own satisfies the gate when its own task record
+#     carries a consult_delivered= value naming a deliverable stage - audit or
+#     plan - which is what lets an ordinary relaunch recover a worker the loop
+#     already delivered to with no dispatch marker and no loop-record lookup.
+#     Nothing else establishes delivery: a *-dispatch or *-worker loop phase,
+#     the dispatch marker, a loop record naming the worker, or a value naming
+#     no delivered stage all say nothing about whether the prompt reached it,
+#     and a failed handoff leaves no field, so that worker's next launch is
+#     still refused.
 #
 # fm_consult_gate_check returns 0 to proceed and 1 to refuse, printing its full
 # diagnostic on stderr. On a proceeding launch, FM_CONSULT_GATE_WAIVER_REASON
@@ -168,10 +170,12 @@ fm_consult_gate_loop_dispatch_valid() {
 }
 
 # fm_consult_gate_delivery_record_valid <state-dir> <task-id>
-# True when this task's own record (state/<id>.meta) carries a non-empty
-# consult_delivered= value: the durable field bin/fm-chatgpt-loop.sh writes
-# only after the stage prompt genuinely reached this worker. Loop phases,
-# dispatch markers, and loop records never substitute for it.
+# True when this task's own record (state/<id>.meta) carries a
+# consult_delivered=<stage> value naming a stage the loop can deliver (audit or
+# plan): the durable field bin/fm-chatgpt-loop.sh writes only after that
+# stage's prompt genuinely reached this worker, and clears before a later
+# handoff, so no earlier stage's value can stand in. Loop phases, dispatch
+# markers, and loop records never substitute for it.
 fm_consult_gate_delivery_record_valid() {
   local meta="$1/$2.meta" line value=
   [ -f "$meta" ] && [ -r "$meta" ] || return 1
@@ -180,7 +184,10 @@ fm_consult_gate_delivery_record_valid() {
     consult_delivered=*) value=${line#consult_delivered=} ;;
     esac
   done <"$meta" 2>/dev/null || return 1
-  [ -n "$(printf '%s' "$value" | tr -d '[:space:]')" ]
+  case "$value" in
+  audit | plan) return 0 ;;
+  esac
+  return 1
 }
 
 # fm_consult_gate_refuse <task> <record-path> <detail> <stage-hint> <channel-line>

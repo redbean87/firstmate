@@ -85,7 +85,16 @@ make_spawn_stub() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$STUB_SPAWN_DIR/argv.txt"
 env > "$STUB_SPAWN_DIR/env.txt"
-printf 'window=stub:fm-%s\nkind=ship\n' "$1" > "${FM_STATE_OVERRIDE:?}/$1.meta"
+meta="${FM_STATE_OVERRIDE:?}/$1.meta"
+if [ "${STUB_SPAWN_PRESERVE:-0}" = 1 ] && [ -f "$meta" ]; then
+  {
+    grep -v '^window=' "$meta" || true
+    printf 'window=stub:fm-%s\n' "$1"
+  } > "$meta.tmp"
+  mv "$meta.tmp" "$meta"
+else
+  printf 'window=stub:fm-%s\nkind=ship\n' "$1" > "$meta"
+fi
 exit "${STUB_SPAWN_EXIT:-0}"
 SH
   chmod +x "$dir/fm-spawn-stub.sh"
@@ -171,7 +180,7 @@ test_full_loop_happy_path() {
 # leftover audit prompt or plan is exactly what bin/fm-consult-gate-lib.sh's
 # dispatch gate could mistake for the new round's consultation.
 test_next_round_clears_the_finished_rounds_fields() {
-  local dir=$TMP_ROOT/nextround pid file field
+  local dir=$TMP_ROOT/nextround pid file field out rc
   mkdir -p "$dir"
   new_task_files
   make_spawn_stub "$dir"
@@ -198,6 +207,10 @@ test_next_round_clears_the_finished_rounds_fields() {
   done
   [ "$(jq -r '.iteration' "$file")" = 2 ] || fail "next-round must still advance the iteration"
   [ "$(loop_phase nextround)" = "audit-consult" ] || fail "next-round must still return to audit-consult"
+  assert_no_grep "consult_delivered=" "$HOME_DIR/state/nrworker.meta" \
+    "next-round must clear the finished round's delivery record so its worker's relaunch needs the new round's prompt"
+  out=$(gate_check nrworker); rc=$?
+  [ "$rc" -eq 1 ] || fail "the gate must refuse the finished round's worker until the new round delivers a prompt: $out"
   pass "next-round clears the finished round's scoped fields, so a stale prompt never satisfies the gate"
 }
 
@@ -332,6 +345,42 @@ test_failed_handoff_leaves_no_delivery_record() {
   assert_contains "$out" "cannot launch without its stored ChatGPT-generated prompt" \
     "the refusal must be the ordinary consultation refusal"
   pass "a failed handoff leaves no delivery record and the gate still refuses that worker"
+}
+
+# The proving case for stage scoping: a successful audit handoff records audit,
+# but a LATER plan handoff to the same worker that fails must not leave that
+# audit value behind, or the gate would pass a plan-stage relaunch whose prompt
+# never reached the worker. The spawn stub preserves the record's other fields
+# the way a relaunch re-publication does, so only the loop's own clear removes
+# the earlier stage's value.
+test_failed_later_handoff_clears_the_earlier_delivery_record() {
+  local dir=$TMP_ROOT/staleclear rc out
+  mkdir -p "$dir"
+  new_task_files
+  make_spawn_stub "$dir"
+  local pid
+  pid=$(start_stub "$dir")
+  bash "$LOOP" init --task staleclear --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  bash "$LOOP" consult --stage audit --task staleclear >/dev/null
+  stop_stub "$pid"
+  bash "$LOOP" dispatch --stage audit --task staleclear -- sw myproj --mode local-only --yolo off >/dev/null; rc=$?
+  [ "$rc" -eq 0 ] || fail "the audit dispatch must succeed"
+  assert_grep "consult_delivered=audit" "$HOME_DIR/state/sw.meta" \
+    "the confirmed audit handoff must record its delivery"
+  printf 'worker found two flaky tests\n' > "$dir/findings.txt"
+  bash "$LOOP" record-findings --task staleclear --file "$dir/findings.txt" >/dev/null
+  pid=$(start_stub "$dir")
+  bash "$LOOP" consult --stage plan --task staleclear >/dev/null
+  stop_stub "$pid"
+  STUB_SPAWN_PRESERVE=1 STUB_SEND_EXIT=1 bash "$LOOP" dispatch --stage plan --task staleclear -- sw myproj --mode local-only --yolo off >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 0 ] || fail "the failed plan handoff must exit nonzero"
+  assert_no_grep "consult_delivered=" "$HOME_DIR/state/sw.meta" \
+    "a failed later handoff must leave no delivery record from an earlier stage"
+  out=$(gate_check sw); rc=$?
+  [ "$rc" -eq 1 ] || fail "the gate must refuse the worker whose plan handoff failed: $out"
+  assert_contains "$out" "cannot launch without its stored ChatGPT-generated prompt" \
+    "the refusal must be the ordinary consultation refusal"
+  pass "a failed later handoff clears the earlier delivery record, so the gate refuses its relaunch"
 }
 
 test_dispatch_requires_plain_task_id() {
@@ -1145,6 +1194,7 @@ test_worker_failure_recorded
 test_spawn_failure_recorded
 test_dispatch_records_delivery_on_the_worker
 test_failed_handoff_leaves_no_delivery_record
+test_failed_later_handoff_clears_the_earlier_delivery_record
 test_dispatch_requires_plain_task_id
 test_wrong_phase_refuses
 test_task_id_validated_before_state_paths

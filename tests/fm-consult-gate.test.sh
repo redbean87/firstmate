@@ -346,6 +346,36 @@ test_ordinary_relaunch_of_a_delivered_worker_passes_without_a_waiver() {
   pass "fm-spawn: an ordinary relaunch passes on the worker's recorded delivery, with no waiver"
 }
 
+# A consult_delivered= value only carries delivery if it names a stage the loop
+# delivers. A value naming no stage - pending work, a blank, a typo - proves
+# nothing about a prompt reaching the worker, so the relaunch refuses.
+test_a_delivery_record_must_name_a_delivered_stage() {
+  local dir id out status
+  id=gate-delivery-stage-c1
+  dir=$(make_case gate-delivery-stage "$id")
+  fm_test_start_bridge_stub "$dir" healthy
+  write_record "$dir" gate-delivery-stage-loop audit-dispatch "the stored audit prompt" ""
+  out=$(FM_CHATGPT_LOOP_DISPATCH_TASK=gate-delivery-stage-loop run_ship "$dir" "$id"); status=$?
+  expect_code 0 "$status" "the loop's own dispatch must pass the gate"$'\n'"$out"
+  assert_present "$dir/home/state/$id.meta" "the dispatch must publish the worker's task record"
+
+  printf 'consult_delivered=pending\n' >>"$dir/home/state/$id.meta"
+  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$id" run_case "$dir" "$id" --relaunch); status=$?
+  expect_code 1 "$status" "a delivery record naming no deliverable stage must refuse"$'\n'"$out"
+  assert_contains "$out" "$dir/home/data/$id/chatgpt-loop.json" \
+    "the refusal must name the missing artifact"
+  [ ! -s "$dir/launch.log" ] || fail "a refused relaunch must not launch a worker"
+
+  grep -v '^consult_delivered=' "$dir/home/state/$id.meta" >"$dir/home/state/$id.meta.tmp"
+  printf 'consult_delivered=\n' >>"$dir/home/state/$id.meta.tmp"
+  mv "$dir/home/state/$id.meta.tmp" "$dir/home/state/$id.meta"
+  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$id" run_case "$dir" "$id" --relaunch); status=$?
+  expect_code 1 "$status" "a blank delivery record must refuse"$'\n'"$out"
+  [ ! -s "$dir/launch.log" ] || fail "a refused relaunch must not launch a worker"
+  fm_test_stop_bridge_stub
+  pass "fm-spawn: a delivery record must name a deliverable stage"
+}
+
 test_loop_worker_record_for_another_task_still_refuses() {
   local dir id out status
   id=gate-loopworker-other-c1
@@ -405,6 +435,7 @@ test_loop_dispatch_record_satisfies_the_gate
 test_loop_dispatch_marker_alone_proves_nothing
 test_loop_worker_record_without_a_delivery_record_refuses
 test_ordinary_relaunch_of_a_delivered_worker_passes_without_a_waiver
+test_a_delivery_record_must_name_a_delivered_stage
 test_loop_worker_record_for_another_task_still_refuses
 test_the_stage_in_play_decides_which_prompt_is_required
 
