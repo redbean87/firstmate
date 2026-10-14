@@ -156,10 +156,19 @@ test("thermal mode marks only recent activity within the window", () => {
 test("xray mode strips emphasis while preserving every word", () => {
   const out = transformForVisor("xray", SAMPLE);
   assert.equal(normalizeEmphasis(out), normalizeEmphasis(SAMPLE));
-  assert.doesNotMatch(out, /\*\*/);
   assert.match(out, /parser/);
   assert.match(out, /```bash/);
+  assert.match(out, /echo \*\*not bolded\*\*/);
   assert.equal(transformForVisor("xray", SAMPLE), out);
+});
+
+test("xray mode never drops non-emphasis content", () => {
+  assert.equal(transformForVisor("xray", "2**10 and 3**5"), "2**10 and 3**5");
+  assert.equal(transformForVisor("xray", "`a**b` and `c**d`"), "`a**b` and `c**d`");
+  assert.equal(transformForVisor("xray", "C:\\path\\*\\*"), "C:\\path\\*\\*");
+  assert.equal(transformForVisor("xray", "```sh\nglob **/*.ts\n```"), "```sh\nglob **/*.ts\n```");
+  assert.equal(transformForVisor("xray", "**bold** and ***strong*** and __under__"), "bold and strong and under");
+  assert.equal(transformForVisor("xray", "foo *bar* baz"), "foo bar baz");
 });
 
 test("visor mode parsing and cycling are total", () => {
@@ -397,4 +406,61 @@ test("model selection updates the beam readout", () => {
   ctx.model = { provider: "mystery", id: "unmapped" };
   captured.handlers.get("model_select")?.({ type: "model_select" }, ctx);
   assert.match(captured.statuses.get("fm-prime-hud-visor") ?? "", /BEAM POWER/);
+});
+
+test("unknown context usage never fabricates a percent from branch history", () => {
+  const captured = harness();
+  const ctx = ctxMock(undefined, captured);
+  ctx.model = { provider: "openai", id: "gpt-5.2" };
+  ctx.sessionManager = {
+    getBranch: () =>
+      Array.from({ length: 50 }, () => ({
+        type: "message",
+        message: { role: "assistant", usage: { input: 9_000, output: 1_000 } },
+      })),
+  };
+  captured.handlers.get("session_start")?.({ type: "session_start" }, ctx);
+  assert.equal(captured.statuses.get("fm-prime-hud-energy"), "NRG ?");
+  assert.equal(captured.statuses.get("fm-prime-hud-hazard"), undefined);
+});
+
+test("thermal recency keys each rendered assistant block", () => {
+  const captured = harness();
+  const ctx = ctxMock(undefined, captured);
+  captured.handlers.get("session_start")?.({ type: "session_start" }, ctx);
+  void captured.commands.get("visor")?.handler("thermal", ctx);
+  captured.handlers.get("message_end")?.({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Before tool\n" },
+        { type: "toolCall", id: "t1", name: "bash", input: { command: "ls" } },
+        { type: "text", text: " After tool" },
+        { type: "thinking", thinking: " thinking one " },
+        { type: "thinking", thinking: "thinking two" },
+      ],
+    },
+  }, ctx);
+  const transform = captured.transformer;
+  assert.ok(transform);
+  const context = { messageType: "assistant", isStreaming: false, availableWidth: 80 };
+  assert.equal(transform("Before tool", context), "▌ Before tool");
+  assert.equal(transform("After tool", context), "▌ After tool");
+  assert.equal(transform("thinking one\n\nthinking two", context), "▌ thinking one\n\n▌ thinking two");
+  assert.equal(transform("Unrecorded row", context), "Unrecorded row");
+});
+
+test("thermal recency keys the user message of a skill block", () => {
+  const captured = harness();
+  const ctx = ctxMock(undefined, captured);
+  captured.handlers.get("session_start")?.({ type: "session_start" }, ctx);
+  void captured.commands.get("visor")?.handler("thermal", ctx);
+  const skill = '<skill name="x" location="/tmp/x">\nbody text\n</skill>\n\nactual question';
+  captured.handlers.get("message_start")?.({ type: "message_start", message: { role: "user", content: skill } }, ctx);
+  const transform = captured.transformer;
+  assert.ok(transform);
+  const context = { messageType: "user", isStreaming: false, availableWidth: 80 };
+  assert.equal(transform("actual question", context), "▌ actual question");
+  assert.equal(transform(skill, context), skill);
 });

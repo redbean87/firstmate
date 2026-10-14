@@ -68,4 +68,6 @@ echo "# fm-prime-hud extension tests against Pi $version"
 
 cd "$TMP_ROOT" || exit 1
 # shellcheck disable=SC2086 # NODE_TS_ARGS is empty or a single literal flag.
-exec node $NODE_TS_ARGS --test test/fm-prime-hud.test.ts
+node $NODE_TS_ARGS --test test/fm-prime-hud.test.ts
+status=$?
+exit "$status"

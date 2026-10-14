@@ -3,9 +3,8 @@
 // Launch for isolated review with: pi --extension .pi/extensions/fm-prime-hud.ts
 //
 // Data honesty contract, fixed by the pre-implementation audit (data/fm-prime-hud-c1/report.md):
-// - Energy meter and energy tanks come from ctx.getContextUsage(), falling back to the model's
-//   context window plus assistant-message token sums. Unknown usage renders as an explicit "?",
-//   never as a fabricated percentage.
+// - Energy meter and energy tanks come from ctx.getContextUsage(). Unknown usage renders as an
+//   explicit "?", never as a fabricated percentage.
 // - The missile reserve represents the provider usage budget (5-hour and 7-day windows). Pi
 //   exposes no in-process source for it, so it always renders as unknown until one exists.
 // - Beam selection is a documented thematic mapping over the real active model; the model id is
@@ -25,8 +24,8 @@
 // with no timers or polling; the transformer never blanks or drops content; no built-in tools,
 // headers, footers, editors, or themes are claimed; every status and widget key is namespaced.
 
-import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
-import type { ContextUsage, ExtensionAPI, ExtensionContext, MarkdownTransformContext } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext, MarkdownTransformContext } from "@earendil-works/pi-coding-agent";
 import { rgbColor, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 export type VisorMode = "combat" | "scan" | "thermal" | "xray";
@@ -235,14 +234,61 @@ function prefixContentLines(markdown: string, prefix: string): string {
 }
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+const FENCE_PATTERN = /^\s*(```|~~~)/;
+
+function maskInlineCode(line: string): { masked: string; restore: (value: string) => string } {
+  const stash: string[] = [];
+  const masked = line.replace(/(`+)([\s\S]*?)\1/g, (match) => {
+    const token = `\u0001${stash.length}\u0001`;
+    stash.push(match);
+    return token;
+  });
+  return {
+    masked,
+    restore: (value) => value.replace(/\u0001(\d+)\u0001/g, (_match, index: string) => stash[Number(index)] ?? ""),
+  };
+}
+
+function maskEscapedDelimiters(line: string): { masked: string; restore: (value: string) => string } {
+  const stash: string[] = [];
+  const masked = line.replace(/(\\+)([*_])/g, (match, backslashes: string) => {
+    if (backslashes.length % 2 === 0) return match;
+    const token = `\u0002${stash.length}\u0002`;
+    stash.push(match);
+    return token;
+  });
+  return {
+    masked,
+    restore: (value) => value.replace(/\u0002(\d+)\u0002/g, (_match, index: string) => stash[Number(index)] ?? ""),
+  };
+}
+
+function stripEmphasisDelimiters(text: string): string {
+  let out = text;
+  out = out.replace(/(^|[^\w*])\*\*\*(?=\S)([^*]*?\S)\*\*\*(?=$|[^\w*])/g, "$1$2");
+  out = out.replace(/(^|[^\w*])\*\*(?=\S)([^*]*?\S)\*\*(?=$|[^\w*])/g, "$1$2");
+  out = out.replace(/(^|[^\w_])__(?=\S)([^_]*?\S)__(?=$|[^\w_])/g, "$1$2");
+  out = out.replace(/(^|[^*\w])\*(?=\S)([^*\n]*?\S)\*(?=$|[^*\w])/g, "$1$2");
+  return out;
+}
 
 function stripEmphasis(markdown: string): string {
-  let out = markdown.replace(ANSI_PATTERN, "");
-  out = out.replace(/\*\*\*(?!\s)([^*]+?)(?<!\s)\*\*\*/g, "$1");
-  out = out.replace(/\*\*(?!\s)([^*]+?)(?<!\s)\*\*/g, "$1");
-  out = out.replace(/__(?!\s)([^_]+?)(?<!\s)__/g, "$1");
-  out = out.replace(/(^|[^*\w])\*([^*\n]+)\*([^*\w]|$)/g, "$1$2$3");
-  return out;
+  let inFence = false;
+  return markdown
+    .replace(ANSI_PATTERN, "")
+    .split("\n")
+    .map((line) => {
+      if (FENCE_PATTERN.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      const code = maskInlineCode(line);
+      const escaped = maskEscapedDelimiters(code.masked);
+      const stripped = stripEmphasisDelimiters(escaped.masked);
+      return code.restore(escaped.restore(stripped));
+    })
+    .join("\n");
 }
 
 export interface VisorTransformOptions {
@@ -315,42 +361,70 @@ function modelLabel(model: Model<any> | undefined): string | null {
   return provider && id ? `${provider}/${id}` : provider || id;
 }
 
-function resolveUsage(ctx: ExtensionContext): ContextUsage | null {
-  const usage = ctx.getContextUsage();
-  if (usage) return usage;
-  const window = ctx.model?.contextWindow;
-  if (!window) return null;
-  let tokens = 0;
-  let seen = false;
-  for (const entry of ctx.sessionManager.getBranch()) {
-    if (entry.type === "message" && entry.message.role === "assistant") {
-      const message = entry.message as AssistantMessage;
-      if (message.usage) {
-        tokens += (message.usage.input ?? 0) + (message.usage.output ?? 0);
-        seen = true;
-      }
-    }
+const SKILL_BLOCK_PATTERN = /^<skill name="[^"]+" location="[^"]+">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]+))?$/;
+
+function userRenderedText(content: string): string | null {
+  if (content === "") return null;
+  const skill = content.match(SKILL_BLOCK_PATTERN);
+  if (skill) {
+    const userMessage = skill[1]?.trim();
+    return userMessage ? userMessage : null;
   }
-  if (!seen) return { tokens: null, contextWindow: window, percent: null };
-  return { tokens, contextWindow: window, percent: (tokens / window) * 100 };
+  return content;
 }
 
-function messageText(message: { role?: unknown; content?: unknown }): string | null {
-  if (message.role !== "user" && message.role !== "assistant") return null;
+// Mirror the exact strings Pi's renderer hands to the Markdown transformer: assistant text and
+// thinking blocks are trimmed (consecutive thinking blocks join with a blank line), and a user
+// skill block renders only its trailing user message.
+function renderedTexts(message: { role?: unknown; content?: unknown }): string[] {
+  if (message.role !== "user" && message.role !== "assistant") return [];
   const content = message.content;
-  if (typeof content === "string") return content.length > 0 ? content : null;
-  if (!Array.isArray(content)) return null;
-  const texts = content
-    .filter(
-      (part): part is { type: "text"; text: string } =>
-        typeof part === "object" &&
-        part !== null &&
-        (part as { type?: unknown }).type === "text" &&
-        typeof (part as { text?: unknown }).text === "string",
-    )
-    .map((part) => part.text);
-  const joined = texts.join("\n");
-  return joined.length > 0 ? joined : null;
+  if (typeof content === "string") {
+    if (message.role !== "user") return [];
+    const text = userRenderedText(content);
+    return text === null ? [] : [text];
+  }
+  if (!Array.isArray(content)) return [];
+  if (message.role === "user") {
+    const joined = content
+      .filter(
+        (part): part is { type: "text"; text: string } =>
+          typeof part === "object" &&
+          part !== null &&
+          (part as { type?: unknown }).type === "text" &&
+          typeof (part as { text?: unknown }).text === "string",
+      )
+      .map((part) => part.text)
+      .join("");
+    const text = userRenderedText(joined);
+    return text === null ? [] : [text];
+  }
+  const blocks: string[] = [];
+  for (let index = 0; index < content.length; index++) {
+    const part = content[index];
+    if (typeof part !== "object" || part === null) continue;
+    const record = part as { type?: unknown; text?: unknown; thinking?: unknown };
+    if (record.type === "text" && typeof record.text === "string") {
+      const text = record.text.trim();
+      if (text) blocks.push(text);
+      continue;
+    }
+    if (record.type !== "thinking") continue;
+    const thinkingBlocks: string[] = [];
+    for (; index < content.length; index++) {
+      const thinkingPart = content[index];
+      if (typeof thinkingPart !== "object" || thinkingPart === null) break;
+      const thinkingRecord = thinkingPart as { type?: unknown; thinking?: unknown };
+      if (thinkingRecord.type !== "thinking") break;
+      if (typeof thinkingRecord.thinking === "string") {
+        const thinking = thinkingRecord.thinking.trim();
+        if (thinking) thinkingBlocks.push(thinking);
+      }
+    }
+    index--;
+    if (thinkingBlocks.length > 0) blocks.push(thinkingBlocks.join("\n\n"));
+  }
+  return blocks;
 }
 
 function rememberRecent(state: HudRuntimeState, text: string, at: number): void {
@@ -388,8 +462,7 @@ export default function (pi: ExtensionAPI) {
   let state = freshState();
 
   const refreshDerived = (ctx: ExtensionContext): void => {
-    const usage = resolveUsage(ctx);
-    state.percent = usage?.percent ?? null;
+    state.percent = ctx.getContextUsage()?.percent ?? null;
     state.model = modelLabel(ctx.model);
     state.beam = beamForModel(ctx.model);
     state.hazard.contextCritical = contextCritical(state.percent);
@@ -441,9 +514,15 @@ export default function (pi: ExtensionAPI) {
     paint(ctx);
   });
 
+  pi.on("message_start", (event) => {
+    if (event.message.role !== "user") return;
+    const at = Date.now();
+    for (const text of renderedTexts(event.message)) rememberRecent(state, text, at);
+  });
+
   pi.on("message_end", (event, ctx) => {
-    const text = messageText(event.message);
-    if (text !== null) rememberRecent(state, text, Date.now());
+    const at = Date.now();
+    for (const text of renderedTexts(event.message)) rememberRecent(state, text, at);
     paint(ctx);
   });
 
