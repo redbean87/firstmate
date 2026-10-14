@@ -1,0 +1,50 @@
+
+ ▀▀█  v1.2.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d
+ clear/exit · / commands · ! bash ·
+ ctrl+o more
+ Press ctrl+o to show full startup help
+ and loaded resources.
+
+ Pi can explain its own features and look
+ up its docs. Ask it how to use or extend
+ Pi.
+
+[Skills]
+  no-mistakes
+
+[Extensions]
+  fm-prime-hud.ts
+
+
+ Warning: tmux extended-keys is off.
+ Modified Enter keys may not work. Add
+ `set -g extended-keys on` to
+ ~/.tmux.conf and restart tmux.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
++---------------- VISOR -----------------+
+| NRG [============] 100%                |
+| TANK [#####]                           |
+| MSL 5h:? 7d:?                          |
+| BEAM POWER  MDL hud-local/mystery-hu...|
++----------------------------------------+
+──────────────────────────────────────────
+
+──────────────────────────────────────────
+/private/var/folders/lq/gtznj14x70d1bgn...
+0.0%/200k (auto)         mystery-hud-probe
+NRG 100% VSR BEAM POWER

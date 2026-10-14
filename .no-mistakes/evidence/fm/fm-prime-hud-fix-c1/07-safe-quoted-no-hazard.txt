@@ -1,0 +1,50 @@
+ (no output)
+
+ Command exited with code 7
+
+ Took 0.0s
+
+
+ Tool finished; back to you.
+
+
+ DESTROY scratch
+
+
+
+ $ sleep 6; rm -rf /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-hud-lab.cchXG9/scratch/gone
+
+ (no output)
+
+ Took 6.2s
+
+
+ Tool finished; back to you.
+
+
+ OKSAFE quoted payload
+
+
+
+ $ sleep 4; echo "clean; rm -rf build; reboot; shutdown -h now"
+
+ Elapsed 3.0s
+
+
++-------------------------------------------------- VISOR ---------------------------------------------------+
+| NRG [======------] 50%                                                                                     |
+| TANK [###--]                                                                                               |
+| MSL 5h:? 7d:?                                                                                              |
+| BEAM PLASMA  MDL hud-local/claude-hud-probe                                                                |
+| NRG/TANK=CONTEXT LEFT  MSL=NO SOURCE  RADAR=SIM                                                            |
+| RADAR SIM                                                                                                  |
+| | *   .  |                                                                                                 |
+| |  . *   |                                                                                                 |
+| +--------+                                                                                                 |
++------------------------------------------------------------------------------------------------------------+
+── ⠇ Working ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-hud-lab.cchXG9/work
+↑880k ↓96 50.0%/200k (auto)                                                                   claude-hud-probe
+NRG 50% VSR BEAM PLASMA

@@ -1,0 +1,50 @@
+
+ [38;2;228;138;122m[48;2;79;142;179m▀[49m▀█[39m  [2mv1.2.0[0m
+ [38;2;79;142;179m█▀[39m [38;2;234;182;93m█[39m [2mescape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more[0m
+ [2mPress ctrl+o to show full startup help and loaded resources.[0m
+
+ [2mPi can explain its own features and look up its docs. Ask it how to use or extend Pi.[0m
+
+[38;5;3m[Skills][39m
+[2m  no-mistakes[0m
+
+[38;5;3m[Extensions][39m
+[2m  fm-prime-hud.ts[0m
+
+
+ [38;5;3mWarning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to
+[39m [38;5;3m~/.tmux.conf and restart tmux.[39m
+
+
+ plain probe
+
+
+ HUD live probe acknowledged.
+
+
+ HIGHCTX now
+
+
+ Context is nearly full now.
+
+
+
+
+[38;2;0;229;255m+-------------------------------------------------- VISOR ---------------------------------------------------+
+| NRG [=-----------] 10%                                                                                     |
+| TANK [#----]                                                                                               |
+[38;2;255;179;0m| MSL 5h:? 7d:?                                                                                              |
+[38;2;0;229;255m| BEAM PLASMA  MDL hud-local/claude-hud-probe                                                                |
+[38;2;255;179;0m| !! CONTEXT CRITICAL                                                                                        |
+[38;2;114;114;115m| NRG/TANK=CONTEXT LEFT  MSL=NO SOURCE  RADAR=SIM                                                            |
+| RADAR SIM                                                                                                  |
+| | *   .  |                                                                                                 |
+| |  . *   |                                                                                                 |
+| +--------+                                                                                                 |
+[38;2;0;229;255m+------------------------------------------------------------------------------------------------------------+
+[2m[39m──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[0;7m [0m
+[2m──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-hud-lab.cchXG9/work[0m
+[2m↑280k ↓24 [38;5;1m90.0%/200k (auto)[39m                                                                   claude-hud-probe
+[0mNRG 10% !! CONTEXT CRITICAL VSR BEAM PLASMA

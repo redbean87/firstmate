@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>fm-prime-hud: destructive command pending (amber hazard)</title>
+<style>
+  body { margin:0; background:#0b0f14; padding:24px; }
+  h1 { color:#9fb3c8; font:600 14px ui-monospace,Menlo,monospace; margin:0 0 12px; }
+  pre.term {
+    display:inline-block;
+    margin:0;
+    padding:16px 18px;
+    background:#05070a;
+    color:#c9d4e0;
+    border:1px solid #1d2733;
+    border-radius:8px;
+    font:13px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
+    white-space:pre;
+  }
+</style></head>
+<body>
+<h1>fm-prime-hud: destructive command pending (amber hazard)</h1>
+<pre class="term" style=""><span>
+ plain reset
+
+
+ HUD live probe acknowledged.
+
+
+ FAILTOOL now
+
+
+
+ </span><span style="font-weight:700">$ exit 7</span><span>
+
+ </span><span style="opacity:.55">(no output)</span><span>
+
+ </span><span style="opacity:.55">Command exited with code 7
+
+</span><span> </span><span style="opacity:.55">Took 0.0s</span><span>
+
+
+ Tool finished; back to you.
+
+
+ DESTROY scratch
+
+
+
+ </span><span style="font-weight:700">$ sleep 6; rm -rf /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-hud-lab.cchXG9/scratch/gone</span><span>
+
+ </span><span style="opacity:.55">Elapsed 3.0s</span><span>
+
+
+</span><span style="color:rgb(0,229,255)">+-------------------------------------------------- VISOR ---------------------------------------------------+
+| NRG [======------] 50%                                                                                     |
+| TANK [###--]                                                                                               |
+</span><span style="color:rgb(255,179,0)">| MSL 5h:? 7d:?                                                                                              |
+</span><span style="color:rgb(0,229,255)">| BEAM PLASMA  MDL hud-local/claude-hud-probe                                                                |
+</span><span style="color:rgb(255,179,0)">| !! DESTRUCTIVE COMMAND PENDING                                                                             |
+</span><span style="color:rgb(114,114,115)">| NRG/TANK=CONTEXT LEFT  MSL=NO SOURCE  RADAR=SIM                                                            |
+| RADAR SIM                                                                                                  |
+| | *   .  |                                                                                                 |
+| |  . *   |                                                                                                 |
+| +--------+                                                                                                 |
+</span><span style="color:rgb(0,229,255)">+------------------------------------------------------------------------------------------------------------+
+</span><span style="opacity:.55">── ⠇</span><span> </span><span style="opacity:.55">Working ─────────────────────────────────────────────────────────────────────────────────────────────────
+</span><span> </span><span>
+</span><span style="opacity:.55">──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-hud-lab.cchXG9/work</span><span>
+</span><span style="opacity:.55">↑680k ↓72 50.0%/200k (auto)                                                                   claude-hud-probe
+</span><span>NRG 50% !! DESTRUCTIVE COMMAND PENDING VSR BEAM PLASMA
+</span></pre>
+</body></html>
