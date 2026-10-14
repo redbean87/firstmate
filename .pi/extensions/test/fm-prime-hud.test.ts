@@ -257,7 +257,7 @@ interface Harness {
 interface MockCtx {
   mode: string;
   hasUI: boolean;
-  model: { provider: string; id: string } | undefined;
+  model: { provider: string; id: string; contextWindow?: number } | undefined;
   getContextUsage: () => { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
   sessionManager: { getBranch: () => unknown[] };
   ui: {
@@ -411,7 +411,7 @@ test("model selection updates the beam readout", () => {
 test("unknown context usage never fabricates a percent from branch history", () => {
   const captured = harness();
   const ctx = ctxMock(undefined, captured);
-  ctx.model = { provider: "openai", id: "gpt-5.2" };
+  ctx.model = { provider: "openai", id: "gpt-5.2", contextWindow: 200_000 };
   ctx.sessionManager = {
     getBranch: () =>
       Array.from({ length: 50 }, () => ({
