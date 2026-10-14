@@ -133,7 +133,7 @@ function tankLine(remaining: number | null): HudLine {
   return { text: ` TANK [${"#".repeat(filled)}${"-".repeat(5 - filled)}]`, tone: "cyan" };
 }
 
-function beamLine(input: HudInput, inner: number): HudLine {
+function beamLine(input: HudInput): HudLine {
   const beam = input.beam === null ? "?" : input.beam.toUpperCase();
   return { text: ` BEAM ${beam}  MDL ${input.model ?? "?"}`, tone: "cyan" };
 }
@@ -165,7 +165,7 @@ export function renderHudLines(input: HudInput, width: number): HudLine[] {
   if (!Number.isFinite(width) || width < 4) return [];
   const inner = Math.max(1, width - 2);
   const remaining = remainingFromPercent(input.percent);
-  const content: HudLine[] = [energyLine(remaining), tankLine(remaining), missileReadout(), beamLine(input, inner)];
+  const content: HudLine[] = [energyLine(remaining), tankLine(remaining), missileReadout(), beamLine(input)];
   if (input.hazardLabel !== null) content.push({ text: ` !! ${input.hazardLabel}`, tone: "amber" });
   if (width >= LEGEND_MIN_WIDTH) {
     content.push({ text: " NRG/TANK=CONTEXT LEFT  MSL=NO SOURCE  RADAR=SIM", tone: "dim" });
