@@ -86,6 +86,18 @@ test("destructive command heuristic matches documented patterns only", () => {
   assert.equal(isDestructiveCommand("dd if=/dev/zero of=/dev/sda"), true);
   assert.equal(isDestructiveCommand("mkfs.ext4 /dev/sdb"), true);
   assert.equal(isDestructiveCommand("git push --force-with-lease origin main"), false);
+  assert.equal(isDestructiveCommand('git commit -m "fix; reboot"'), false);
+  assert.equal(isDestructiveCommand('git commit -m "notes; shutdown handler"'), false);
+  assert.equal(isDestructiveCommand('git commit -m "clean; rm -rf build"'), false);
+  assert.equal(isDestructiveCommand('git commit -m "subject\nreboot now"'), false);
+  assert.equal(isDestructiveCommand('git commit -m "drop table users"'), false);
+  assert.equal(isDestructiveCommand('echo "hello; reboot"'), false);
+  assert.equal(isDestructiveCommand("echo 'x | rm -rf /'"), false);
+  assert.equal(isDestructiveCommand("git commit -m 'fix; reboot'"), false);
+  assert.equal(isDestructiveCommand('rm -rf "build dir"'), true);
+  assert.equal(isDestructiveCommand('git push --force origin "main"'), true);
+  assert.equal(isDestructiveCommand('cd /tmp && rm -rf "build dir"'), true);
+  assert.equal(isDestructiveCommand('dd if=/dev/zero of="/dev/sda"'), true);
   assert.equal(isDestructiveCommand('echo "do not truncate this"'), false);
   assert.equal(isDestructiveCommand('git commit -m "reboot the server"'), false);
   assert.equal(isDestructiveCommand("grep -r reboot docs/"), false);

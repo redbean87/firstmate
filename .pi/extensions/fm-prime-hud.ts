@@ -93,10 +93,13 @@ const DESTRUCTIVE_COMMAND_PATTERNS: readonly RegExp[] = [
   /\bdrop\s+(database|table)\b/i,
 ];
 
+const QUOTED_SPAN_PATTERN = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g;
+
 // A deliberately small, documented heuristic list. Its only consequence is a hazard
 // glyph: this extension never blocks the call it matches.
 export function isDestructiveCommand(command: string): boolean {
-  return DESTRUCTIVE_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
+  const unquoted = command.replace(QUOTED_SPAN_PATTERN, " ");
+  return DESTRUCTIVE_COMMAND_PATTERNS.some((pattern) => pattern.test(unquoted));
 }
 
 export interface HudInput {
