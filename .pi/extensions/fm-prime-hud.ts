@@ -77,17 +77,19 @@ export function evaluateHazard(state: HazardState): { kind: HazardKind; label: s
   return { kind: "none", label: null };
 }
 
+const COMMAND_START = String.raw`(?:^|[\n;&|])\s*(?:(?:sudo|doas)\s+)?`;
+
 const DESTRUCTIVE_COMMAND_PATTERNS: readonly RegExp[] = [
-  /\brm\s+-\w*[rf]\w*/,
-  /\bgit\s+push\s+.*(--force\b|-f\b)/,
-  /\bgit\s+reset\s+--hard\b/,
-  /\bgit\s+clean\s+-\w*f/,
-  /\bgit\s+branch\s+-D\b/,
-  /\bgit\s+worktree\s+remove\b/,
-  /\bdd\b.*\bof=/,
-  /\bmkfs/,
-  /\btruncate\b/,
-  /\b(shutdown|reboot|halt)\b/,
+  new RegExp(`${COMMAND_START}rm\\s+-\\w*[rf]\\w*`),
+  new RegExp(`${COMMAND_START}git\\s+push\\s+.*(?:--force(?![\\w-])|-f\\b)`),
+  new RegExp(`${COMMAND_START}git\\s+reset\\s+--hard\\b`),
+  new RegExp(`${COMMAND_START}git\\s+clean\\s+-\\w*f`),
+  new RegExp(`${COMMAND_START}git\\s+branch\\s+-D\\b`),
+  new RegExp(`${COMMAND_START}git\\s+worktree\\s+remove\\b`),
+  new RegExp(`${COMMAND_START}dd\\s+.*\\bof=`),
+  new RegExp(`${COMMAND_START}mkfs`),
+  new RegExp(`${COMMAND_START}truncate\\b`),
+  new RegExp(`${COMMAND_START}(?:shutdown|reboot|halt)\\b`),
   /\bdrop\s+(database|table)\b/i,
 ];
 

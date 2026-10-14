@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavior checks for the Metroid Prime HUD Pi extension (.pi/extensions/fm-prime-hud.ts): honest unknown readouts, tank thresholds, beam fallback, hazard precedence and clearing, visor transformer purity and content preservation, and width truncation at 40, 80, and 160 columns, executed against the colocated node:test suite with the installed Pi packages linked into a fixture directory.
+# Behavior checks for the Metroid Prime HUD Pi extension (.pi/extensions/fm-prime-hud.ts): honest unknown readouts, tank thresholds, beam fallback, hazard precedence and clearing, the destructive-command heuristic's safe and unsafe forms, and width truncation at 40, 80, and 160 columns, executed against the colocated node:test suite with the installed Pi packages linked into a fixture directory.
 # The colocated suite lives in .pi/extensions/test/ because Pi auto-loads every top-level .ts file in .pi/extensions/ as an extension, and the subdirectory is skipped the same way lib/ is (no index entry point).
 set -u
 

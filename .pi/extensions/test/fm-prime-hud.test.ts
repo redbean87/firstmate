@@ -75,8 +75,23 @@ test("context hazard threshold is 85 percent used", () => {
 test("destructive command heuristic matches documented patterns only", () => {
   assert.equal(isDestructiveCommand("rm -rf /tmp/scratch"), true);
   assert.equal(isDestructiveCommand("git push --force origin main"), true);
+  assert.equal(isDestructiveCommand("git push -f origin main"), true);
   assert.equal(isDestructiveCommand("git reset --hard HEAD~3"), true);
   assert.equal(isDestructiveCommand("DROP TABLE users"), true);
+  assert.equal(isDestructiveCommand("truncate -s 0 file.log"), true);
+  assert.equal(isDestructiveCommand("shutdown -h now"), true);
+  assert.equal(isDestructiveCommand("sudo shutdown -h now"), true);
+  assert.equal(isDestructiveCommand("cd /tmp && rm -rf build"), true);
+  assert.equal(isDestructiveCommand("echo hi; reboot"), true);
+  assert.equal(isDestructiveCommand("dd if=/dev/zero of=/dev/sda"), true);
+  assert.equal(isDestructiveCommand("mkfs.ext4 /dev/sdb"), true);
+  assert.equal(isDestructiveCommand("git push --force-with-lease origin main"), false);
+  assert.equal(isDestructiveCommand('echo "do not truncate this"'), false);
+  assert.equal(isDestructiveCommand('git commit -m "reboot the server"'), false);
+  assert.equal(isDestructiveCommand("grep -r reboot docs/"), false);
+  assert.equal(isDestructiveCommand('echo "dd if=x of=y"'), false);
+  assert.equal(isDestructiveCommand('echo "rm -rf /"'), false);
+  assert.equal(isDestructiveCommand('git commit -m "git push --force"'), false);
   assert.equal(isDestructiveCommand("ls -la"), false);
   assert.equal(isDestructiveCommand("echo hello"), false);
   assert.equal(isDestructiveCommand("man rm"), false);
