@@ -52,10 +52,7 @@ else
 fi
 
 TMP_ROOT=$(fm_test_tmproot fm-prime-hud) || exit 1
-cleanup() {
-  fm_test_cleanup
-}
-trap cleanup EXIT
+trap fm_test_cleanup EXIT
 
 cp "$ROOT/.pi/extensions/fm-prime-hud.ts" "$TMP_ROOT/fm-prime-hud.ts" || exit 1
 mkdir -p "$TMP_ROOT/test"
