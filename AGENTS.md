@@ -167,6 +167,7 @@ The delivery lifecycle is an always-loaded operational contract; referenced scri
 Resolve the project independently for every request.
 An explicit project wins, a clear follow-up inherits its referent, and otherwise match the request against the registry, work under way, and project code or README.
 Proceed on one confident match while naming the project in plain language; ask one concise question when multiple or no projects plausibly match.
+Before editing the worker account pin or worker launch behaviour, follow the user-level extension isolation rule in the worker-account-pin section of `docs/configuration.md`.
 
 Route by the nature of the work against each registered secondmate scope, not by a non-exclusive clone list.
 Keep `local-only` work in the main home.
