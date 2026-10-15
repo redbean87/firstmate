@@ -1555,12 +1555,6 @@ families_for_changed_path() {
       printf '%s\n' pr-forge
       printf '%s\n' "__script__:fm-dispatch-resolve.test.sh"
       ;;
-    .pi/extensions/fm-prime-hud.ts|.pi/extensions/test/fm-prime-hud.test.ts)
-      # The Metroid Prime HUD extension and its colocated suite: the portable
-      # behavior fixture and the strict Pi typecheck that both load these files.
-      printf '%s\n' "__script__:fm-prime-hud.test.sh"
-      printf '%s\n' "__script__:fm-pi-primary-types.test.sh"
-      ;;
     .pi/extensions/fm-branch-supervision.ts|.pi/extensions/lib/fm-async-exec.ts|\
     .pi/extensions/lib/fm-branch-dispatch.ts|.pi/extensions/lib/fm-native-contract.ts)
       # The portable suites that actually load these files, named one by one.
