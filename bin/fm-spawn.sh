@@ -229,6 +229,10 @@
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
 #   /updatefirstmate, restart). A raw launch command never satisfies a
 #   deterministic project pin (docs/configuration.md "Crew dispatch profiles").
+#   A pi launch on the guarded local-engine profile is additionally count-and-refused
+#   while another live worker holds that profile's single slot
+#   (config/single-slot-profile; docs/configuration.md "Single-slot launch guard";
+#   an absent or malformed file refuses the pi launch rather than running unguarded).
 #   A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
@@ -3505,25 +3509,49 @@ if [ "$KIND" != secondmate ]; then
   fi
 fi
 
-# Qwen-local single-slot gate (supervision-hardening round 1). The local
-# qwen-local server runs one physical slot (total_slots=1), so a second
-# concurrent worker on its canonical profile would stall behind the first.
-# The canonical profile identifier is the exact model string, carried only by
-# harness pi; provider-ness is inherent in the qwen-local/ prefix. Like the pin
-# refusal above, this is a deterministic count-and-refuse, never a queue: it
-# runs before any endpoint, worktree, or record exists, so a refusal costs
-# nothing to unwind. Secondmates are NOT exempt, because the slot constraint is
-# physical. A matching record only blocks while its agent is actually LIVE: a
-# retained row for an exited agent is agent-free and must not deadlock recovery
-# behind a holder that no longer exists. The liveness verdict comes from the
-# same backend agent-state reader supervision uses (bin/fm-backend.sh's
-# fm_backend_agent_alive), never from the record's mere presence. A relaunch of
-# the same task id must not self-block, so the task's own record is skipped; it
-# is the only exemption.
-spawn_refuse_if_qwen_local_slot_taken() {
+# Single-slot launch gate (supervision-hardening round 1, retargeted to the
+# engine in use 2026-10-15). The AI server's local engine serves one request
+# at a time - it occupies essentially all of that box's memory, so it is
+# strictly one run at a time (data/captain.md, captain 2026-10-14) - and a
+# second concurrent worker on the guarded profile must be refused. The
+# guarded profile identifier is home policy data, read from
+# config/single-slot-profile (one exact model string, same form --model
+# takes), never a tracked literal, so the next engine switch is a
+# configuration edit rather than a code edit; docs/configuration.md
+# "Single-slot launch guard" owns the file and its fail-toward-refusing
+# default. Like the pin refusal above, this is a deterministic
+# count-and-refuse, never a queue: it runs before any endpoint, worktree, or
+# record exists, so a refusal costs nothing to unwind. Secondmates are NOT
+# exempt, because the slot constraint is physical. A matching record only
+# blocks while its agent is actually LIVE: a retained row for an exited agent
+# is agent-free and must not deadlock recovery behind a holder that no longer
+# exists. The liveness verdict comes from the same backend agent-state reader
+# supervision uses (bin/fm-backend.sh's fm_backend_agent_alive), never from
+# the record's mere presence. A relaunch of the same task id must not
+# self-block, so the task's own record is skipped; it is the only exemption.
+# The configuration fails towards refusing: an absent, unreadable, empty, or
+# malformed config/single-slot-profile stops this launch instead of running
+# the gate unverifiable, because a guard that cannot read its target must
+# refuse rather than proceed.
+spawn_refuse_if_single_slot_taken() {
   local holder holder_id holder_harness holder_model holder_backend holder_target
+  local slot_profile slot_profile_present
   [ "$HARNESS" = pi ] || return 0
-  [ "$MODEL" = "qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs" ] || return 0
+  if ! slot_profile_present=$(fm_config_source_present "$CONFIG/single-slot-profile"); then
+    exit 1
+  fi
+  if [ "$slot_profile_present" != 1 ] || [ ! -f "$CONFIG/single-slot-profile" ] || [ ! -r "$CONFIG/single-slot-profile" ]; then
+    echo "error: $ID cannot launch: config/single-slot-profile must be a readable regular file holding the guarded profile identifier (one exact model string), because the local engine runs a single slot and an unverifiable guard refuses to launch" >&2
+    exit 1
+  fi
+  slot_profile=$(cat "$CONFIG/single-slot-profile") || exit 1
+  case "$slot_profile" in
+  '' | *[[:space:][:cntrl:]]* | '#'*)
+    echo "error: $ID cannot launch: config/single-slot-profile must hold one profile identifier without whitespace or comment markers (found '${slot_profile:-<empty>}')" >&2
+    exit 1
+    ;;
+  esac
+  [ "$MODEL" = "$slot_profile" ] || return 0
   for holder in "$STATE"/*.meta; do
     [ -f "$holder" ] || continue
     holder_id=$(basename "$holder" .meta)
@@ -3531,15 +3559,15 @@ spawn_refuse_if_qwen_local_slot_taken() {
     holder_harness=$(fm_meta_get "$holder" harness)
     holder_model=$(fm_meta_get "$holder" model)
     [ "$holder_harness" = pi ] || continue
-    [ "$holder_model" = "qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs" ] || continue
+    [ "$holder_model" = "$slot_profile" ] || continue
     holder_backend=$(fm_backend_of_meta "$holder")
     holder_target=$(fm_backend_target_of_meta "$holder")
     [ "$(fm_backend_agent_alive "$holder_backend" "$holder_target")" = alive ] || continue
-    echo "error: $ID cannot launch: the qwen-local server runs a single slot (total_slots=1) and $holder_id is live on that profile; re-dispatch $ID after $holder_id lands" >&2
+    echo "error: $ID cannot launch: $slot_profile runs a single slot (one request at a time) and $holder_id is live on that profile; re-dispatch $ID after $holder_id lands" >&2
     exit 1
   done
 }
-spawn_refuse_if_qwen_local_slot_taken
+spawn_refuse_if_single_slot_taken
 
 BRIEF_DIR_REAL=$(cd "$(dirname "$BRIEF")" && pwd -P)
 BRIEF_REAL="$BRIEF_DIR_REAL/$(basename "$BRIEF")"

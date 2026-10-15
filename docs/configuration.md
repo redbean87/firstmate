@@ -1136,6 +1136,20 @@ A malformed or unreadable file refuses every fresh ship or scout spawn until it 
 Firstmate cannot see which part of a worker's life uses the resource, so the number bounds whole workers from launch to handoff, and the tightest resource every worker needs should decide it.
 [`bin/fm-project-capacity-lib.sh`](../bin/fm-project-capacity-lib.sh) owns the file format, what holds a place, and why concurrent spawns cannot both take the last one.
 
+## Single-slot launch guard (config/single-slot-profile)
+
+The local AI server runs one engine that serves exactly one request at a time, so `bin/fm-spawn.sh` refuses a second concurrent launch on its guarded profile with a deterministic, nonzero refusal - never a queue - before any endpoint, worktree, or record exists.
+Secondmates get no exemption, because the constraint is physical, and a recorded holder counts only while its agent is actually live, judged by the same backend reader supervision uses; a relaunch of the holding task itself is the one exemption, so a task never blocks its own replacement.
+
+```text
+local-provider/model-id
+```
+
+The guarded profile identifier is machine-local policy data, so the local, gitignored `config/single-slot-profile` holds it instead of tracked code: one exact model string in the same form `--model` takes, and pointing the guard at a different engine is an edit to this file rather than a code change.
+The file must be a readable regular file holding that one identifier; an absent, unreadable, empty, whitespace-containing, or comment-prefixed value refuses the pi launch rather than running the guard unverifiable, because the guarded engine cannot survive two requests at once and a guard that cannot read its target must refuse instead of proceeding.
+The guard applies to `pi` launches only and matches the identifier exactly against the launching model and each live recorded holder, so no other harness or model is affected.
+New secondmate homes inherit the file with the rest of the home's local configuration ([`bin/fm-config-inherit-lib.sh`](../bin/fm-config-inherit-lib.sh)), so every home that launches workers on that engine carries the same guarded profile.
+
 ## Crew dispatch profiles (config/crew-dispatch.json)
 
 `config/crew-dispatch.json` is an optional local, gitignored file containing natural-language rules that firstmate reads before dispatching a crewmate or scout.
