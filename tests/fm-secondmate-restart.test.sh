@@ -138,6 +138,9 @@ new_case() {
   local dir="$TMP_ROOT/$1-$RANDOM"
   mkdir -p "$dir/home/state" "$dir/home/data" "$dir/home/config" "$dir/fake"
   printf 'claude\n' > "$dir/home/config/secondmate-harness"
+  # A well-formed test-only single-slot guard profile, so pi restarts satisfy
+  # the gate's fail-toward-refusing precondition.
+  printf '%s\n' 'fixture/single-slot-model' > "$dir/home/config/single-slot-profile"
   : > "$dir/fake/literal"
   : > "$dir/fake/keys"
   : > "$dir/fake/rings"
