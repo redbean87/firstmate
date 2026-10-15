@@ -1178,7 +1178,6 @@ The `projects` object maps an exact project name to the one profile that project
 Both are exact-match on the project's basename and free of natural-language matching, so the pin cannot be skipped or guessed.
 An absent mapping leaves dispatch on the rules path above; a present mapping is enforced structurally by `bin/fm-spawn.sh` at initial spawn and by `bin/fm-control.sh` at relaunch, which refuse a contradicting harness or model before anything is stopped or launched, never substitute another profile, and never fall back to firstmate executing the work itself.
 There is no per-task override flag: a project that needs a different worker class is an explicit edit to this mapping.
-The standing policy is `projectDefault` on the configured OpenCode profile and a pinned `expo-bowling-journal` entry on Pi with the local Qwen model.
 
 **Required and optional fields**
 
