@@ -1,0 +1,27 @@
+### lab home: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.8dVNgc (disposable, removed at end)
+
+### S1a. home config seeded from the tracked example docs/examples/crew-dispatch.json
+projectDefault now: {"harness":"codex","model":"gpt-5.5"}
+projects key present: false
+
+$ FM_HOME=$LAB FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_NETWORK=skip bin/fm-bootstrap.sh   # real bootstrap config path
+(silent: no CREW_DISPATCH diagnostic, tracked example accepted)
+
+### S1b. real pin engine reads the same home config
+expo-bowling-journal -> codex	gpt-5.5	
+some-other-project   -> codex	gpt-5.5	
+
+### S2. fleet policy lives in the HOME config and drives the same engine
+expo-bowling-journal -> pi	qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs	
+some-other-project   -> opencode	opencode-go/muse-spark-1.3-contributor	
+
+### S3. adversarial: no home config -> tracked files must not supply policy
+rc=1 out=[]
+
+### S3b. adversarial: malformed home policy is refused, not dispatched around
+rc=2 out=[error: config/crew-dispatch.json project pin for 'some-project' names no harness]
+
+
+### teardown
+$ rm -rf <lab>
+-> no fm-lab.* directories remain under TMPDIR
