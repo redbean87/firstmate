@@ -31,9 +31,6 @@ cp "$ROOT/.pi/extensions/fm-branch-supervision.ts" "$TMP_ROOT/fm-branch-supervis
 cp "$ROOT/.pi/extensions/fm-calm.ts" "$TMP_ROOT/fm-calm.ts"
 cp "$ROOT/.pi/extensions/fm-primary-pi-watch.ts" "$TMP_ROOT/fm-primary-pi-watch.ts"
 cp "$ROOT/.pi/extensions/fm-primary-turnend-guard.ts" "$TMP_ROOT/fm-primary-turnend-guard.ts"
-cp "$ROOT/.pi/extensions/fm-prime-hud.ts" "$TMP_ROOT/fm-prime-hud.ts"
-mkdir -p "$TMP_ROOT/test"
-cp "$ROOT/.pi/extensions/test/fm-prime-hud.test.ts" "$TMP_ROOT/test/fm-prime-hud.test.ts"
 cp "$ROOT/.pi/extensions/lib/fm-branch-dispatch.ts" "$TMP_ROOT/lib/fm-branch-dispatch.ts"
 cp "$ROOT/.pi/extensions/lib/fm-native-contract.ts" "$TMP_ROOT/lib/fm-native-contract.ts"
 cp "$ROOT/.pi/extensions/lib/fm-async-exec.ts" "$TMP_ROOT/lib/fm-async-exec.ts"
@@ -67,7 +64,7 @@ cat > "$TMP_ROOT/tsconfig.json" <<'JSON'
     "target": "ES2022",
     "types": ["node"]
   },
-  "include": ["*.ts", "lib/*.ts", "test/*.ts"]
+  "include": ["*.ts", "lib/*.ts"]
 }
 JSON
 
