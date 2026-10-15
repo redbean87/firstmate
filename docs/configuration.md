@@ -962,8 +962,8 @@ A home that authenticates Claude through environment credentials on purpose shou
 ### User-level extension isolation
 
 Fleet behaviour must never depend on auto-discovery from the runtime's user-level extension directory (`~/.pi/agent/extensions/`), which remains a personal-customisation surface.
-Today's workers inherit that directory only because three unrelated facts coincide, each checkable at its own source: the runtime's default agent directory is `~/.pi/agent` (in the installed runtime's `dist/config.js`), this home's `config/pi-account` pin resolves to that same directory and is exported to the launch as `PI_CODING_AGENT_DIR` ([`bin/fm-spawn.sh`](../bin/fm-spawn.sh), [`bin/fm-worker-account-lib.sh`](../bin/fm-worker-account-lib.sh)), and that directory's `settings.json` names no explicit `extensions` array, so loading is pure auto-discovery.
-Any extension required by a worker must be loaded through an explicit path on the launch, as with the tracked model-failover router and busy-state extension.
+That directory loads for every worker whether or not the pin exists: the runtime's agent directory defaults to `~/.pi/agent` when `PI_CODING_AGENT_DIR` is unset (in the installed runtime's `dist/config.js`), and this home's `config/pi-account` pin resolves to that same directory and is exported to the launch as `PI_CODING_AGENT_DIR` ([`bin/fm-spawn.sh`](../bin/fm-spawn.sh), [`bin/fm-worker-account-lib.sh`](../bin/fm-worker-account-lib.sh)); either fact alone is sufficient, and only an explicit exclusion or a different agent directory changes what loads.
+No extension required by a worker may be supplied by that user-level directory; supply it from an explicit launch path instead, as with the tracked model-failover router and busy-state extension.
 This rule is enforced by review, not by a runtime guard: the runtime's extension loader collects a bad extension's error and keeps running instead of failing the session, so no code refuses a violation.
 
 ### Failures, reporting, and inheritance
