@@ -394,6 +394,11 @@ Each record includes:
 - Lock identity before and after close.
 - Successor disposition.
 
+The Pi extension appends one additional tab-separated record to the same file when a restored pending reuses an already-live verified successor instead of starting a new arm (`reason=reused-successor`).
+`arm_pid` names the predecessor arm, `watcher_pid` the predecessor's own watcher when its close record is already present, `successor=reused:<pid>` names the reused successor's verified watcher, and `lock_before`/`lock_after` name the holder convergence left in place.
+The predecessor's own close record keeps `successor=none`; this link record beside it is what makes the convergence explicit, so a reused successor never reads as a supervision gap.
+The record keeps the same field order and field cleaning as the arm layer's records and takes the same ledger lock through `bin/fm-wake-lib.sh`, and it is best-effort: a ledger it cannot write never stalls the live successor it would have described.
+
 The file is size-capped through `FM_WATCH_CYCLE_LOG_MAX_BYTES` and `FM_WATCH_CYCLE_LOG_KEEP_LINES`.
 `state/.watch-triage.log` remains only the watcher's bounded absorbed-wake debug log and carries no lifecycle semantics.
 
