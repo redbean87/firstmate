@@ -1,0 +1,6 @@
+ok - Pi reuse of a live successor writes the predecessor-to-reused-successor cycle-ledger record
+=== RAW CYCLE LEDGER (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-pi-watch-extension.081ZYC/pi-reuse-link-home/state/.watch-cycle-exits.log) ===
+arm_pid=28222	watcher_pid=8888	origin=started	started_at=1700000000	ended_at=1700000099	exit_code=0	signal=none	reason=actionable-stale	beacon_age=1	lock_before=pid:none|identity:none	lock_after=pid:none|identity:none	successor=none
+arm_pid=28229	watcher_pid=9999	origin=started	started_at=1700000000	ended_at=1700000099	exit_code=0	signal=none	reason=actionable-stale	beacon_age=1	lock_before=pid:none|identity:none	lock_after=pid:none|identity:none	successor=none
+arm_pid=28229	watcher_pid=9999	origin=reused	started_at=1700000000	ended_at=1792182220	exit_code=none	signal=none	reason=reused-successor	beacon_age=1	lock_before=pid:4242|identity:Fri Oct 16 08:26:31 2026	lock_after=pid:4242|identity:Fri Oct 16 08:26:31 2026	successor=reused:777001
+=== END RAW CYCLE LEDGER ===

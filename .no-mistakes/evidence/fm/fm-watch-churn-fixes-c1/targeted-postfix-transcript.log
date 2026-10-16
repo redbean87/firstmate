@@ -1,0 +1,37 @@
+# Targeted post-fix validation - 2026-10-16T20:19:26Z
+# commit add7243e2e2df2d9403f1ca25709a3cf03f7bcfc
+
+## fm-pi-watch-extension.test.sh
+$ FM_TEST_ONLY=test_pi_reused_live_successor_links_the_cycle_ledger bash tests/fm-pi-watch-extension.test.sh
+ok - Pi reuse of a live successor writes the predecessor-to-reused-successor cycle-ledger record
+exit=0
+
+$ FM_TEST_ONLY=test_concurrent_reuse_records_produce_one_ledger_row bash tests/fm-pi-watch-extension.test.sh
+ok - two concurrent reuse records for one predecessor serialize into exactly one ledger row
+exit=0
+
+## fm-watch-triage.test.sh
+$ FM_TEST_ONLY=test_declared_wait_throttle_survives_a_busy_reading bash tests/fm-watch-triage.test.sh
+ok - a declared wait's first-sight throttle survives every pane reading, wakes once on a new declaration, and never wedge-escalates
+exit=0
+
+$ FM_TEST_ONLY=test_gone_endpoint_reports_once_instead_of_escalating_forever bash tests/fm-watch-triage.test.sh
+ok - a record whose endpoint is dead or missing reports itself once and is never re-escalated
+exit=0
+
+$ FM_TEST_ONLY=test_live_and_unproven_endpoints_still_wedge_escalate bash tests/fm-watch-triage.test.sh
+ok - a live wedged agent, an unattributable one, and an unreadable endpoint escalate unchanged
+exit=0
+
+$ FM_TEST_ONLY=test_nonterminal_stale_paused_absorbed_then_resurfaced bash tests/fm-watch-triage.test.sh
+ok - a declared pause is absorbed on first sight, then re-surfaced as a recheck past the threshold, never wedge-escalated
+exit=0
+
+$ FM_TEST_ONLY=test_live_declared_wait_churn_honors_the_resurface_throttle bash tests/fm-watch-triage.test.sh
+ok - a parked live worker surfaces once, absorbs pane churn for the whole re-surface window, then re-surfaces when it elapses
+exit=0
+
+$ FM_TEST_ONLY=test_absorbed_replacement_wait_does_not_inherit_the_old_throttle bash tests/fm-watch-triage.test.sh
+ok - absorbed paused and captain-held replacements each start their own re-surface cadence
+exit=0
+

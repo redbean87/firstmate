@@ -1,0 +1,1 @@
+arm_pid=9508	watcher_pid=9999	origin=reused	started_at=1700000000	ended_at=1792181491	exit_code=none	signal=none	reason=reused-successor	beacon_age=0	lock_before=pid:4242|identity:Fri Oct 16 08:26:31 2026	lock_after=pid:4242|identity:Fri Oct 16 08:26:31 2026	successor=reused:777001

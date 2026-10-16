@@ -1,0 +1,8 @@
+not ok - Pi reuse must link the predecessor to its reused live successor in the cycle ledger (exit 1): file:///Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M532VV7BBDZ45H7H4RA9M0AX/[eval1]:69
+  if (!record.includes(part)) throw new Error(`reuse record is missing ${JSON.stringify(part)}: ${record}`);
+                                    ^
+
+Error: reuse record is missing "\tsuccessor=reused:777001": arm_pid=29223	watcher_pid=9999	origin=reused	started_at=1700000000	ended_at=1792181934	exit_code=none	signal=none	reason=reused-successor	beacon_age=0	lock_before=pid:4242|identity:Fri Oct 16 08:26:31 2026	lock_after=pid:4242|identity:Fri Oct 16 08:26:31 2026	successor=reused:29230
+    at file:///Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M532VV7BBDZ45H7H4RA9M0AX/[eval1]:69:37
+
+Node.js v24.21.0
