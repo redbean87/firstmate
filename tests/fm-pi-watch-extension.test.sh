@@ -5211,12 +5211,14 @@ EOF
 # readiness line, so pending 2 for that close is queued while the restore is
 # still running, the restore retires the unready child and retries on a third
 # arm that verifies and stays live; pending 1 then delivers, and pending 2's
-# restore finds that third arm already live - the reuse. Pinned: exactly one
-# record, carrying the predecessor row's watcher identity and start time, the
-# reused watcher, the live lock holder, and the full ledger record shape; the
-# predecessor's own close record still reading successor=none; exactly three
-# arm spawns (one bounded retry, no fourth arm); both pendings delivered; and
-# the session lock untouched.
+# restore finds that third arm already live - the reuse. The third arm's status
+# stream announces a started watcher and then a re-attached watcher, so the link
+# must name the arm's current verified watcher (the last established line), not
+# the stale first sight. Pinned: exactly one record, carrying the predecessor
+# row's watcher identity and start time, the reused watcher, the live lock
+# holder, and the full ledger record shape; the predecessor's own close record
+# still reading successor=none; exactly three arm spawns (one bounded retry, no
+# fourth arm); both pendings delivered; and the session lock untouched.
 test_pi_reused_live_successor_links_the_cycle_ledger() {
   local repo home plugin log stop cycle out status
   repo="$TMP_ROOT/pi-reuse-link-root"
@@ -5259,7 +5261,7 @@ case "$count" in
     exit 0
     ;;
   3)
-    printf 'watcher: started pid=%s (beacon fresh) recovery-generation=fixture-generation\n' "$$"
+    printf 'watcher: started pid=%s (beacon fresh) recovery-generation=fixture-generation\nwatcher: attached pid=777001 (beacon 1s)\n' "$$"
     trap 'exit 0' TERM INT
     while [ ! -e "$FM_STOP_FILE" ]; do sleep 0.02; done
     ;;
@@ -5306,7 +5308,7 @@ if (!/predecessor=[0-9]+/.test(armRows[1]) || !/predecessor=[0-9]+/.test(armRows
 }
 if (deliveries < 2) throw new Error(`both pendings must deliver; saw ${deliveries} delivery(ies)`);
 const predecessorArm = armRows[1].split(" ")[0].replace("arm=", "");
-const reusedArm = armRows[2].split(" ")[0].replace("arm=", "");
+const reusedWatcherPid = "777001";
 const cycleRows = lines(process.env.FM_CYCLE_LOG);
 const predecessorClose = cycleRows.filter((row) => row.startsWith(`arm_pid=${predecessorArm}\t`) && row.includes("reason=actionable-stale"));
 if (predecessorClose.length !== 1) {
@@ -5332,7 +5334,7 @@ const expectParts = [
   "\tbeacon_age=",
   "\tlock_before=pid:4242|identity:Fri Oct 16 08:26:31 2026\t",
   "\tlock_after=pid:4242|identity:Fri Oct 16 08:26:31 2026\t",
-  `\tsuccessor=reused:${reusedArm}`,
+  `\tsuccessor=reused:${reusedWatcherPid}`,
 ];
 for (const part of expectParts) {
   if (!record.includes(part)) throw new Error(`reuse record is missing ${JSON.stringify(part)}: ${record}`);

@@ -1233,7 +1233,7 @@ export default function (pi: ExtensionAPI) {
     };
     const observeEstablishedArm = (): void => {
       const combined = `${stdout}\n${stderr}`;
-      const established = combined.match(/^watcher: (?:started|attached) pid=([0-9]+)/m);
+      const established = [...combined.matchAll(/^watcher: (?:started|attached) pid=([0-9]+)/gm)].pop();
       if (established) armWatcherPid.set(armChild, established[1]);
       const recovery = combined.match(/^watcher: started pid=([0-9]+).* recovery-generation=([A-Za-z0-9._-]+)$/m);
       if (recovery) armRecovery.set(armChild, { watcherPid: recovery[1], generation: recovery[2] });
