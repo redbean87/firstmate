@@ -5393,7 +5393,7 @@ race_reuse_rows() {  # <cycle-log>
 
 test_concurrent_reuse_records_produce_one_ledger_row() {
   local dir repo home stop cycle pid_a pid_b holder i tag
-  local arm_a arm_b snapshot waiting holder_visible
+  local arm_a snapshot waiting holder_visible
   dir="$TMP_ROOT/pi-reuse-race"; repo="$dir/repo"; home="$dir/home"
   stop="$dir/stop"
   cycle="$home/state/.watch-cycle-exits.log"
