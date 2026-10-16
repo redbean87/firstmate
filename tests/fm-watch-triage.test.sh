@@ -5108,6 +5108,115 @@ test_busy_declared_pause_is_rechecked_not_wedge_escalated() {
   pass "a busy pane under a declared pause is rechecked on the long cadence, and lifting the pause restores the wedge escalation"
 }
 
+# --- the declared-wait first-sight throttle is scoped to the DECLARATION, -----
+# never to a pane reading: the watcher-churn predicate fix. The reset sites
+# that clear per-pane bookkeeping once a pane reading turns busy used to take
+# clear_pause_tracking whenever the second identical busy hash landed (or the
+# first new busy hash at the changed-hash site), wiping the declaration-scoped
+# .paused-resurfaced-<key> marker while the declaration itself stood. Every
+# later idle sighting under that SAME declaration then re-fired firstmate: a
+# new pane reading repeatedly reopened the first-sight alarm. After the fix
+# only the hash-scoped half clears, and this test pins all three directions:
+# the armed throttle survives both busy reset sites, the idle return under the
+# unchanged declaration is absorbed (with the keep-alive triage line, no
+# wedge timer), and the first sight of a NEW declaration still wakes exactly
+# once. A dead agent with no declaration never enters these declared-wait
+# branches - its detection and escalation stay pinned by
+# test_gone_endpoint_reports_once_instead_of_escalating_forever and
+# test_live_and_unproven_endpoints_still_wedge_escalate.
+# One watcher round against the fixture below, armed the way a supervision turn
+# re-arms after a handled wake: <mode> exit requires the round to surface and
+# exit; absorb requires it to survive whole poll cycles - enough for a changed
+# pane hash to be counted stable, classified, and either absorbed or surfaced.
+parked_flap_round() {  # <state> <fakebin> <out> <capture> <window> exit|absorb
+  local state=$1 fakebin=$2 out=$3 capture=$4 window=$5 mode=$6 pid cycles=0
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture" \
+    FM_FAKE_CREW_STATE='state: paused · source: status-log · parked' \
+    FM_WATCH_HANDLING_SUCCESSOR=1 \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" \
+    FM_PAUSE_RESURFACE_SECS=999 FM_STALE_ESCALATE_SECS=999 FM_BUSY_TURN_MAX_SECS=999 \
+    FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    "$WATCH" >> "$out" &
+  pid=$!
+  if [ "$mode" = exit ]; then
+    wait_for_exit "$pid" 100 || { reap "$pid"; return 1; }
+    return 0
+  fi
+  while [ "$cycles" -lt 4 ]; do
+    wait_poll_cycle "$state" "$pid" 300 || { reap "$pid"; return 1; }
+    cycles=$((cycles + 1))
+  done
+  reap "$pid"
+  return 0
+}
+
+test_declared_wait_throttle_survives_a_busy_reading() {
+  local dir state fakebin out capture_file statusf window key sig throttle declaration wakes
+  dir=$(make_case declared-busy-reading); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; statusf="$state/parked.status"
+  window="test:fm-parked"
+  printf 'window=%s\nkind=ship\nharness=pi\n' "$window" > "$state/parked.meta"
+  printf 'paused: waiting on the validation run to finish\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-parked_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  throttle="$state/.paused-resurfaced-$key"
+  declaration="declared:$(status_observed_signature "$statusf")"
+
+  # Phase 1: the first sight of a parked-but-live worker still wakes, arming
+  # the declaration-scoped throttle.
+  printf 'parked, elapsed 1s' > "$capture_file"
+  printf '%s' "$(hash_text 'parked, elapsed 1s')" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  parked_flap_round "$state" "$fakebin" "$out" "$capture_file" "$window" exit \
+    || fail "first sight of the parked declared wait did not surface: $(cat "$out")"
+  grep -Fx "stale: $window" "$out" >/dev/null || fail "the first sight lost its plain stale identity"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the first sight"
+  [ "$(cat "$throttle" 2>/dev/null || true)" = "$declaration" ] \
+    || fail "the first sight did not arm the declaration-scoped throttle: '$(cat "$throttle" 2>/dev/null || true)'"
+  [ -e "$state/.paused-$key" ] || fail "the first sight recorded no declared-pause flag"
+
+  # Phase 2: the pane turns BUSY under the SAME declaration - one new hash,
+  # then the second identical busy hash reaching the stable-hash reset site.
+  # Neither reading may clear the declaration-scoped throttle.
+  record_pi_busy "$state" parked
+  printf 'Working... (12.3s) lavish-axi poll' > "$capture_file"
+  parked_flap_round "$state" "$fakebin" "$out" "$capture_file" "$window" absorb \
+    || fail "the watcher did not supervise through the busy reading: $(cat "$out")"
+  [ "$(cat "$throttle" 2>/dev/null || true)" = "$declaration" ] \
+    || fail "a busy pane reading cleared the declaration-scoped throttle: '$(cat "$throttle" 2>/dev/null || true)'"
+  [ -e "$state/.paused-$key" ] || fail "a busy pane reading cleared the declared-pause flag"
+  [ ! -s "$state/.wake-queue" ] || fail "the busy reading queued a wake: $(cat "$state/.wake-queue")"
+
+  # Phase 3: the pane returns to idle with a new hash under the SAME
+  # declaration - absorbed with the keep-alive triage line, not re-fired, and
+  # no wedge timer.
+  rm -f "$state/parked.busy-state" "$state/parked.busy-gen"
+  printf 'parked, elapsed 2s' > "$capture_file"
+  parked_flap_round "$state" "$fakebin" "$out" "$capture_file" "$window" absorb \
+    || fail "the watcher did not supervise through the idle return: $(cat "$out")"
+  [ ! -s "$state/.wake-queue" ] \
+    || fail "a new pane reading under an unchanged declaration re-fired: $(cat "$state/.wake-queue")"
+  grep -F 'absorbed non-terminal stale (declared wait' "$state/.watch-triage.log" >/dev/null \
+    || fail "the idle return was not absorbed as an unchanged declaration: $(tail -5 "$state/.watch-triage.log" 2>/dev/null)"
+  [ "$(cat "$throttle" 2>/dev/null || true)" = "$declaration" ] \
+    || fail "the absorbed idle return lost the declaration-scoped throttle"
+  [ ! -e "$state/.stale-since-$key" ] || fail "the declared absorb started a wedge timer"
+  [ ! -e "$state/.wedge-escalations-$key" ] || fail "the declared absorb incremented a wedge count"
+
+  # Phase 4: the first sight of a NEW declaration still wakes - its signature
+  # no longer matches the kept marker - exactly once, on the plain identity.
+  printf 'paused: waiting on the replacement validation run\n' >> "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-parked_status"
+  printf 'parked, elapsed 3s' > "$capture_file"
+  parked_flap_round "$state" "$fakebin" "$out" "$capture_file" "$window" exit \
+    || fail "the first sight of a new declaration did not wake: $(cat "$out")"
+  wakes=$(awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w && $5 == "stale: " w { n++ } END { print n + 0 }' \
+    "$state/.wake-queue" 2>/dev/null || echo 0)
+  [ "$wakes" -eq 1 ] || fail "the new declaration produced $wakes bare stale wakes instead of exactly one: $(cat "$state/.wake-queue")"
+  ack_stopped_cycle "$state" || fail "could not acknowledge the new declaration's wake"
+  pass "a declared wait's first-sight throttle survives every pane reading, wakes once on a new declaration, and never wedge-escalates"
+}
+
 # --- declared pause + busy pane + AWAY MODE: the bound must hand off, not decorate
 # Away mode is daemon-owned: the watcher reverts to one-shot and lets the daemon
 # classify. The busy-turn bound used to be the one stale path that ignored that,
@@ -6694,6 +6803,7 @@ test_busy_pane_native_progress_resets_age
 test_busy_pane_repeated_escalation_reaches_demand_deep_inspection
 test_busy_pane_default_turn_age_bound_is_3600s
 test_busy_declared_pause_is_rechecked_not_wedge_escalated
+test_declared_wait_throttle_survives_a_busy_reading
 test_afk_busy_declared_pause_hands_off_plain_stale
 test_afk_busy_declared_pause_ticking_pane_hands_off_once
 test_nonterminal_stale_not_working_surfaced

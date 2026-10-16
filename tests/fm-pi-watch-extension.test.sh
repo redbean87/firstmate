@@ -40,6 +40,12 @@ install_pi_watch_extension_fixture() {
   mkdir -p "$repo/bin"
   cp "$ROOT/bin/fm-operational-input.sh" "$repo/bin/fm-operational-input.sh"
   chmod +x "$repo/bin/fm-operational-input.sh"
+  # The reuse-link case below exercises the extension's cycle-ledger write,
+  # which takes the real ledger lock by sourcing bin/fm-wake-lib.sh exactly as
+  # bin/fm-watch-arm.sh does, so the fixture repo carries that library and its
+  # path-helper dependency too.
+  cp "$ROOT/bin/fm-wake-lib.sh" "$repo/bin/fm-wake-lib.sh"
+  cp "$ROOT/bin/fm-path-lib.sh" "$repo/bin/fm-path-lib.sh"
   cat > "$repo/node_modules/@earendil-works/pi-coding-agent/package.json" <<'JSON'
 {"name":"@earendil-works/pi-coding-agent","type":"module","exports":"./index.js"}
 JSON
@@ -5194,6 +5200,425 @@ EOF
   pass "OpenCode healthy arm output does not suppress the turn-end guard"
 }
 
+# Overlapping-arm convergence: when a restored pending finds an already-live
+# verified successor, startArm returns unchanged-ok without starting another arm,
+# so no successor arm ever runs its in-place predecessor mark and the
+# predecessor's close record keeps successor=none forever. The extension must
+# append its own predecessor-to-reused-successor record, so that convergence is
+# explicit in the cycle ledger and can never be read as a supervision gap.
+# Fixture choreography: the initial arm closes actionable (pending 1); its
+# restore starts a successor that publishes an actionable close WITHOUT a
+# readiness line, so pending 2 for that close is queued while the restore is
+# still running, the restore retires the unready child and retries on a third
+# arm that verifies and stays live; pending 1 then delivers, and pending 2's
+# restore finds that third arm already live - the reuse. The third arm's status
+# stream announces a started watcher and then a re-attached watcher, so the link
+# must name the arm's current verified watcher (the last established line), not
+# the stale first sight. Pinned: exactly one record, carrying the predecessor
+# row's watcher identity and start time, the reused watcher, the live lock
+# holder, and the full ledger record shape; the predecessor's own close record
+# still reading successor=none; exactly three arm spawns (one bounded retry, no
+# fourth arm); both pendings delivered; and the session lock untouched.
+test_pi_reused_live_successor_links_the_cycle_ledger() {
+  local repo home plugin log stop cycle out status
+  repo="$TMP_ROOT/pi-reuse-link-root"
+  home="$TMP_ROOT/pi-reuse-link-home"
+  log="$TMP_ROOT/pi-reuse-link-arm.log"
+  stop="$TMP_ROOT/pi-reuse-link.stop"
+  cycle="$home/state/.watch-cycle-exits.log"
+  mkdir -p "$repo/bin" "$home/state" "$home/config"
+  install_pi_watch_extension_fixture "$repo"
+  plugin="$repo/.pi/extensions/fm-primary-pi-watch.ts"
+  # The lock holder and beacon the reuse record must name: seeded before the
+  # run so the record's identity fields are deterministic to assert.
+  mkdir -p "$home/state/.watch.lock"
+  printf '4242\n' > "$home/state/.watch.lock/pid"
+  printf 'Fri Oct 16 08:26:31 2026\n' > "$home/state/.watch.lock/pid-identity"
+  : > "$home/state/.last-watcher-beat"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --handling-delivered ]; then
+  printf 'confirmed generation=%s watcher=%s\n' "$2" "$4" >> "${FM_ARM_LOG:?}"
+  exit 0
+fi
+printf 'arm=%s predecessor=%s\n' "$$" "${FM_WATCH_PREDECESSOR_ARM_PID:-none}" >> "${FM_ARM_LOG:?}"
+count=$(grep -c '^arm=' "$FM_ARM_LOG")
+append_close_row() {
+  printf 'arm_pid=%s\twatcher_pid=%s\torigin=started\tstarted_at=1700000000\tended_at=1700000099\texit_code=0\tsignal=none\treason=actionable-stale\tbeacon_age=1\tlock_before=pid:none|identity:none\tlock_after=pid:none|identity:none\tsuccessor=none\n' "$1" "$2" >> "${FM_CYCLE_LOG:?}"
+}
+case "$count" in
+  1)
+    printf 'watcher: started pid=%s (beacon fresh) recovery-generation=fixture-generation\n' "$$"
+    printf 'signal: synthetic actionable close\n'
+    append_close_row "$$" 8888
+    exit 0
+    ;;
+  2)
+    # No readiness line: the restore treats this child as unready and retires
+    # it, but its actionable close still queues pending 2 mid-restore.
+    printf 'signal: second actionable close\n'
+    append_close_row "$$" 9999
+    exit 0
+    ;;
+  3)
+    printf 'watcher: started pid=%s (beacon fresh) recovery-generation=fixture-generation\nwatcher: attached pid=777001 (beacon 1s)\n' "$$"
+    trap 'exit 0' TERM INT
+    while [ ! -e "$FM_STOP_FILE" ]; do sleep 0.02; done
+    ;;
+esac
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$log" FM_STOP_FILE="$stop" FM_CYCLE_LOG="$cycle" FM_PI_ARM_READY_TIMEOUT_MS="$ARM_READY_TIMEOUT_MS" FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_WATCH_REARM_RETRY_LIMIT=2 node --input-type=module 2>&1 <<'EOF'
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const lines = (file) => {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8").split("\n").filter((line) => line.length > 0);
+};
+let tool = null;
+let deliveries = 0;
+const pi = {
+  on() {},
+  registerCommand() {},
+  registerTool(candidate) {
+    if (candidate.name === "fm_watch_arm_pi") tool = candidate;
+  },
+  sendUserMessage: async () => {
+    deliveries += 1;
+  },
+};
+writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}\n`);
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+mod.default(pi);
+if (!tool) throw new Error("Pi watch tool was not registered");
+await tool.execute("tool-call-ledger-link", {}, undefined, undefined, {});
+const arms = () => lines(process.env.FM_ARM_LOG).filter((row) => row.startsWith("arm="));
+const reuseRows = () => lines(process.env.FM_CYCLE_LOG).filter((row) => row.includes("reason=reused-successor"));
+for (let i = 0; i < 500 && (arms().length < 3 || reuseRows().length < 1 || deliveries < 2); i += 1) {
+  await sleep(10);
+}
+const armRows = arms();
+if (armRows.length !== 3) {
+  throw new Error(`expected exactly three arm spawns (initial, unready, bounded retry), got ${armRows.length}: ${armRows.join(" | ")}`);
+}
+if (!/predecessor=[0-9]+/.test(armRows[1]) || !/predecessor=[0-9]+/.test(armRows[2])) {
+  throw new Error(`successor arms lost predecessor identity: ${armRows.join(" | ")}`);
+}
+if (deliveries < 2) throw new Error(`both pendings must deliver; saw ${deliveries} delivery(ies)`);
+const predecessorArm = armRows[1].split(" ")[0].replace("arm=", "");
+const reusedWatcherPid = "777001";
+const cycleRows = lines(process.env.FM_CYCLE_LOG);
+const predecessorClose = cycleRows.filter((row) => row.startsWith(`arm_pid=${predecessorArm}\t`) && row.includes("reason=actionable-stale"));
+if (predecessorClose.length !== 1) {
+  throw new Error(`predecessor close record missing or duplicated: ${cycleRows.join(" | ")}`);
+}
+if (!predecessorClose[0].includes("\tsuccessor=none")) {
+  throw new Error(`predecessor close record must keep successor=none: ${predecessorClose[0]}`);
+}
+const reuseFirst = reuseRows();
+if (reuseFirst.length !== 1) {
+  throw new Error(`expected exactly one reused-successor record, got ${reuseFirst.length}: ${reuseFirst.join(" | ")}`);
+}
+const record = reuseFirst[0];
+const expectParts = [
+  `arm_pid=${predecessorArm}\t`,
+  "\twatcher_pid=9999\t",
+  "\torigin=reused\t",
+  "\tstarted_at=1700000000\t",
+  "\tended_at=",
+  "\texit_code=none\t",
+  "\tsignal=none\t",
+  "\treason=reused-successor\t",
+  "\tbeacon_age=",
+  "\tlock_before=pid:4242|identity:Fri Oct 16 08:26:31 2026\t",
+  "\tlock_after=pid:4242|identity:Fri Oct 16 08:26:31 2026\t",
+  `\tsuccessor=reused:${reusedWatcherPid}`,
+];
+for (const part of expectParts) {
+  if (!record.includes(part)) throw new Error(`reuse record is missing ${JSON.stringify(part)}: ${record}`);
+}
+if (!/^arm_pid=[^\t]+\twatcher_pid=[^\t]+\torigin=[^\t]+\tstarted_at=[^\t]+\tended_at=[^\t]+\texit_code=[^\t]+\tsignal=[^\t]+\treason=[^\t]+\tbeacon_age=[^\t]+\tlock_before=[^\t]+\tlock_after=[^\t]+\tsuccessor=[^\t]+$/.test(record)) {
+  throw new Error(`reuse record does not keep the ledger's field order: ${record}`);
+}
+const endedAt = record.split("\t").find((field) => field.startsWith("ended_at=")) || "";
+const beaconAge = record.split("\t").find((field) => field.startsWith("beacon_age=")) || "";
+if (!/^[0-9]+$/.test(endedAt.replace("ended_at=", ""))) {
+  throw new Error(`reuse record ended_at is not an epoch: ${record}`);
+}
+if (!/^[0-9]+$/.test(beaconAge.replace("beacon_age=", ""))) {
+  throw new Error(`reuse record beacon_age is not a number: ${record}`);
+}
+await sleep(150);
+if (arms().length !== 3) throw new Error(`the reuse started extra arm work: ${arms().join(" | ")}`);
+if (reuseRows().length !== 1) throw new Error(`the reuse recorded more than one ledger link: ${reuseRows().join(" | ")}`);
+if (readFileSync(`${process.env.FM_HOME}/state/.lock`, "utf8").trim() !== String(process.pid)) {
+  throw new Error("the session lock holder changed during the reuse");
+}
+writeFileSync(process.env.FM_STOP_FILE, "stop\n");
+process.exit(0);
+EOF
+  )
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "Pi reuse must link the predecessor to its reused live successor in the cycle ledger (exit $status): $out"
+  fi
+  [ -z "$out" ] || fail "Pi reuse ledger test printed output: $out"
+  pass "Pi reuse of a live successor writes the predecessor-to-reused-successor cycle-ledger record"
+}
+
+# Cross-process contention on the reuse link: the persisted duplicate check and
+# the append are one critical section under the existing ledger lock, so two
+# concurrent extension processes recording the SAME predecessor must produce
+# exactly one reason=reused-successor record. Contention here is deliberate and
+# deterministic rather than a timing hope: the test holds the real ledger lock
+# while BOTH racing instances reach their locked append, so both are blocked at
+# the lock before it is released, and whichever serializes first is the only one
+# whose check can pass. A duplicate check outside the lock would let both append
+# and fail this assertion. Each instance walks its ancestry to the shared
+# session-lock pid this test writes, so both read ownership as their own, loads
+# the same persisted replacement handoff (the same predecessor arm), arms its
+# own live verified successor, and records the reuse for it. The in-memory
+# predecessor set cannot be what makes this pass: it is per process, and the two
+# instances do not share it.
+# Count the reuse records in the race fixture's ledger without grep -c's
+# missing-file/zero-match exit codes leaking into numeric comparisons.
+race_reuse_rows() {  # <cycle-log>
+  local n
+  n=$(grep -c 'reason=reused-successor' "$1" 2>/dev/null || true)
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  printf '%s' "$n"
+}
+
+test_concurrent_reuse_records_produce_one_ledger_row() {
+  local dir repo home stop cycle pid_a pid_b holder i tag
+  local arm_a snapshot waiting holder_visible
+  dir="$TMP_ROOT/pi-reuse-race"; repo="$dir/repo"; home="$dir/home"
+  stop="$dir/stop"
+  cycle="$home/state/.watch-cycle-exits.log"
+  mkdir -p "$repo/bin" "$home/state/extensions/pi-primary-watch" "$home/config"
+  install_pi_watch_extension_fixture "$repo"
+  plugin="$repo/.pi/extensions/fm-primary-pi-watch.ts"
+  # One persisted handoff, one predecessor arm: both instances load it at
+  # activation and both must attempt the reuse record for it.
+  cat > "$home/state/extensions/pi-primary-watch/session-replacement-actionable.json" <<'JSON'
+{"version": 2, "pending": [
+  {"version": 1, "token": "1000-1000-1", "message": "stale: test:race (first pending)", "predecessorArmPid": "424242"},
+  {"version": 1, "token": "1000-1000-2", "message": "stale: test:race (second pending)", "predecessorArmPid": "424242"}
+]}
+JSON
+  # The shared session lock names this shell: both instances walk their
+  # ancestry to it and read ownership as their own, so both may arm and both
+  # may reach the reuse branch.
+  printf '%s\n' "$$" > "$home/state/.lock"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --handling-delivered ]; then
+  printf 'confirmed generation=%s watcher=%s\n' "$2" "$4" >> "${FM_ARM_LOG:?}"
+  exit 0
+fi
+printf 'arm=%s predecessor=%s\n' "$$" "${FM_WATCH_PREDECESSOR_ARM_PID:-none}" >> "${FM_ARM_LOG:?}"
+printf 'watcher: started pid=%s (beacon fresh) recovery-generation=race-fixture\n' "$$"
+trap 'exit 0' TERM INT
+while [ ! -e "$FM_STOP_FILE" ]; do sleep 0.02; done
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+
+  # Hold the real ledger lock for the whole race so both instances' locked
+  # appends are blocked before either can write.
+  FM_STATE_OVERRIDE="$home/state" bash -c '
+    . "$1" || exit 1
+    fm_lock_try_acquire "$2" || exit 2
+    : > "$3"
+    i=0
+    while [ ! -e "$4" ]; do
+      i=$((i + 1))
+      [ "$i" -lt 1200 ] || exit 3
+      sleep 0.05
+    done
+    fm_lock_release "$2"
+  ' _ "$ROOT/bin/fm-wake-lib.sh" "$home/state/.watch-cycle-exits.lock" \
+    "$dir/lock-held" "$dir/lock-release" &
+  holder=$!
+  i=0
+  while [ ! -e "$dir/lock-held" ]; do
+    [ "$i" -lt 200 ] || fail "the ledger lock was never taken by the race holder"
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -0 "$holder" 2>/dev/null || fail "the race holder exited before the race began"
+
+  start_race_instance() {  # <tag>
+    PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" \
+      FM_ARM_LOG="$dir/arm-$1.log" FM_STOP_FILE="$stop" \
+      FM_PI_ARM_READY_TIMEOUT_MS="$ARM_READY_TIMEOUT_MS" \
+      FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_WATCH_REARM_RETRY_LIMIT=2 \
+      FM_RACE_READY="$dir/$1.ready" FM_RACE_GO="$dir/go" \
+      FM_RACE_LOADED="$dir/$1.loaded" FM_RACE_DELIVER="$dir/deliver" \
+      FM_RACE_DONE="$dir/$1.done" \
+      node --input-type=module > "$dir/$1.out" 2>&1 <<'EOF'
+import { existsSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitFile(file, budget) {
+  for (let i = 0; i < budget; i += 1) {
+    if (existsSync(file)) return;
+    await sleep(25);
+  }
+  throw new Error(`timed out waiting for ${file}`);
+}
+let deliveries = 0;
+const handlers = new Map();
+const pi = {
+  on(event, handler) {
+    handlers.set(event, handler);
+  },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage: async () => {
+    deliveries += 1;
+  },
+};
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+mod.default(pi);
+writeFileSync(process.env.FM_RACE_READY, "ready\n");
+await waitFile(process.env.FM_RACE_GO, 1200);
+const sessionStart = handlers.get("session_start");
+if (!sessionStart) throw new Error("Pi session_start handler was not registered");
+await sessionStart({ type: "session_start", reason: "race" }, {});
+writeFileSync(process.env.FM_RACE_LOADED, "loaded\n");
+// Deliveries stay gated until BOTH instances have loaded the handoff, so
+// neither can clear it before the other has read it.
+await waitFile(process.env.FM_RACE_DELIVER, 1200);
+for (let i = 0; i < 600 && deliveries < 2; i += 1) await sleep(50);
+if (deliveries !== 2) throw new Error(`expected both pending wakes to deliver, saw ${deliveries}`);
+writeFileSync(process.env.FM_RACE_DONE, "done\n");
+process.exit(0);
+EOF
+  }
+
+  start_race_instance a &
+  pid_a=$!
+  start_race_instance b &
+  pid_b=$!
+  for tag in a b; do
+    i=0
+    while [ ! -e "$dir/$tag.ready" ]; do
+      [ "$i" -lt 400 ] || fail "instance $tag never finished importing"
+      sleep 0.1
+      i=$((i + 1))
+    done
+  done
+  : > "$dir/go"
+  for tag in a b; do
+    i=0
+    while [ ! -e "$dir/$tag.loaded" ]; do
+      [ "$i" -lt 400 ] || fail "instance $tag never loaded the shared handoff"
+      sleep 0.1
+      i=$((i + 1))
+    done
+  done
+  : > "$dir/deliver"
+  # Deterministic synchronisation before the release, and the four acceptance
+  # criteria for it:
+  # 1. Both append attempts reach an observable point proving they WAIT: each
+  #    append child's argv carries this fixture's own library path - the exact
+  #    file its bash -c script sources - so counting live argv matches counts
+  #    append children that exist while the lock is held; combined with the
+  #    zero-row ledger below, a matched child is necessarily pre-critical-
+  #    section (it can only be sourcing or spinning on the held lock), never
+  #    past it. Readiness and completion markers alone would not prove this.
+  # 2. The holder cannot be counted: the holder's command line names the real
+  #    repository's library, never the fixture copy, so it is invisible to the
+  #    append pattern - and its own visibility is asserted separately below as
+  #    proof the two patterns discriminate.
+  # 3. The ledger must still hold zero reuse rows for the target predecessor
+  #    while the lock is held, proving the waiters are blocked rather than
+  #    finished.
+  # 4. After the release, both append children must exit (the same argv count
+  #    drops to zero, so both attempts complete rather than one never existing)
+  #    before the single-row assertion.
+  # A count below two means contention was never established and fails instead
+  # of letting the release serialise two unblocked appends into a vacuous pass.
+  i=0
+  while :; do
+    snapshot=$(ps -ax -o args=)
+    waiting=$(printf '%s\n' "$snapshot" | grep -c -F "$repo/bin/fm-wake-lib.sh" || true)
+    case "$waiting" in ''|*[!0-9]*) waiting=0 ;; esac
+    holder_visible=$(printf '%s\n' "$snapshot" | grep -c -F "$ROOT/bin/fm-wake-lib.sh" || true)
+    case "$holder_visible" in ''|*[!0-9]*) holder_visible=0 ;; esac
+    if [ "$waiting" -ge 2 ] && [ "$holder_visible" -ge 1 ] \
+      && [ "$(race_reuse_rows "$cycle")" -eq 0 ]; then
+      break
+    fi
+    [ "$i" -lt 600 ] || fail "contention never established at the held lock: $waiting append attempt(s) observed, holder visible=$holder_visible, ledger reuse rows=$(race_reuse_rows "$cycle") - both racing appends must be waiting before the release"
+    sleep 0.1
+    i=$((i + 1))
+  done
+  # Both append children are provably blocked on the held lock with an empty
+  # ledger and the holder excluded from their count; release it and let them
+  # serialize through the real critical section.
+  : > "$dir/lock-release"
+  wait "$holder" 2>/dev/null || fail "the race holder did not release the ledger lock cleanly"
+  for tag in a b; do
+    i=0
+    while [ ! -e "$dir/$tag.done" ]; do
+      [ "$i" -lt 600 ] || fail "instance $tag never completed its reuse flow: out=[$(cat "$dir/$tag.out" 2>/dev/null)] arms=[$(cat "$dir/arm-$tag.log" 2>/dev/null)]"
+      sleep 0.1
+      i=$((i + 1))
+    done
+  done
+  i=0
+  while [ "$(race_reuse_rows "$cycle")" -lt 1 ]; do
+    [ "$i" -lt 200 ] || fail "no reuse record appeared after the lock released: cycle=[$(cat "$cycle" 2>/dev/null)] arm_a=[$(cat "$dir/arm-a.log" 2>/dev/null)] arm_b=[$(cat "$dir/arm-b.log" 2>/dev/null)] out_a=[$(cat "$dir/a.out" 2>/dev/null)] out_b=[$(cat "$dir/b.out" 2>/dev/null)]"
+    sleep 0.1
+    i=$((i + 1))
+  done
+  # Both append attempts must COMPLETE after the release: the same argv count
+  # drops to zero once both children have exited, which replaces any arbitrary
+  # settle sleep with an observed synchronisation point.
+  i=0
+  while :; do
+    snapshot=$(ps -ax -o args=)
+    waiting=$(printf '%s\n' "$snapshot" | grep -c -F "$repo/bin/fm-wake-lib.sh" || true)
+    case "$waiting" in ''|*[!0-9]*) waiting=0 ;; esac
+    [ "$waiting" -eq 0 ] && break
+    [ "$i" -lt 300 ] || fail "an append attempt never completed after the release: $waiting still running"
+    sleep 0.1
+    i=$((i + 1))
+  done
+  wait "$pid_a" 2>/dev/null || fail "instance a failed: $(cat "$dir/a.out" 2>/dev/null)"
+  wait "$pid_b" 2>/dev/null || fail "instance b failed: $(cat "$dir/b.out" 2>/dev/null)"
+  [ -z "$(cat "$dir/a.out" "$dir/b.out" 2>/dev/null)" ] || fail "race instances printed output: $(cat "$dir/a.out" "$dir/b.out")"
+  [ "$(grep -c 'reason=reused-successor' "$cycle")" -eq 1 ] \
+    || fail "two racing processes produced $(grep -c 'reason=reused-successor' "$cycle") reuse records instead of exactly one: $(cat "$cycle")"
+  grep -q $'^arm_pid=424242\t' "$cycle" \
+    || fail "the contended reuse record does not name the shared predecessor: $(cat "$cycle")"
+  grep 'reason=reused-successor' "$cycle" \
+    | grep -Eq $'^arm_pid=424242\t.*\tsuccessor=reused:[0-9]+$' \
+    || fail "the contended reuse record lost the ledger field shape: $(grep 'reason=reused-successor' "$cycle")"
+  for tag in a b; do
+    arm_a="$dir/arm-$tag.log"
+    [ "$(grep -c '^arm=' "$arm_a")" -eq 1 ] \
+      || fail "instance $tag spawned extra arm work during the race: $(cat "$arm_a")"
+  done
+  : > "$stop"
+  wait "$pid_a" 2>/dev/null || true
+  wait "$pid_b" 2>/dev/null || true
+  pass "two concurrent reuse records for one predecessor serialize into exactly one ledger row"
+}
+
+
+# A focused run of one case, the same FM_TEST_ONLY pattern the watcher-triage
+# suite uses, so a single regression can be re-driven without re-running the
+# whole extension suite.
+if [ -n "${FM_TEST_ONLY:-}" ]; then
+  "$FM_TEST_ONLY"
+  exit 0
+fi
+
 test_pi_extension_reports_external_healthy_watcher
 test_pi_tool_returns_agent_tool_result
 test_pi_redundant_tool_call_is_owned_noop
@@ -5254,3 +5679,5 @@ test_opencode_established_empty_close_honors_retry_limit
 test_opencode_actionable_close_rechecks_session_lock
 test_opencode_watch_arm_coordinates_with_turnend_guard
 test_opencode_healthy_arm_output_does_not_suppress_guard
+test_pi_reused_live_successor_links_the_cycle_ledger
+test_concurrent_reuse_records_produce_one_ledger_row

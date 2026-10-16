@@ -3240,8 +3240,20 @@ EOF
         # is cleared - but not in the same poll the declared-pause cadence just
         # recorded it, or the re-surface throttle it depends on would be erased and
         # the pause would re-surface every poll instead of once per long cadence.
+        # While the declaration itself still stands, the same rule holds across
+        # EVERY pane reading, not only this poll's: only the hash-scoped half
+        # clears, and the declaration-scoped first-sight throttle
+        # (.paused-resurfaced-<key>) survives, so a new pane reading under an
+        # unchanged declaration stays absorbed inside PAUSE_RESURFACE_SECS and the
+        # first sight of a NEW declaration - whose signature no longer matches the
+        # kept marker - still wakes. An undeclared window keeps the full clear, so
+        # the wedge ladder a dead agent with no declaration depends on is untouched.
         if [ "$paused_bound" -ne 0 ] && [ -e "$pf" ] && { [ "$n" -ge 2 ] || ! status_is_paused_or_captain_held "$(status_declared_wait_line "$STATE/$(window_to_task "$w" "$STATE").status")"; }; then
-          clear_pause_tracking "$key"
+          if status_is_paused_or_captain_held "$(status_declared_wait_line "$STATE/$(window_to_task "$w" "$STATE").status")"; then
+            clear_stale_hash_tracking "$key"
+          else
+            clear_pause_tracking "$key"
+          fi
         fi
       fi
     else
@@ -3271,8 +3283,17 @@ EOF
         esac
       elif [ "$paused_bound" -ne 0 ] && [ -e "$pf" ]; then
         # Same rule as the stable-hash branch: never clear pause bookkeeping the
-        # declared-pause cadence recorded on this very poll.
-        clear_pause_tracking "$key"
+        # declared-pause cadence recorded on this very poll - and while the
+        # declaration still stands, never let this pane reading hand it a fresh
+        # first-sight window either. Only the hash-scoped half clears, so the
+        # declaration-scoped throttle survives every busy reading under an
+        # unchanged declaration; an undeclared window keeps the full clear for
+        # the wedge ladder.
+        if status_is_paused_or_captain_held "$(status_declared_wait_line "$STATE/$(window_to_task "$w" "$STATE").status")"; then
+          clear_stale_hash_tracking "$key"
+        else
+          clear_pause_tracking "$key"
+        fi
       fi
     fi
   done < <(recorded_windows)
