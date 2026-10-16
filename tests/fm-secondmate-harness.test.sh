@@ -2597,9 +2597,6 @@ test_config_reread_bootstrap_path_and_spawn_flexibility() {
   w=$(new_world config-reread-spawn-flex)
   printf 'codex\n' > "$w/home/config/crew-harness"
   printf 'codex\n' > "$w/home/config/secondmate-harness"
-  # The explicit pi launch below must satisfy the single-slot guard's
-  # fail-toward-refusing precondition.
-  printf '%s\n' 'fixture/single-slot-model' > "$w/home/config/single-slot-profile"
   sm="$w/sm-flex"
   make_seeded_home "$sm" sm-flex
   mkdir -p "$sm/state"

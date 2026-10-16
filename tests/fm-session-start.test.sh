@@ -614,9 +614,6 @@ EOF
   git -C "$mate" init -q -b main
   printf '%s\n' pi > "$home/config/secondmate-harness"
   printf '%s\n' manual > "$home/config/backlog-backend"
-  # The relaunch below is a pi launch and must satisfy the single-slot
-  # guard's fail-toward-refusing precondition.
-  printf '%s\n' 'fixture/single-slot-model' > "$home/config/single-slot-profile"
   touch "$home/state/.last-watcher-beat"
   {
     printf 'window=firstmate:fm-%s\n' "$id"
@@ -661,9 +658,6 @@ EOF
   printf '%s\n' herdr > "$home/config/backend"
   printf '%s\n' pi > "$home/config/secondmate-harness"
   printf '%s\n' manual > "$home/config/backlog-backend"
-  # The relaunch below is a pi launch and must satisfy the single-slot
-  # guard's fail-toward-refusing precondition.
-  printf '%s\n' 'fixture/single-slot-model' > "$home/config/single-slot-profile"
   touch "$home/state/.last-watcher-beat"
   {
     printf 'window=default:p-old\n'

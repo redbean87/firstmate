@@ -230,9 +230,10 @@
 #   /updatefirstmate, restart). A raw launch command never satisfies a
 #   deterministic project pin (docs/configuration.md "Crew dispatch profiles").
 #   A pi launch on the guarded local-engine profile is additionally count-and-refused
-#   while another live worker holds that profile's single slot
-#   (config/single-slot-profile; docs/configuration.md "Single-slot launch guard";
-#   an absent or malformed file refuses the pi launch rather than running unguarded).
+#   while another live worker holds that profile's single slot; the guarded
+#   profile for the engine in use is a built-in default and
+#   config/single-slot-profile only adds guarded profiles
+#   (docs/configuration.md "Single-slot launch guard").
 #   A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
@@ -3510,48 +3511,116 @@ if [ "$KIND" != secondmate ]; then
 fi
 
 # Single-slot launch gate (supervision-hardening round 1, retargeted to the
-# engine in use 2026-10-15). The AI server's local engine serves one request
+# engine in use 2026-10-16). The AI server's local engine serves one request
 # at a time - it occupies essentially all of that box's memory, so it is
 # strictly one run at a time (data/captain.md, captain 2026-10-14) - and a
-# second concurrent worker on the guarded profile must be refused. The
-# guarded profile identifier is home policy data, read from
-# config/single-slot-profile (one exact model string, same form --model
-# takes), never a tracked literal, so the next engine switch is a
-# configuration edit rather than a code edit; docs/configuration.md
-# "Single-slot launch guard" owns the file and its fail-toward-refusing
-# default. Like the pin refusal above, this is a deterministic
-# count-and-refuse, never a queue: it runs before any endpoint, worktree, or
-# record exists, so a refusal costs nothing to unwind. Secondmates are NOT
-# exempt, because the slot constraint is physical. A matching record only
-# blocks while its agent is actually LIVE: a retained row for an exited agent
-# is agent-free and must not deadlock recovery behind a holder that no longer
-# exists. The liveness verdict comes from the same backend agent-state reader
-# supervision uses (bin/fm-backend.sh's fm_backend_agent_alive), never from
-# the record's mere presence. A relaunch of the same task id must not
-# self-block, so the task's own record is skipped; it is the only exemption.
-# The configuration fails towards refusing: an absent, unreadable, empty, or
-# malformed config/single-slot-profile stops this launch instead of running
-# the gate unverifiable, because a guard that cannot read its target must
-# refuse rather than proceed.
+# second concurrent worker on a guarded profile must be refused. The guarded
+# profile identifier for the engine in use is this built-in default, so the
+# gate protects Strata with no configuration at all; the optional
+# config/single-slot-profile (docs/configuration.md "Single-slot launch
+# guard") may ADD one more guarded profile - a rollback engine, a second
+# single-slot engine - and never removes the default. An unusable override
+# (not a readable regular file, empty, whitespace/control-bearing, or
+# comment-prefixed) is ignored with a loud warning and the built-in default
+# stays in force, so no state of the file can leave the gate off. Like the
+# pin refusal above, this is a deterministic count-and-refuse, never a queue:
+# it runs before any endpoint, worktree, or record exists, so a refusal costs
+# nothing to unwind. Secondmates are NOT exempt, because the slot constraint
+# is physical. A matching record only blocks while its agent is actually
+# LIVE: a retained row for an exited agent is agent-free and must not
+# deadlock recovery behind a holder that no longer exists. The liveness
+# verdict comes from the same backend agent-state reader supervision uses
+# (bin/fm-backend.sh's fm_backend_agent_alive), never from the record's mere
+# presence. A relaunch of the same task id must not self-block, so the task's
+# own record is skipped; it is the only exemption. A raw launch command
+# embeds its own arguments, so when a raw command resolves to harness pi the
+# gate parses its effective --model out of the command text and refuses a
+# command whose --model is missing, empty, trailing-bare, or followed by
+# another option: a raw launch must never bypass the gate by leaving the
+# parsed model empty or malformed.
 spawn_refuse_if_single_slot_taken() {
   local holder holder_id holder_harness holder_model holder_backend holder_target
-  local slot_profile slot_profile_present
+  local slot_profile slot_profile_present eff_model prev_word word
+  local guarded_profiles='strata-local/qwen3.8-flash-next-coder-iq1_m'
   [ "$HARNESS" = pi ] || return 0
   if ! slot_profile_present=$(fm_config_source_present "$CONFIG/single-slot-profile"); then
     exit 1
   fi
-  if [ "$slot_profile_present" != 1 ] || [ ! -f "$CONFIG/single-slot-profile" ] || [ ! -r "$CONFIG/single-slot-profile" ]; then
-    echo "error: $ID cannot launch: config/single-slot-profile must be a readable regular file holding the guarded profile identifier (one exact model string), because the local engine runs a single slot and an unverifiable guard refuses to launch" >&2
-    exit 1
+  if [ "$slot_profile_present" = 1 ]; then
+    slot_profile=
+    if [ -f "$CONFIG/single-slot-profile" ] && [ -r "$CONFIG/single-slot-profile" ]; then
+      slot_profile=$(cat "$CONFIG/single-slot-profile" || true)
+      case "$slot_profile" in
+      '' | *[[:space:][:cntrl:]]* | '#'*)
+        echo "warning: config/single-slot-profile holds an unusable value ('${slot_profile:-<empty>}'); ignoring it and keeping the built-in guarded profile" >&2
+        slot_profile=
+        ;;
+      esac
+    else
+      echo "warning: config/single-slot-profile is not a readable regular file; ignoring it and keeping the built-in guarded profile" >&2
+    fi
+    if [ -n "$slot_profile" ]; then
+      case " $guarded_profiles " in
+      *" $slot_profile "*) ;;
+      *) guarded_profiles="$guarded_profiles $slot_profile" ;;
+      esac
+    fi
   fi
-  slot_profile=$(cat "$CONFIG/single-slot-profile") || exit 1
-  case "$slot_profile" in
-  '' | *[[:space:][:cntrl:]]* | '#'*)
-    echo "error: $ID cannot launch: config/single-slot-profile must hold one profile identifier without whitespace or comment markers (found '${slot_profile:-<empty>}')" >&2
-    exit 1
-    ;;
+  # The model this launch would actually run. A raw launch command embeds its
+  # own --model, which the ordinary flag parser never sees, so resolve it from
+  # the command text; an unresolvable raw pi launch is refused rather than
+  # allowed past the gate with an empty model. An ordinary launch with no
+  # resolved model keeps the pre-existing skip: the model is firstmate's own
+  # dispatch choice and the harness's ambient default is not knowable here.
+  if [ "$RAW_LAUNCH" = 1 ]; then
+    eff_model=
+    prev_word=
+    for word in $LAUNCH; do
+      case "$prev_word" in
+      --model)
+        case "$word" in
+        -*)
+          echo "error: $ID cannot launch: the raw pi launch command's --model is followed by the option '$word' instead of a model value; pass --model <profile>" >&2
+          exit 1
+          ;;
+        *)
+          eff_model=$word
+          break
+          ;;
+        esac
+        ;;
+      esac
+      case "$word" in
+      --model=*)
+        eff_model=${word#--model=}
+        if [ -z "$eff_model" ]; then
+          echo "error: $ID cannot launch: the raw pi launch command's --model= carries an empty value; pass --model=<profile>" >&2
+          exit 1
+        fi
+        break
+        ;;
+      esac
+      prev_word=$word
+    done
+    if [ -z "$eff_model" ]; then
+      case "$prev_word" in
+      --model)
+        echo "error: $ID cannot launch: the raw pi launch command ends with a bare --model and no value, so the single-slot guard cannot resolve the model it would run; pass --model <profile> in the raw command" >&2
+        ;;
+      *)
+        echo "error: $ID cannot launch: the raw pi launch command carries no --model, so the single-slot guard cannot resolve the model it would run; add an explicit --model <profile> to the raw command" >&2
+        ;;
+      esac
+      exit 1
+    fi
+  else
+    eff_model=$MODEL
+  fi
+  [ -n "$eff_model" ] || return 0
+  case " $guarded_profiles " in
+  *" $eff_model "*) ;;
+  *) return 0 ;;
   esac
-  [ "$MODEL" = "$slot_profile" ] || return 0
   for holder in "$STATE"/*.meta; do
     [ -f "$holder" ] || continue
     holder_id=$(basename "$holder" .meta)
@@ -3559,11 +3628,11 @@ spawn_refuse_if_single_slot_taken() {
     holder_harness=$(fm_meta_get "$holder" harness)
     holder_model=$(fm_meta_get "$holder" model)
     [ "$holder_harness" = pi ] || continue
-    [ "$holder_model" = "$slot_profile" ] || continue
+    [ "$holder_model" = "$eff_model" ] || continue
     holder_backend=$(fm_backend_of_meta "$holder")
     holder_target=$(fm_backend_target_of_meta "$holder")
     [ "$(fm_backend_agent_alive "$holder_backend" "$holder_target")" = alive ] || continue
-    echo "error: $ID cannot launch: $slot_profile runs a single slot (one request at a time) and $holder_id is live on that profile; re-dispatch $ID after $holder_id lands" >&2
+    echo "error: $ID cannot launch: $eff_model runs a single slot (one request at a time) and $holder_id is live on that profile; re-dispatch $ID after $holder_id lands" >&2
     exit 1
   done
 }

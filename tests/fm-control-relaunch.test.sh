@@ -192,10 +192,7 @@ SH
 # new_case <name> [id] -> echoes a case dir with a live claude ship task.
 new_case() {
   local id=${2:-t1} dir="$TMP_ROOT/$1-$RANDOM"
-  mkdir -p "$dir/home/state" "$dir/home/data" "$dir/home/config" "$dir/fake"
-  # A well-formed test-only single-slot guard profile, so pi relaunches satisfy
-  # the gate's fail-toward-refusing precondition; the slot test overrides it.
-  printf '%s\n' 'fixture/single-slot-model' > "$dir/home/config/single-slot-profile"
+  mkdir -p "$dir/home/state" "$dir/home/data" "$dir/fake"
   : > "$dir/fake/literal"
   : > "$dir/fake/keys"
   printf 'claude' > "$dir/fake/command"
@@ -1193,8 +1190,9 @@ test_spawn_relaunch_of_a_single_slot_task_does_not_self_block() {
   local slot='single-slot-test/guarded-model'
   dir=$(new_case slot-relaunch rlqw)
   add_ship_task "$dir" rlqw pi
-  # Point the gate at the guarded profile, then append the model to the task
-  # record: fm_meta_get reads the last value of the key.
+  # Add the guarded profile through the optional override, then append the
+  # model to the task record: fm_meta_get reads the last value of the key.
+  mkdir -p "$dir/home/config"
   printf '%s\n' "$slot" > "$dir/home/config/single-slot-profile"
   printf 'model=%s\n' "$slot" >> "$dir/home/state/rlqw.meta"
   cat > "$dir/fakebin/pi" <<'SH'

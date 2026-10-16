@@ -1138,17 +1138,26 @@ Firstmate cannot see which part of a worker's life uses the resource, so the num
 
 ## Single-slot launch guard (config/single-slot-profile)
 
-The local AI server runs one engine that serves exactly one request at a time, so `bin/fm-spawn.sh` refuses a second concurrent launch on its guarded profile with a deterministic, nonzero refusal - never a queue - before any endpoint, worktree, or record exists.
+The local AI server runs one engine that serves exactly one request at a time, so `bin/fm-spawn.sh` refuses a second concurrent launch on a guarded profile with a deterministic, nonzero refusal - never a queue - before any endpoint, worktree, or record exists.
 Secondmates get no exemption, because the constraint is physical, and a recorded holder counts only while its agent is actually live, judged by the same backend reader supervision uses; a relaunch of the holding task itself is the one exemption, so a task never blocks its own replacement.
+The guarded profile identifier for the engine in use is a built-in default in `bin/fm-spawn.sh` (`strata-local/qwen3.8-flash-next-coder-iq1_m`, the AI server's Strata engine since 2026-10-14), so the guard protects that engine with no configuration at all.
+The optional local, gitignored `config/single-slot-profile` adds one more guarded profile - one exact model string in the same form `--model` takes - for a rollback engine or a second single-slot engine; it never removes the built-in default.
 
 ```text
-local-provider/model-id
+# also guard the retired engine while the box is rolled back
+qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs
 ```
 
-The guarded profile identifier is machine-local policy data, so the local, gitignored `config/single-slot-profile` holds it instead of tracked code: one exact model string in the same form `--model` takes, and pointing the guard at a different engine is an edit to this file rather than a code change.
-The file must be a readable regular file holding that one identifier; an absent, unreadable, empty, whitespace-containing, or comment-prefixed value refuses the pi launch rather than running the guard unverifiable, because the guarded engine cannot survive two requests at once and a guard that cannot read its target must refuse instead of proceeding.
-The guard applies to `pi` launches only and matches the identifier exactly against the launching model and each live recorded holder, so no other harness or model is affected.
-New secondmate homes inherit the file with the rest of the home's local configuration ([`bin/fm-config-inherit-lib.sh`](../bin/fm-config-inherit-lib.sh)), so every home that launches workers on that engine carries the same guarded profile.
+Every state of the file is defined and tested:
+
+- absent: the built-in default guards, and launches proceed normally - a home with no file is fully protected and never blocked;
+- one valid identifier: that profile joins the guarded set alongside the default;
+- empty, whitespace- or control-bearing, comment-prefixed, or a file that is not a readable regular file: the file is ignored with a loud warning naming it, and the built-in default stays in force - no state of the file can leave the guard off;
+- a stale but well-formed value: it guards the older engine only as an addition, so the built-in default keeps the engine in use guarded and a stale file cannot silently disable protection.
+
+To move the guard to a new engine, update the built-in default in `bin/fm-spawn.sh` and the value named in this section; the file only ever adds coverage, so a value left naming an older engine during a transition is harmless.
+A raw launch command resolves to the `pi` harness when its first non-environment word is `pi`; the gate parses the effective `--model` (either `--model <value>` or `--model=<value>`) out of the raw command text, and a raw `pi` command whose `--model` is missing, empty, trailing-bare, or followed by another option is refused with a diagnostic naming that malformed argument, because a raw launch must not bypass the guard by leaving the parsed model empty or malformed.
+New secondmate homes inherit the file with the rest of the home's local configuration ([`bin/fm-config-inherit-lib.sh`](../bin/fm-config-inherit-lib.sh)), so a fleet override reaches every home that launches workers.
 
 ## Crew dispatch profiles (config/crew-dispatch.json)
 

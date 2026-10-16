@@ -382,10 +382,6 @@ fm_test_spawn_home() {
   local home=$1 harness=${2-}
   mkdir -p "$home/data" "$home/projects" "$home/state" "$home/config"
   touch "$home/state/.last-watcher-beat"
-  # A well-formed test-only single-slot guard profile, so ordinary fixture
-  # homes satisfy the gate's fail-toward-refusing precondition (no real
-  # engine value belongs in tracked fixtures; gate tests overwrite this).
-  printf '%s\n' 'fixture/single-slot-model' > "$home/config/single-slot-profile"
   if [ -n "$harness" ]; then
     printf '%s\n' "$harness" > "$home/config/crew-harness"
   fi
