@@ -553,11 +553,14 @@ test_single_slot_raw_quoted_and_prefixed_models_enforced() {
   rm -f "$HOME_DIR/config/single-slot-profile"
   seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
 
-  # Quoted, path-wrapped, and environment-prefixed spellings resolve to the
-  # executed engine identity, so each is refused while the slot is live.
+  # Quoted-model, path-wrapped, and VAR=-prefixed spellings resolve to the
+  # executed engine identity with a record-safe launcher word, so each is
+  # refused while the slot is live. Launcher spellings the record cannot
+  # represent (`env ...`, quoted launcher words) are refused before start
+  # by the launcher-identity check and covered in
+  # test_single_slot_raw_unsafe_launcher_refused_before_start.
   for raw in "pi --model '$SLOT_DEFAULT'" "pi --model=\"$SLOT_DEFAULT\"" "pi --model='$SLOT_DEFAULT'" \
-    "/usr/local/bin/pi --model $SLOT_DEFAULT" "FOO=1 pi --model $SLOT_DEFAULT" \
-    "env FOO=1 pi --model $SLOT_DEFAULT"; do
+    "/usr/local/bin/pi --model $SLOT_DEFAULT" "FOO=1 pi --model $SLOT_DEFAULT"; do
     out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
       "$raw")
     status=$?
@@ -567,7 +570,42 @@ test_single_slot_raw_quoted_and_prefixed_models_enforced() {
     assert_absent "$HOME_DIR/state/$id.meta" "a refused spelling '$raw' wrote its own task record"
     [ ! -s "$LAUNCH_LOG" ] || fail "a refused spelling '$raw' launched a worker"
   done
-  pass "quoted, wrapped, and environment-prefixed raw model spellings are enforced"
+  pass "quoted-model, path-wrapped, and VAR=-prefixed raw spellings are enforced"
+}
+
+test_single_slot_raw_unsafe_launcher_refused_before_start() {
+  local rec id out status raw
+  id=slot-unlauncher-z57
+  rec=$(make_spawn_case slot-raw-unlauncher pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  # Launcher spellings the worker record cannot represent as harness=pi
+  # would run the guarded engine while recording a holder no later check
+  # can discover, so each is refused before any engine starts - even with
+  # the slot free. The diagnostic names the offending launcher word.
+  for raw in "env FOO=1 pi --model $SLOT_DEFAULT" "env -i pi --model $SLOT_DEFAULT" \
+    "env -u FOO pi --model $SLOT_DEFAULT" "'pi' --model $SLOT_DEFAULT" \
+    "\"pi\" --model $SLOT_DEFAULT"; do
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      "$raw")
+    status=$?
+    expect_code 1 "$status" "an unsafe launcher spelling '$raw' must be refused"
+    assert_contains "$out" "$id cannot launch" "the refusal of '$raw' must use the cannot-launch shape"
+    assert_contains "$out" "instead of a plain pi command" "the refusal of '$raw' must name the plain-pi restatement"
+    assert_absent "$HOME_DIR/state/$id.meta" "a refused launcher spelling '$raw' wrote its own task record"
+    [ ! -s "$LAUNCH_LOG" ] || fail "a refused launcher spelling '$raw' launched a worker"
+  done
+
+  # The refusal is scoped to the guarded engine: the same `env` spelling on
+  # an unguarded profile still launches, proving ordinary raw use is kept.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "env FOO=1 pi --model openai-codex/gpt-5.6-sol")
+  status=$?
+  expect_code 0 "$status" "an env-prefixed raw launch on an unguarded profile must proceed"$'\n'"$out"
+  assert_contains "$out" "spawned $id harness=env" "the unguarded env-prefixed launch did not complete"
+  [ -s "$LAUNCH_LOG" ] || fail "an allowed env-prefixed launch left no launch trace"
+  pass "record-unsafe launcher spellings are refused before any engine starts"
 }
 
 test_single_slot_raw_ambiguous_forms_refuse_before_start() {
@@ -2960,6 +2998,7 @@ test_single_slot_raw_launch_trailing_bare_model_refuses
 test_single_slot_raw_holder_blocks_ordinary_launch
 test_single_slot_ordinary_holder_blocks_raw_launch
 test_single_slot_raw_quoted_and_prefixed_models_enforced
+test_single_slot_raw_unsafe_launcher_refused_before_start
 test_single_slot_raw_ambiguous_forms_refuse_before_start
 test_single_slot_config_scope_is_pi_only
 test_single_slot_refuses_a_secondmate_spawn

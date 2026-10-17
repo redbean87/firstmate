@@ -3536,13 +3536,19 @@ fi
 # embeds its own launcher and arguments, so when the command resolves to the
 # pi launcher the gate resolves its effective --model out of the command
 # text the way the executing shell would read it - quotes stripped, leading
-# environment assignments (and a leading `env`) skipped - and records that
-# identity on the worker record so the holder scan discovers a raw-launched
-# Strata worker exactly like an ordinary one. A raw pi command whose --model
+# environment assignments (and a leading `env`) skipped. A plain `pi`
+# command records that identity on the worker record, so the holder scan
+# discovers a raw-launched Strata worker exactly like an ordinary one. Any
+# other launcher spelling that resolves to pi - a leading `env`, a quoted
+# launcher word, or any form the launch probe does not normalize to exactly
+# `pi` - is refused before any engine starts whenever the guarded profile
+# is at stake, because its worker record would not identify a pi holder
+# that later checks could discover. A raw pi command whose --model
 # is missing, empty, trailing-bare, followed by another option, quoted but
-# unresolvable, expanded, wrapped, or otherwise ambiguous is refused before
-# any engine starts rather than allowed past with an empty or mismatched
-# model: a raw launch must never bypass the gate by leaving the parsed model
+# unresolvable, expanded, wrapped, or otherwise ambiguous is likewise
+# refused before any engine starts rather than allowed past with an empty
+# or mismatched model: a raw launch must never bypass the gate by leaving
+# the parsed model
 # empty, quoted past the comparison, or hidden behind a wrapper.
 # Resolve the effective --model of a raw launch command the way the
 # executing shell would read it: single and double quotes are stripped, a
@@ -3754,8 +3760,11 @@ spawn_refuse_if_single_slot_taken() {
       return 0
     fi
     # Record the effective engine identity on the worker record, so the
-    # holder scan below discovers a raw-launched Strata worker exactly like
-    # an ordinary one. The meta writer below stores model=${MODEL:-default}.
+    # holder scan below discovers a plain-`pi` raw-launched Strata worker
+    # exactly like an ordinary one. Launcher spellings the record cannot
+    # represent as harness=pi are refused below whenever the guarded
+    # profile is at stake. The meta writer below stores
+    # model=${MODEL:-default}.
     MODEL=$eff_model
   else
     # An ordinary launch with no resolved model keeps the pre-existing skip:
@@ -3796,6 +3805,18 @@ spawn_refuse_if_single_slot_taken() {
   *" $eff_model "*) ;;
   *) return 0 ;;
   esac
+  # A raw launch counts as a holder only while its worker record reads
+  # harness=pi, and the record writer stores $HARNESS verbatim. A raw pi
+  # launch whose derived HARNESS is anything but exactly `pi` - a leading
+  # `env`, a quoted launcher word, or any spelling the launch probe does
+  # not normalize - would run the guarded engine while recording a holder
+  # no later single-slot check can discover. Refuse that form before any
+  # engine starts rather than record an invisible holder; restate it as a
+  # plain command whose launcher word is exactly `pi`.
+  if [ "$RAW_LAUNCH" = 1 ] && [ "$HARNESS" != pi ]; then
+    echo "error: $ID cannot launch: the raw launch command reaches the guarded profile through the launcher word '$HARNESS' instead of a plain pi command, so its worker record would not identify a pi holder and later single-slot checks could not see this worker; launch with a plain pi command carrying --model <profile>" >&2
+    exit 1
+  fi
   for holder in "$STATE"/*.meta; do
     [ -f "$holder" ] || continue
     holder_id=$(basename "$holder" .meta)
