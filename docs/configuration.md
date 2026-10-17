@@ -1142,9 +1142,9 @@ The local AI server runs one engine that serves exactly one request at a time, s
 Secondmates get no exemption, because the constraint is physical, and a recorded holder counts only while its agent is actually live, judged by the same backend reader supervision uses; a relaunch of the holding task itself is the one exemption, so a task never blocks its own replacement.
 The guarded profile identifier for the engine in use is a built-in default in `bin/fm-spawn.sh` (`strata-local/qwen3.8-flash-next-coder-iq1_m`, the AI server's Strata engine since 2026-10-14), so the guard protects that engine with no configuration at all.
 The optional local, gitignored `config/single-slot-profile` adds one more guarded profile - one exact model string in the same form `--model` takes - for a rollback engine or a second single-slot engine; it never removes the built-in default.
+To also guard the retired engine while the box is rolled back, the file's whole content is that one value:
 
 ```text
-# also guard the retired engine while the box is rolled back
 qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs
 ```
 
