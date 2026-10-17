@@ -1,0 +1,3 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.pptMbR
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: lab-raw-eq10 cannot launch: strata-local/qwen3.8-flash-next-coder-iq1_m runs a single slot (one request at a time) and lab-second-b2 is live on that profile; re-dispatch lab-raw-eq10 after lab-second-b2 lands

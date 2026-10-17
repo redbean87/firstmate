@@ -1,0 +1,24 @@
+$ printf 'qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs\n' > $LAB/config/single-slot-profile
+$ FM_HOME=$LAB bin/fm-config-push.sh   # against a seeded secondmate home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+config-push: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.pptMbR -> live secondmate homes
+secondmate sm-live-1 (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-sm.vxSzlj):
+  crew-dispatch.json: unchanged
+  dispatch-never-send: unchanged
+  crew-harness: unchanged
+  backlog-backend: unchanged
+  backend: unchanged
+  herdr-presentation-spaces: unchanged
+  startup-memory-budget: unchanged
+  trace-context: unchanged - session-scoped
+  launch-env-allowlist: unchanged
+  claude-permission-mode: unchanged
+  lavish-axi-host: unchanged
+  keep-ai-trailers: unchanged
+  supervision-host-off: unchanged
+  single-slot-profile: pushed
+  data/captain-shared.md: unchanged
+CONFIG_REREAD: secondmate sm-live-1: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/Users/cortezashley/.no-mistakes/repos/26772a06f146.git)
+rc=1
+$ cat $SMDIR/config/single-slot-profile
+qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs

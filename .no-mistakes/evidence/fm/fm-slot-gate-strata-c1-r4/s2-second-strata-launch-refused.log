@@ -1,0 +1,10 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.pptMbR
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  snapshot: model=extension reason=stale-beacon lock=unheld pid=none(absent identity -) beacon=999999s extension-ownership=not-proven
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M53W1GNVAV93S6SYWTXKQ0FX/.pi/extensions/fm-primary-turnend-guard.ts -e /Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M53W1GNVAV93S6SYWTXKQ0FX/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: lab-second-b2 cannot launch: strata-local/qwen3.8-flash-next-coder-iq1_m runs a single slot (one request at a time) and lab-holder-a1 is live on that profile; re-dispatch lab-second-b2 after lab-holder-a1 lands
