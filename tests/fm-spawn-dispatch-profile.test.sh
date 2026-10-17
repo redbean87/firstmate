@@ -531,6 +531,24 @@ test_single_slot_refuses_a_secondmate_spawn() {
 # operational inbox and passes only a printable doorbell naming it. Parsing the
 # staged launch the way the destination pane's shell would proves the argument
 # it passes and the record it names.
+test_no_profile_keeps_claude_profile_defaults() {
+  local rec id out status expected launch
+  id=profile-off-z1
+  rec=$(make_spawn_case profile-off claude "$id")
+  read_case_record "$rec"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "claude spawn without profile flags should succeed"
+  assert_contains "$out" "spawned $id harness=claude" "spawn did not report claude"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
+
+  launch=$(cat "$LAUNCH_LOG")
+  expected=$(claude_expected_launch "$launch" "$HOME_DIR" "$id" --dangerously-skip-permissions)
+  [ "$launch" = "$expected" ] || fail "no-profile claude launch did not use the canonical launch kind"$'\n'"expected: $expected"$'\n'"actual:   $launch"
+  pass "no --model/--effort records defaults and types the claude launch instructions"
+}
+
 test_claude_launch_brief_publishes_record_doorbell() {
   local rec id out status launch doorbell record
   id="brief-doorbell-z1"
