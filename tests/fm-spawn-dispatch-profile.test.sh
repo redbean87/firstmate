@@ -140,125 +140,186 @@ assert_meta_profile() {
   assert_grep "effort=$effort" "$meta" "meta missing effort=$effort"
 }
 
-# The canonical Qwen-local profile identifier the serial gate matches on. A
-# recorded task on this exact model/harness pair occupies the server's single
-# slot only while its agent is live, so the gate reads those two meta fields
-# and then the recorded endpoint's agent state through the shared backend
-# reader.
-QWEN_LOCAL_MODEL='qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs'
-# The session every seeded qwen holder's window is recorded in, so the
+# The single-slot gate's built-in default guarded profile - the AI server's
+# engine in use, Strata since 2026-10-14 - is a tracked contract of
+# bin/fm-spawn.sh, named here explicitly so the tests prove the default
+# guards with no configuration file at all.
+SLOT_DEFAULT='strata-local/qwen3.8-flash-next-coder-iq1_m'
+# The optional config/single-slot-profile addition is exercised with a
+# synthetic id, so tests never carry a real fleet override value.
+SLOT_OVERRIDE='single-slot-test/guarded-model'
+# The session every seeded slot holder's window is recorded in, so the
 # liveness-aware fake tmux can answer the gate's window inventory with the
 # exact window name.
-QWEN_LIVENESS_SESSION=qmses
+SLOT_LIVENESS_SESSION=slses
 
-seed_qwen_holder() {  # <home> <id> [harness] [model]
-  local home=$1 id=$2 harness=${3:-pi} model=${4:-$QWEN_LOCAL_MODEL}
+seed_slot_holder() {  # <home> <id> [harness] [model]
+  local home=$1 id=$2 harness=${3:-pi} model=${4:-$SLOT_OVERRIDE}
   {
     echo "harness=$harness"
     echo "model=$model"
-    echo "window=$QWEN_LIVENESS_SESSION:fm-$id"
+    echo "window=$SLOT_LIVENESS_SESSION:fm-$id"
   } > "$home/state/$id.meta"
 }
 
-# run_qwen_slot_spawn <live|dead> <holder-id> <args...>: drive run_ship_spawn
+# write_slot_config <home> [model]: add <model> (default the synthetic
+# override id) to the case home's guarded set through the optional
+# config/single-slot-profile; the built-in default stays guarded either way.
+write_slot_config() {
+  printf '%s\n' "${2:-$SLOT_OVERRIDE}" > "$1/config/single-slot-profile"
+}
+
+# run_slot_spawn <live|dead> <holder-id> <args...>: drive run_ship_spawn
 # with the liveness-aware fake tmux pinned to one holder window. <live> gives
 # the pane an agent foreground command, <dead> a bare shell; the window stays
 # in the inventory either way, so a dead row models an exited agent whose
 # endpoint and metadata record both survive.
-run_qwen_slot_spawn() {  # <live|dead> <holder-id> <args...>
+run_slot_spawn() {  # <live|dead> <holder-id> <args...>
   local state=$1 holder_id=$2
   shift 2
   case "$state" in
     live) FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder_id" FM_FAKE_PANE_COMMAND=pi run_ship_spawn "$@" ;;
     dead) FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder_id" FM_FAKE_PANE_COMMAND=zsh run_ship_spawn "$@" ;;
-    *) fail "run_qwen_slot_spawn: unknown state '$state'" ;;
+    *) fail "run_slot_spawn: unknown state '$state'" ;;
   esac
 }
 
-test_qwen_local_slot_refuses_a_second_worker() {
+test_single_slot_refuses_a_second_worker() {
   local rec id blocker out status
-  id=qwen-slot-second-z30
-  blocker=qwen-slot-holder-z29
-  rec=$(make_spawn_case qwen-slot-second pi "$id")
+  id=slot-second-z30
+  blocker=slot-holder-z29
+  rec=$(make_spawn_case slot-second pi "$id")
   read_case_record "$rec"
-  seed_qwen_holder "$HOME_DIR" "$blocker"
+  write_slot_config "$HOME_DIR"
+  seed_slot_holder "$HOME_DIR" "$blocker"
 
-  out=$(run_qwen_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    --harness pi --model "$QWEN_LOCAL_MODEL")
+  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_OVERRIDE")
   status=$?
-  expect_code 1 "$status" "a second concurrent qwen-local worker must be refused"
+  expect_code 1 "$status" "a second concurrent single-slot worker must be refused"
   assert_contains "$out" "$id cannot launch" "the refusal must use the deterministic cannot-launch shape"
   assert_contains "$out" "$blocker" "the refusal must name the blocking live worker"
   assert_contains "$out" "re-dispatch $id after $blocker lands" "the refusal must direct re-dispatch after landing"
-  assert_absent "$HOME_DIR/state/$id.meta" "a refused qwen-local spawn wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "a refused qwen-local spawn launched a worker"
-  pass "a live qwen-local worker blocks a second concurrent worker with a named refusal"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused single-slot spawn wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused single-slot spawn launched a worker"
+  pass "a live worker on an overridden guarded profile blocks a second concurrent worker with a named refusal"
 }
 
-test_qwen_local_slot_leaves_other_profiles_alone() {
+test_single_slot_builtin_default_guards_without_config() {
   local rec id blocker out status
-  id=qwen-slot-other-z31
-  blocker=qwen-slot-holder-z29b
-  rec=$(make_spawn_case qwen-slot-other pi "$id")
+  id=slot-default-z38
+  blocker=slot-default-holder-z29g
+  rec=$(make_spawn_case slot-default pi "$id")
   read_case_record "$rec"
-  seed_qwen_holder "$HOME_DIR" "$blocker"
+  # No settings file at all: the built-in default must still protect the
+  # engine in use...
+  rm -f "$HOME_DIR/config/single-slot-profile"
+  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
+
+  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 1 "$status" "the built-in default must refuse a second worker with no config file"
+  assert_contains "$out" "$id cannot launch" "the default refusal must use the deterministic cannot-launch shape"
+  assert_contains "$out" "$blocker" "the default refusal must name the blocking live worker"
+  assert_absent "$HOME_DIR/state/$id.meta" "a default-refused spawn wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a default-refused spawn launched a worker"
+
+  # ...and once the holder's agent is gone the slot frees as usual.
+  out=$(run_slot_spawn dead "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 0 "$status" "the default-guarded slot must reopen once the holder exits"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$SLOT_DEFAULT" default
+  pass "the built-in default guards the engine in use with no settings file present"
+}
+
+test_single_slot_missing_file_leaves_other_profiles_alone() {
+  local rec id blocker out status
+  id=slot-noconf-z39
+  blocker=slot-noconf-holder-z29h
+  rec=$(make_spawn_case slot-noconf pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
+
+  # A home with no settings file must still spawn workers on other profiles.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model openai-codex/gpt-5.6-sol --effort max)
+  status=$?
+  expect_code 0 "$status" "a home with no single-slot file must still spawn a non-guarded profile"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi openai-codex/gpt-5.6-sol max
+  pass "an absent config/single-slot-profile blocks nothing outside the built-in guarded profile"
+}
+
+test_single_slot_leaves_other_profiles_alone() {
+  local rec id blocker out status
+  id=slot-other-z31
+  blocker=slot-holder-z29b
+  rec=$(make_spawn_case slot-other pi "$id")
+  read_case_record "$rec"
+  write_slot_config "$HOME_DIR"
+  seed_slot_holder "$HOME_DIR" "$blocker"
 
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
     --harness pi --model openai-codex/gpt-5.6-sol --effort max)
   status=$?
-  expect_code 0 "$status" "a non-qwen profile must be unaffected by a live qwen-local worker"$'\n'"$out"
+  expect_code 0 "$status" "a non-guarded profile must be unaffected by a live guarded worker"$'\n'"$out"
   assert_meta_profile "$HOME_DIR/state/$id.meta" pi openai-codex/gpt-5.6-sol max
-  pass "a live qwen-local worker does not block a different profile"
+  pass "a live overridden-profile worker does not block a different profile"
 }
 
-test_qwen_local_slot_only_counts_its_own_profile() {
+test_single_slot_only_counts_its_own_profile() {
   local rec id holder out status
-  id=qwen-slot-lookalike-z32
-  holder=qwen-slot-lookalike-holder-z29c
-  rec=$(make_spawn_case qwen-slot-lookalike pi "$id")
+  id=slot-lookalike-z32
+  holder=slot-lookalike-holder-z29c
+  rec=$(make_spawn_case slot-lookalike pi "$id")
   read_case_record "$rec"
-  # A qwen-local model on another harness, or another model on pi, is not the
-  # canonical profile and must not gate a real qwen-local spawn.
-  seed_qwen_holder "$HOME_DIR" "$holder" codex "$QWEN_LOCAL_MODEL"
-  seed_qwen_holder "$HOME_DIR" "${holder}-b" pi openai-codex/gpt-5.6-sol
+  write_slot_config "$HOME_DIR"
+  # The guarded model on another harness, or another model on pi, is not the
+  # guarded profile and must not gate a real guarded-profile spawn.
+  seed_slot_holder "$HOME_DIR" "$holder" codex "$SLOT_OVERRIDE"
+  seed_slot_holder "$HOME_DIR" "${holder}-b" pi openai-codex/gpt-5.6-sol
 
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    --harness pi --model "$QWEN_LOCAL_MODEL")
+    --harness pi --model "$SLOT_OVERRIDE")
   status=$?
-  expect_code 0 "$status" "only the canonical profile may hold the qwen-local slot"$'\n'"$out"
-  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
-  pass "the qwen-local gate matches only the canonical model and harness pair"
+  expect_code 0 "$status" "only the guarded model/harness pair may hold the single slot"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$SLOT_OVERRIDE" default
+  pass "the single-slot gate matches only the guarded model and harness pair"
 }
 
-test_qwen_local_slot_ignores_a_dead_agent_row() {
+test_single_slot_ignores_a_dead_agent_row() {
   local rec id blocker out status
-  id=qwen-slot-dead-second-z33
-  blocker=qwen-slot-dead-holder-z29d
-  rec=$(make_spawn_case qwen-slot-dead pi "$id")
+  id=slot-dead-second-z33
+  blocker=slot-dead-holder-z29d
+  rec=$(make_spawn_case slot-dead pi "$id")
   read_case_record "$rec"
-  seed_qwen_holder "$HOME_DIR" "$blocker"
+  write_slot_config "$HOME_DIR"
+  seed_slot_holder "$HOME_DIR" "$blocker"
 
   # The holder's record and window survive, but its agent has exited to a bare
   # shell, so the physical slot is free and the stale row must not block.
-  out=$(run_qwen_slot_spawn dead "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    --harness pi --model "$QWEN_LOCAL_MODEL")
+  out=$(run_slot_spawn dead "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_OVERRIDE")
   status=$?
-  expect_code 0 "$status" "an exited qwen-local agent must not hold the single slot"$'\n'"$out"
-  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
-  pass "an exited qwen-local agent leaves the slot free for a new worker"
+  expect_code 0 "$status" "an exited agent must not hold the single slot"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$SLOT_OVERRIDE" default
+  pass "an exited guarded-profile agent leaves the slot free for a new worker"
 }
 
-test_qwen_local_slot_reopens_after_the_holder_exits() {
+test_single_slot_reopens_after_the_holder_exits() {
   local rec id blocker out status
-  id=qwen-slot-exit-second-z34
-  blocker=qwen-slot-exit-holder-z29e
-  rec=$(make_spawn_case qwen-slot-exit pi "$id")
+  id=slot-exit-second-z34
+  blocker=slot-exit-holder-z29e
+  rec=$(make_spawn_case slot-exit pi "$id")
   read_case_record "$rec"
-  seed_qwen_holder "$HOME_DIR" "$blocker"
+  write_slot_config "$HOME_DIR"
+  seed_slot_holder "$HOME_DIR" "$blocker"
 
   # A live holder refuses the second launch...
-  out=$(run_qwen_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    --harness pi --model "$QWEN_LOCAL_MODEL")
+  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_OVERRIDE")
   status=$?
   expect_code 1 "$status" "a live holder must refuse the second launch"$'\n'"$out"
   assert_contains "$out" "$blocker" "the refusal must name the live holder"
@@ -266,14 +327,210 @@ test_qwen_local_slot_reopens_after_the_holder_exits() {
 
   # ...but once its agent exits while the record and window remain, the same
   # launch proceeds.
-  out=$(run_qwen_slot_spawn dead "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    --harness pi --model "$QWEN_LOCAL_MODEL")
+  out=$(run_slot_spawn dead "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_OVERRIDE")
   status=$?
   expect_code 0 "$status" "the same launch must proceed once the holder's agent exits"$'\n'"$out"
-  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
-  pass "the qwen-local slot reopens after its recorded holder's agent exits"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$SLOT_OVERRIDE" default
+  pass "the single slot reopens after its recorded holder's agent exits"
 }
 
+test_single_slot_unusable_override_falls_back_to_default() {
+  local rec id blocker out status
+  id=slot-badconf-z36
+  blocker=slot-badconf-holder-z29i
+  rec=$(make_spawn_case slot-badconf pi "$id")
+  read_case_record "$rec"
+  # An empty file must warn loudly and keep the built-in default in force -
+  # never read as an opt-out that leaves the engine unguarded.
+  : > "$HOME_DIR/config/single-slot-profile"
+  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
+
+  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 1 "$status" "an unusable override must not disable the built-in default guard"
+  assert_contains "$out" "config/single-slot-profile" "the fallback warning must name the unusable file"
+  assert_contains "$out" "$blocker" "the fallback refusal must name the blocking live worker"
+  assert_absent "$HOME_DIR/state/$id.meta" "a fallback-refused spawn wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a fallback-refused spawn launched a worker"
+  pass "an unusable override warns loudly and the built-in default keeps guarding"
+}
+
+test_single_slot_stale_override_keeps_default_guard() {
+  local rec id blocker out status
+  id=slot-stale-z40
+  blocker=slot-stale-holder-z29j
+  rec=$(make_spawn_case slot-stale pi "$id")
+  read_case_record "$rec"
+  # A well-formed value naming an older engine adds that engine to the guarded
+  # set; it must not remove the built-in default for the engine in use.
+  write_slot_config "$HOME_DIR" 'single-slot-test/retired-model'
+  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
+
+  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 1 "$status" "a stale override must not disable the built-in default guard"
+  assert_contains "$out" "$blocker" "the stale-override refusal must name the blocking live worker"
+  assert_absent "$HOME_DIR/state/$id.meta" "a stale-override refusal wrote its own task record"
+  pass "a stale but well-formed override cannot silently disable the built-in default"
+}
+
+test_single_slot_raw_launch_resolves_model_from_command() {
+  local rec id blocker out status
+  id=slot-raw-z41
+  blocker=slot-raw-holder-z29k
+  rec=$(make_spawn_case slot-raw pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
+
+  # A raw pi command embeds its own --model; the gate resolves it out of the
+  # command text, so the guarded profile cannot be bypassed by going raw...
+  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "pi --model $SLOT_DEFAULT")
+  status=$?
+  expect_code 1 "$status" "a raw pi launch on the guarded profile must be refused while the slot is live"
+  assert_contains "$out" "$id cannot launch" "the raw refusal must use the deterministic cannot-launch shape"
+  assert_contains "$out" "$blocker" "the raw refusal must name the blocking live worker"
+  assert_absent "$HOME_DIR/state/$id.meta" "a raw-refused spawn wrote its own task record"
+
+  # ...including the --model=<value> form, which then launches normally.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "pi --model=openai-codex/gpt-5.6-sol")
+  status=$?
+  expect_code 0 "$status" "a raw pi launch on a non-guarded model must proceed"$'\n'"$out"
+  assert_contains "$out" "spawned $id harness=pi" "the raw pi launch did not complete"
+  pass "a raw pi launch's embedded --model is resolved and gated"
+}
+
+test_single_slot_raw_launch_without_model_refuses() {
+  local rec id out status
+  id=slot-raw-nomodel-z42
+  rec=$(make_spawn_case slot-raw-nomodel pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  # A raw pi command with no resolvable --model cannot be verified against the
+  # guarded set, so it is refused rather than allowed past the gate.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "pi --tui-mode regular")
+  status=$?
+  expect_code 1 "$status" "a raw pi launch without --model must be refused"
+  assert_contains "$out" "$id cannot launch" "the unresolvable-model refusal must use the cannot-launch shape"
+  assert_contains "$out" "--model" "the unresolvable-model refusal must name --model"
+  assert_absent "$HOME_DIR/state/$id.meta" "an unresolvable-model refusal wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "an unresolvable-model refusal launched a worker"
+  pass "a raw pi launch with no resolvable --model is refused with a clear diagnostic"
+}
+
+test_single_slot_raw_launch_model_followed_by_option_refuses() {
+  local rec id blocker out status
+  id=slot-raw-optval-z44
+  blocker=slot-raw-optval-holder-z29l
+  rec=$(make_spawn_case slot-raw-optval pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
+
+  # The token after --model is an option, not a model value: taking it at face
+  # value would resolve a bogus model, miss the guarded set, and let the gate
+  # skip - so the malformed argument is refused before any launch.
+  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "pi --model --tui-mode regular")
+  status=$?
+  expect_code 1 "$status" "a raw --model followed by an option must be refused"
+  assert_contains "$out" "$id cannot launch" "the malformed-model refusal must use the cannot-launch shape"
+  assert_contains "$out" "--model is followed by the option '--tui-mode'" "the refusal must name the malformed argument"
+  assert_absent "$HOME_DIR/state/$id.meta" "a malformed-model refusal wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a malformed-model refusal launched a worker"
+  pass "a raw --model followed by another option cannot slip past the gate"
+}
+
+test_single_slot_raw_launch_empty_inline_model_refuses() {
+  local rec id out status
+  id=slot-raw-emptyval-z45
+  rec=$(make_spawn_case slot-raw-emptyval pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "pi --model=")
+  status=$?
+  expect_code 1 "$status" "a raw --model= with an empty value must be refused"
+  assert_contains "$out" "$id cannot launch" "the empty-inline-model refusal must use the cannot-launch shape"
+  assert_contains "$out" "--model= carries an empty value" "the refusal must name the empty --model= argument"
+  assert_absent "$HOME_DIR/state/$id.meta" "an empty-inline-model refusal wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "an empty-inline-model refusal launched a worker"
+  pass "a raw --model= with an empty value is refused with an accurate diagnostic"
+}
+
+test_single_slot_raw_launch_trailing_bare_model_refuses() {
+  local rec id out status
+  id=slot-raw-bare-z46
+  rec=$(make_spawn_case slot-raw-bare pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "pi --tui-mode regular --model")
+  status=$?
+  expect_code 1 "$status" "a raw command ending in a bare --model must be refused"
+  assert_contains "$out" "$id cannot launch" "the trailing-bare-model refusal must use the cannot-launch shape"
+  assert_contains "$out" "ends with a bare --model" "the refusal must name the trailing bare --model"
+  assert_absent "$HOME_DIR/state/$id.meta" "a trailing-bare-model refusal wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a trailing-bare-model refusal launched a worker"
+  pass "a raw command ending in a bare --model is refused with an accurate diagnostic"
+}
+
+test_single_slot_config_scope_is_pi_only() {
+  local rec id out status
+  id=slot-claude-z37
+  rec=$(make_spawn_case slot-claude claude "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  # The guard governs pi launches only; a non-pi launch is untouched even when
+  # no single-slot file exists.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "a claude launch must be unaffected by the single-slot config"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
+  pass "the single-slot gate is scoped to pi launches"
+}
+
+test_single_slot_refuses_a_secondmate_spawn() {
+  local rec id blocker sm out status
+  id=slot-sm-z43
+  blocker=slot-sm-holder-z29f
+  rec=$(make_spawn_case slot-sm pi "$id")
+  read_case_record "$rec"
+  write_slot_config "$HOME_DIR"
+  printf '%s\n' "pi $SLOT_OVERRIDE" > "$HOME_DIR/config/secondmate-harness"
+  seed_slot_holder "$HOME_DIR" "$blocker"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  sm=$(cd "$sm" && pwd -P)
+
+  # Secondmates are NOT exempt: the slot constraint is physical, so a
+  # secondmate launch on a guarded profile is refused while the slot is live.
+  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$blocker" FM_FAKE_PANE_COMMAND=pi \
+    run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+  status=$?
+  expect_code 1 "$status" "a secondmate launch on the guarded profile must be refused"
+  assert_contains "$out" "$id cannot launch" "the secondmate refusal must use the deterministic cannot-launch shape"
+  assert_contains "$out" "$blocker" "the secondmate refusal must name the blocking live worker"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused secondmate spawn wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused secondmate spawn launched a worker"
+  pass "the single-slot gate exempts secondmates not at all"
+}
+
+# Claude Code strips U+2063 from the launch-prompt argument, so a claude launch
+# publishes the launch-brief envelope as a record in the receiving home's
+# operational inbox and passes only a printable doorbell naming it. Parsing the
+# staged launch the way the destination pane's shell would proves the argument
+# it passes and the record it names.
 test_no_profile_keeps_claude_profile_defaults() {
   local rec id out status expected launch
   id=profile-off-z1
@@ -292,11 +549,6 @@ test_no_profile_keeps_claude_profile_defaults() {
   pass "no --model/--effort records defaults and types the claude launch instructions"
 }
 
-# Claude Code strips U+2063 from the launch-prompt argument, so a claude launch
-# publishes the launch-brief envelope as a record in the receiving home's
-# operational inbox and passes only a printable doorbell naming it. Parsing the
-# staged launch the way the destination pane's shell would proves the argument
-# it passes and the record it names.
 test_claude_launch_brief_publishes_record_doorbell() {
   local rec id out status launch doorbell record
   id="brief-doorbell-z1"
@@ -1365,6 +1617,9 @@ test_pi_exclude_tools_reach_ship_and_scout_launches() {
 # calls); every other model, every other harness, and the primary session keep
 # the tools, and the built-in list merges with config/crew-exclude-tools.
 WEB_TOOL_EXCLUSION='web_search,source_check,fetch_content,get_search_content'
+# A qwen-local model id for these exclusion tests: the exclusion is scoped to
+# the qwen-local/* provider prefix, not to any particular engine.
+QWEN_TOOL_MODEL='qwen-local/test-model'
 
 test_qwen_local_model_excludes_web_tools() {
   local harness rec id out status launch
@@ -1373,7 +1628,7 @@ test_qwen_local_model_excludes_web_tools() {
     rec=$(make_spawn_case "excl-qwen-web-$harness" "$harness" "$id")
     read_case_record "$rec"
     out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-      --harness "$harness" --model "$QWEN_LOCAL_MODEL")
+      --harness "$harness" --model "$QWEN_TOOL_MODEL")
     status=$?
     expect_code 0 "$status" "qwen-local $harness ship spawn should succeed"$'\n'"$out"
     launch=$(cat "$LAUNCH_LOG")
@@ -1390,7 +1645,7 @@ test_qwen_local_model_exclusion_merges_with_config_list() {
   read_case_record "$rec"
   write_exclude_file "$HOME_DIR" 'mcp__tracker__editIssue' 'web_search'
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    --harness pi --model "$QWEN_LOCAL_MODEL")
+    --harness pi --model "$QWEN_TOOL_MODEL")
   status=$?
   expect_code 0 "$status" "qwen-local spawn with a config exclusion list should succeed"$'\n'"$out"
   launch=$(cat "$LAUNCH_LOG")
@@ -1431,7 +1686,7 @@ test_qwen_local_secondmate_config_model_excludes_web_tools() {
   id=excl-qwen-web-secondmate-z9e
   rec=$(make_spawn_case excl-qwen-web-secondmate pi "$id")
   read_case_record "$rec"
-  printf '%s\n' "pi $QWEN_LOCAL_MODEL" > "$HOME_DIR/config/secondmate-harness"
+  printf '%s\n' "pi $QWEN_TOOL_MODEL" > "$HOME_DIR/config/secondmate-harness"
   sm="$CASE_DIR/secondmate-home"
   make_seeded_secondmate_home "$sm" "$id"
   sm=$(cd "$sm" && pwd -P)
@@ -1439,9 +1694,9 @@ test_qwen_local_secondmate_config_model_excludes_web_tools() {
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
   status=$?
   expect_code 0 "$status" "a config-resolved qwen-local secondmate should succeed"$'\n'"$out"
-  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_LOCAL_MODEL" default
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$QWEN_TOOL_MODEL" default
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "--model '$QWEN_LOCAL_MODEL' " \
+  assert_contains "$launch" "--model '$QWEN_TOOL_MODEL' " \
     "the config-resolved secondmate model must reach the launch"
   assert_contains "$launch" "--exclude-tools '$WEB_TOOL_EXCLUSION' " \
     "a config-resolved qwen-local secondmate must exclude the unused pi-web-access tools"
@@ -2578,10 +2833,21 @@ test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks
 test_keep_ai_trailers_reaches_secondmate_crew_launches
 test_claude_secondmate_launch_carries_the_attribution_policy
 test_active_dispatch_profile_does_not_block_secondmate_launch
-test_qwen_local_slot_refuses_a_second_worker
-test_qwen_local_slot_leaves_other_profiles_alone
-test_qwen_local_slot_only_counts_its_own_profile
-test_qwen_local_slot_ignores_a_dead_agent_row
-test_qwen_local_slot_reopens_after_the_holder_exits
+test_single_slot_refuses_a_second_worker
+test_single_slot_builtin_default_guards_without_config
+test_single_slot_missing_file_leaves_other_profiles_alone
+test_single_slot_leaves_other_profiles_alone
+test_single_slot_only_counts_its_own_profile
+test_single_slot_ignores_a_dead_agent_row
+test_single_slot_reopens_after_the_holder_exits
+test_single_slot_unusable_override_falls_back_to_default
+test_single_slot_stale_override_keeps_default_guard
+test_single_slot_raw_launch_resolves_model_from_command
+test_single_slot_raw_launch_without_model_refuses
+test_single_slot_raw_launch_model_followed_by_option_refuses
+test_single_slot_raw_launch_empty_inline_model_refuses
+test_single_slot_raw_launch_trailing_bare_model_refuses
+test_single_slot_config_scope_is_pi_only
+test_single_slot_refuses_a_secondmate_spawn
 
 echo "# all fm-spawn-dispatch-profile tests passed"
