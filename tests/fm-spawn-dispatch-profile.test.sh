@@ -484,6 +484,116 @@ test_single_slot_raw_launch_trailing_bare_model_refuses() {
   pass "a raw command ending in a bare --model is refused with an accurate diagnostic"
 }
 
+test_single_slot_raw_holder_blocks_ordinary_launch() {
+  local rec holder id out status
+  holder=slot-rawholder-z50
+  id=slot-rawholder-second-z51
+  rec=$(make_spawn_case slot-raw-holder pi "$holder" "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  # A hand-typed Strata launch really runs: with the slot free it succeeds,
+  # and its worker record carries the effective engine identity.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$holder" "$PROJ_DIR" \
+    "pi --model $SLOT_DEFAULT")
+  status=$?
+  expect_code 0 "$status" "a raw pi launch on the free guarded profile must proceed"$'\n'"$out"
+  assert_contains "$out" "spawned $holder harness=pi" "the raw pi launch did not complete"
+  assert_meta_profile "$HOME_DIR/state/$holder.meta" pi "$SLOT_DEFAULT" default
+  [ -s "$LAUNCH_LOG" ] || fail "a successful raw launch left no launch trace"
+
+  # With that hand-typed worker live, an ordinary launch on the same engine
+  # is refused, and the refused launch never reaches an engine.
+  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder" FM_FAKE_PANE_COMMAND=pi \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 1 "$status" "an ordinary launch must be refused while a raw-launched Strata worker is live"
+  assert_contains "$out" "$id cannot launch" "the refusal must use the deterministic cannot-launch shape"
+  assert_contains "$out" "$holder" "the refusal must name the live raw-launched worker"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused ordinary spawn wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused ordinary spawn launched a worker"
+  pass "a live hand-typed Strata worker blocks an ordinary Strata launch"
+}
+
+test_single_slot_ordinary_holder_blocks_raw_launch() {
+  local rec holder id out status
+  holder=slot-ordholder-z52
+  id=slot-ordholder-raw-z53
+  rec=$(make_spawn_case slot-ordinary-holder pi "$holder" "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$holder" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 0 "$status" "an ordinary launch on the free guarded profile must proceed"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$holder.meta" pi "$SLOT_DEFAULT" default
+
+  # With that ordinary worker live, the hand-typed form of the same engine
+  # is refused, and the refused launch never reaches an engine.
+  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder" FM_FAKE_PANE_COMMAND=pi \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "pi --model $SLOT_DEFAULT")
+  status=$?
+  expect_code 1 "$status" "a raw launch must be refused while an ordinary Strata worker is live"
+  assert_contains "$out" "$id cannot launch" "the raw refusal must use the deterministic cannot-launch shape"
+  assert_contains "$out" "$holder" "the raw refusal must name the live ordinary worker"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused raw spawn wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused raw spawn launched a worker"
+  pass "a live ordinary Strata worker blocks a hand-typed Strata launch"
+}
+
+test_single_slot_raw_quoted_and_prefixed_models_enforced() {
+  local rec blocker id out status raw
+  blocker=slot-qpholder-z54
+  id=slot-qp-z55
+  rec=$(make_spawn_case slot-raw-quoted pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
+
+  # Quoted, path-wrapped, and environment-prefixed spellings resolve to the
+  # executed engine identity, so each is refused while the slot is live.
+  for raw in "pi --model '$SLOT_DEFAULT'" "pi --model=\"$SLOT_DEFAULT\"" "pi --model='$SLOT_DEFAULT'" \
+    "/usr/local/bin/pi --model $SLOT_DEFAULT" "FOO=1 pi --model $SLOT_DEFAULT" \
+    "env FOO=1 pi --model $SLOT_DEFAULT"; do
+    out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      "$raw")
+    status=$?
+    expect_code 1 "$status" "a raw launch spelling '$raw' must be refused while the slot is live"
+    assert_contains "$out" "$id cannot launch" "the refusal of '$raw' must use the cannot-launch shape"
+    assert_contains "$out" "$blocker" "the refusal of '$raw' must name the blocking live worker"
+    assert_absent "$HOME_DIR/state/$id.meta" "a refused spelling '$raw' wrote its own task record"
+    [ ! -s "$LAUNCH_LOG" ] || fail "a refused spelling '$raw' launched a worker"
+  done
+  pass "quoted, wrapped, and environment-prefixed raw model spellings are enforced"
+}
+
+test_single_slot_raw_ambiguous_forms_refuse_before_start() {
+  local rec id out status raw
+  id=slot-amb-z56
+  rec=$(make_spawn_case slot-raw-ambiguous pi "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  # Forms whose effective engine identity cannot be established without
+  # evaluating shell text are refused before any engine starts.
+  # Literal $ and backticks below are the point under test, not a quoting slip.
+  # shellcheck disable=SC2016
+  for raw in 'pi --model $SOME_UNSET_MODEL_VAR_XYZ' "pi --model=\"\$SOME_UNSET_MODEL_VAR_XYZ\"" \
+    'pi --model `pick-model`' "sh -c 'pi --model $SLOT_DEFAULT'" "pi --model A --model B"; do
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+      "$raw")
+    status=$?
+    expect_code 1 "$status" "an ambiguous raw form '$raw' must be refused"
+    assert_contains "$out" "$id cannot launch" "the refusal of '$raw' must use the cannot-launch shape"
+    assert_absent "$HOME_DIR/state/$id.meta" "a refused ambiguous form '$raw' wrote its own task record"
+    [ ! -s "$LAUNCH_LOG" ] || fail "a refused ambiguous form '$raw' launched a worker"
+  done
+  pass "ambiguous raw launch forms are refused before any engine starts"
+}
+
 test_single_slot_config_scope_is_pi_only() {
   local rec id out status
   id=slot-claude-z37
@@ -2847,6 +2957,10 @@ test_single_slot_raw_launch_without_model_refuses
 test_single_slot_raw_launch_model_followed_by_option_refuses
 test_single_slot_raw_launch_empty_inline_model_refuses
 test_single_slot_raw_launch_trailing_bare_model_refuses
+test_single_slot_raw_holder_blocks_ordinary_launch
+test_single_slot_ordinary_holder_blocks_raw_launch
+test_single_slot_raw_quoted_and_prefixed_models_enforced
+test_single_slot_raw_ambiguous_forms_refuse_before_start
 test_single_slot_config_scope_is_pi_only
 test_single_slot_refuses_a_secondmate_spawn
 

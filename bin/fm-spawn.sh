@@ -3533,16 +3533,237 @@ fi
 # (bin/fm-backend.sh's fm_backend_agent_alive), never from the record's mere
 # presence. A relaunch of the same task id must not self-block, so the task's
 # own record is skipped; it is the only exemption. A raw launch command
-# embeds its own arguments, so when a raw command resolves to harness pi the
-# gate parses its effective --model out of the command text and refuses a
-# command whose --model is missing, empty, trailing-bare, or followed by
-# another option: a raw launch must never bypass the gate by leaving the
-# parsed model empty or malformed.
+# embeds its own launcher and arguments, so when the command resolves to the
+# pi launcher the gate resolves its effective --model out of the command
+# text the way the executing shell would read it - quotes stripped, leading
+# environment assignments (and a leading `env`) skipped - and records that
+# identity on the worker record so the holder scan discovers a raw-launched
+# Strata worker exactly like an ordinary one. A raw pi command whose --model
+# is missing, empty, trailing-bare, followed by another option, quoted but
+# unresolvable, expanded, wrapped, or otherwise ambiguous is refused before
+# any engine starts rather than allowed past with an empty or mismatched
+# model: a raw launch must never bypass the gate by leaving the parsed model
+# empty, quoted past the comparison, or hidden behind a wrapper.
+# Resolve the effective --model of a raw launch command the way the
+# executing shell would read it: single and double quotes are stripped, a
+# backslash escapes the next character, and leading environment assignments
+# (plus an optional leading `env` with its own assignments) are skipped to
+# find the real program. Anything that cannot be resolved deterministically
+# - unbalanced quotes, expansions or separators that would need evaluation,
+# or conflicting --model values - is refused before any engine starts, so
+# the guard validates the model the launcher will actually execute. Prints
+# the resolved model on stdout and exits nonzero with a form-accurate
+# diagnostic otherwise. Never evaluates the command text.
+slot_resolve_raw_model() { # <id> <command>
+  local id=$1 text=$2
+  local i=0 n c token='' words='' in_s=0 in_d=0 skip_next=0
+  local slot_launcher='' in_prefix=1 w piece model='' seen_model=0
+  local flag_nl=0 flag_unbal=0 flag_expand=0 flag_dqexpand=0
+  local flag_meta=0 flag_glob=0 flag_dangle=0 badc=''
+  n=${#text}
+  while [ "$i" -lt "$n" ]; do
+    c=${text:$i:1}
+    if [ "$in_s" = 1 ]; then
+      case "$c" in
+      "'") in_s=0 ;;
+      *) token=$token$c ;;
+      esac
+    elif [ "$in_d" = 1 ]; then
+      case "$c" in
+      '"') in_d=0 ;;
+      # An expansion inside double quotes still runs, so note it for the
+      # pi-only strictness check below; other adapters keep existing behavior.
+      '$' | '`') flag_dqexpand=1; badc=$c; token=$token$c ;;
+      [\\])
+        i=$((i + 1))
+        if [ "$i" -ge "$n" ]; then
+          flag_dangle=1
+        else
+          token=$token${text:$i:1}
+        fi
+        ;;
+      *) token=$token$c ;;
+      esac
+    else
+      case "$c" in
+      "'") in_s=1 ;;
+      '"') in_d=1 ;;
+      # Unquoted expansions, separators, and globs would need evaluation to
+      # resolve: note them for the pi-only strictness check below rather
+      # than refusing here, so chained raw launches for other adapters
+      # (e.g. `cd . && git commit`) keep working exactly as before.
+      '$' | '`') flag_expand=1; badc=$c; token=$token$c ;;
+      ';' | '&' | '|' | '<' | '>' | '(' | ')')
+        flag_meta=1; badc=$c; token=$token$c
+        ;;
+      '*' | '?' | '[') flag_glob=1; badc=$c; token=$token$c ;;
+      [\\])
+        i=$((i + 1))
+        if [ "$i" -ge "$n" ]; then
+          flag_dangle=1
+        else
+          token=$token${text:$i:1}
+        fi
+        ;;
+      ' ' | '\t' | $'\n')
+        case "$c" in
+        $'\n') flag_nl=1 ;;
+        esac
+        words=$words$token$'\n'
+        token=''
+        ;;
+      *) token=$token$c ;;
+      esac
+    fi
+    i=$((i + 1))
+  done
+  if [ "$in_s" = 1 ] || [ "$in_d" = 1 ]; then
+    flag_unbal=1
+  fi
+  words=$words$token$'\n'
+  while IFS= read -r w; do
+    if [ "$skip_next" = 1 ]; then
+      skip_next=0
+      continue
+    fi
+    if [ "$in_prefix" = 1 ]; then
+      case "$w" in
+      '') continue ;;
+      env) continue ;;
+      -i) continue ;;
+      -u) skip_next=1; continue ;;
+      -*) slot_launcher=$w; in_prefix=0 ;;
+      [A-Za-z_]*=*) continue ;;
+      *) slot_launcher=$w; in_prefix=0 ;;
+      esac
+      continue
+    fi
+    case "$w" in
+    --)
+      break
+      ;;
+    --model)
+      IFS= read -r w || w=
+      case "$w" in
+      '' | --)
+        echo "error: $id cannot launch: the raw pi launch command ends with a bare --model and no value, so the single-slot guard cannot resolve the model it would run; pass --model <profile> in the raw command" >&2
+        return 1
+        ;;
+      -*)
+        echo "error: $id cannot launch: the raw pi launch command's --model is followed by the option '$w' instead of a model value; pass --model <profile>" >&2
+        return 1
+        ;;
+      esac
+      if [ "$seen_model" = 1 ] && [ "$w" != "$model" ]; then
+        echo "error: $id cannot launch: the raw pi launch command names two different --model values ('$model' and '$w'), so the single-slot guard cannot resolve the model it would run; pass exactly one --model <profile>" >&2
+        return 1
+      fi
+      model=$w
+      seen_model=1
+      ;;
+    --model=*)
+      w=${w#--model=}
+      if [ -z "$w" ]; then
+        echo "error: $id cannot launch: the raw pi launch command's --model= carries an empty value; pass --model=<profile>" >&2
+        return 1
+      fi
+      if [ "$seen_model" = 1 ] && [ "$w" != "$model" ]; then
+        echo "error: $id cannot launch: the raw pi launch command names two different --model values ('$model' and '$w'), so the single-slot guard cannot resolve the model it would run; pass exactly one --model <profile>" >&2
+        return 1
+      fi
+      model=$w
+      seen_model=1
+      ;;
+    esac
+  done <<< "$words"
+  case "$(basename "./$slot_launcher")" in
+  pi) ;;
+  *)
+    # Not a plain pi launch: refuse only when the command still wraps one -
+    # any whitespace-separated piece resolving to the pi binary means the
+    # engine identity cannot be established from the launcher position, so
+    # the command must be restated plainly. Anything else is another
+    # adapter's raw launch and stays outside this gate.
+    while IFS= read -r w; do
+      for piece in $w; do
+        case "$(basename "./$piece")" in
+        pi)
+          echo "error: $id cannot launch: the raw launch command wraps a pi invocation ('$slot_launcher ...'), so the single-slot guard cannot resolve the model it would run; launch with a plain pi command carrying --model <profile>" >&2
+          return 1
+          ;;
+        esac
+      done
+    done <<< "$words"
+    echo "non-pi-raw"
+    return 0
+    ;;
+  esac
+  # A plain pi launch must resolve deterministically: refuse every noted
+  # ambiguity before any engine starts.
+  if [ "$flag_unbal" = 1 ]; then
+    echo "error: $id cannot launch: the raw pi launch command has an unbalanced quote, so the single-slot guard cannot resolve the model it would run; balance the quotes and pass --model <profile>" >&2
+    return 1
+  fi
+  if [ "$flag_nl" = 1 ]; then
+    echo "error: $id cannot launch: the raw pi launch command spans multiple lines, so the single-slot guard cannot resolve the model it would run; pass a single-line command with --model <profile>" >&2
+    return 1
+  fi
+  if [ "$flag_expand" = 1 ]; then
+    echo "error: $id cannot launch: the raw pi launch command contains an unevaluated '$badc' expansion, so the single-slot guard cannot resolve the model it would run; pass a literal --model <profile>" >&2
+    return 1
+  fi
+  if [ "$flag_dqexpand" = 1 ]; then
+    echo "error: $id cannot launch: the raw pi launch command expands '$badc' inside double quotes, so the single-slot guard cannot resolve the model it would run; pass a literal --model <profile>" >&2
+    return 1
+  fi
+  if [ "$flag_meta" = 1 ]; then
+    echo "error: $id cannot launch: the raw pi launch command contains the shell metacharacter '$badc', so the single-slot guard cannot resolve which engine it would run; pass a single plain pi command with --model <profile>" >&2
+    return 1
+  fi
+  if [ "$flag_glob" = 1 ]; then
+    echo "error: $id cannot launch: the raw pi launch command contains the unquoted glob character '$badc', so the single-slot guard cannot resolve the model it would run; quote or remove it and pass a literal --model <profile>" >&2
+    return 1
+  fi
+  if [ "$flag_dangle" = 1 ]; then
+    echo "error: $id cannot launch: the raw pi launch command ends in a dangling backslash, so the single-slot guard cannot resolve the model it would run" >&2
+    return 1
+  fi
+  if [ "$seen_model" = 0 ]; then
+    echo "error: $id cannot launch: the raw pi launch command carries no --model, so the single-slot guard cannot resolve the model it would run; add an explicit --model <profile> to the raw command" >&2
+    return 1
+  fi
+  printf '%s\n' "$model"
+}
 spawn_refuse_if_single_slot_taken() {
   local holder holder_id holder_harness holder_model holder_backend holder_target
-  local slot_profile slot_profile_present eff_model prev_word word
+  local slot_profile slot_profile_present eff_model
   local guarded_profiles='strata-local/qwen3.8-flash-next-coder-iq1_m'
-  [ "$HARNESS" = pi ] || return 0
+  if [ "$RAW_LAUNCH" = 1 ]; then
+    # A raw launch command embeds its own launcher and arguments, which the
+    # ordinary flag parser never sees, so the launcher is resolved here from
+    # the command text itself: the HARNESS probe above stops at a leading
+    # `env` or wrapper word, which must never exempt a wrapped pi launch.
+    # A raw launch that resolves to another adapter stays outside this gate;
+    # a wrapped pi invocation is refused by the resolver before any engine
+    # starts. An unresolvable raw pi launch is refused rather than allowed
+    # past the gate with an empty model.
+    if ! eff_model=$(slot_resolve_raw_model "$ID" "$LAUNCH"); then
+      exit 1
+    fi
+    if [ "$eff_model" = non-pi-raw ]; then
+      return 0
+    fi
+    # Record the effective engine identity on the worker record, so the
+    # holder scan below discovers a raw-launched Strata worker exactly like
+    # an ordinary one. The meta writer below stores model=${MODEL:-default}.
+    MODEL=$eff_model
+  else
+    # An ordinary launch with no resolved model keeps the pre-existing skip:
+    # the model is firstmate's own dispatch choice and the harness's ambient
+    # default is not knowable here.
+    [ "$HARNESS" = pi ] || return 0
+    eff_model=$MODEL
+  fi
   if ! slot_profile_present=$(fm_config_source_present "$CONFIG/single-slot-profile"); then
     exit 1
   fi
@@ -3566,56 +3787,10 @@ spawn_refuse_if_single_slot_taken() {
       esac
     fi
   fi
-  # The model this launch would actually run. A raw launch command embeds its
-  # own --model, which the ordinary flag parser never sees, so resolve it from
-  # the command text; an unresolvable raw pi launch is refused rather than
-  # allowed past the gate with an empty model. An ordinary launch with no
-  # resolved model keeps the pre-existing skip: the model is firstmate's own
-  # dispatch choice and the harness's ambient default is not knowable here.
-  if [ "$RAW_LAUNCH" = 1 ]; then
-    eff_model=
-    prev_word=
-    for word in $LAUNCH; do
-      case "$prev_word" in
-      --model)
-        case "$word" in
-        -*)
-          echo "error: $ID cannot launch: the raw pi launch command's --model is followed by the option '$word' instead of a model value; pass --model <profile>" >&2
-          exit 1
-          ;;
-        *)
-          eff_model=$word
-          break
-          ;;
-        esac
-        ;;
-      esac
-      case "$word" in
-      --model=*)
-        eff_model=${word#--model=}
-        if [ -z "$eff_model" ]; then
-          echo "error: $ID cannot launch: the raw pi launch command's --model= carries an empty value; pass --model=<profile>" >&2
-          exit 1
-        fi
-        break
-        ;;
-      esac
-      prev_word=$word
-    done
-    if [ -z "$eff_model" ]; then
-      case "$prev_word" in
-      --model)
-        echo "error: $ID cannot launch: the raw pi launch command ends with a bare --model and no value, so the single-slot guard cannot resolve the model it would run; pass --model <profile> in the raw command" >&2
-        ;;
-      *)
-        echo "error: $ID cannot launch: the raw pi launch command carries no --model, so the single-slot guard cannot resolve the model it would run; add an explicit --model <profile> to the raw command" >&2
-        ;;
-      esac
-      exit 1
-    fi
-  else
-    eff_model=$MODEL
-  fi
+  # The model this launch would run is already resolved above: the raw
+  # branch carries the effective --model out of the command text (and
+  # recorded it on MODEL for the worker record), while an ordinary launch
+  # with no resolved model keeps the pre-existing skip.
   [ -n "$eff_model" ] || return 0
   case " $guarded_profiles " in
   *" $eff_model "*) ;;
