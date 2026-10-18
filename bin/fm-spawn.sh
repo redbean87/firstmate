@@ -230,15 +230,15 @@
 #   /updatefirstmate, restart). A raw launch command never satisfies a
 #   deterministic project pin (docs/configuration.md "Crew dispatch profiles").
 #   A pi launch on the guarded local-engine profile is additionally count-and-refused
-#   while another live worker holds that profile's single slot, and a hand-typed
-#   (raw) launch whose command text names a guarded engine is refused outright
-#   rather than parsed; the guarded profile for the engine in use is a built-in
-#   default and config/single-slot-profile only adds guarded profiles
+#   while another live worker holds that profile's single slot, and every
+#   hand-typed (raw) launch command is refused outright for every adapter - the
+#   gate never reads command text. The guarded profile for the engine in use is
+#   a built-in default and config/single-slot-profile only adds guarded profiles
 #   (docs/configuration.md "Single-slot launch guard").
 #   A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin)
 #   overrides it for this spawn (either kind). A non-flag string containing
-#   whitespace is treated as a RAW launch command - the escape hatch for verifying
-#   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
+#   whitespace is a RAW launch command, refused before any engine starts; use
+#   --harness to launch an adapter. For pi and pi-signed, fm-spawn resolves the selected executable
 #   name from PATH once, probes that concrete path with --help, and launches the
 #   same path. It adds --tui-mode regular only when that help advertises the flag;
 #   a failed or inconclusive probe omits it so older Pi versions remain launchable.
@@ -3535,21 +3535,21 @@ fi
 # the record's mere presence. A relaunch of the same task id must not
 # self-block, so the task's own record is skipped; it is the only exemption.
 #
-# Hand-typed (raw) launches are refused outright rather than parsed. This gate
+# Hand-typed (raw) launches are refused outright for every tool. This gate
 # deliberately does NOT inspect, tokenize, evaluate, or try to recognise shell
-# command text: every earlier attempt to recover an executed engine identity
-# from a raw command's quoting, wrappers, expansions, or prefixes left another
-# spelling that started the guarded engine while the guard looked elsewhere. A
-# raw launch whose command text names a guarded profile - quote-blind literal
-# containment, so quoting, wrappers, command substitution, environment
-# prefixes, `exec`/`env`, and `&&` chaining cannot hide it - is refused before
-# any engine process starts, and Strata launches must use the supported
-# `--harness pi --model <profile>` path, which enforces this guard and records
-# the live worker for later single-slot checks. A raw launch that names no
-# guarded profile is another adapter's business and is left exactly as it was.
+# command text: launcher recognition is not a reliable enforcement boundary,
+# because each attempt to identify a raw command's executed engine from its
+# quoting, wrappers, expansions, or prefixes left one more spelling that
+# started the guarded engine while the guard looked elsewhere. The rule is
+# therefore total - if a launch did not come through the supported launch
+# path, it is refused before any engine process starts - and the compatibility
+# cost is explicit: hand-typed launch commands no longer work for any adapter.
+# Supported launches carry --harness (or a positional adapter) and use their
+# template path, which enforces this guard and records the live worker for
+# later single-slot checks.
 spawn_refuse_if_single_slot_taken() {
   local holder holder_id holder_harness holder_model holder_backend holder_target
-  local slot_profile slot_profile_present guarded_profile
+  local slot_profile slot_profile_present
   local guarded_profiles='strata-local/qwen3.8-flash-next-coder-iq1_m'
   if ! slot_profile_present=$(fm_config_source_present "$CONFIG/single-slot-profile"); then
     exit 1
@@ -3574,18 +3574,14 @@ spawn_refuse_if_single_slot_taken() {
       esac
     fi
   fi
-  # A hand-typed launch is never parsed: refuse it outright when its text
-  # names a guarded engine, and otherwise leave it to the adapter it names.
+  # A hand-typed launch is refused outright, without reading its text at all:
+  # it did not come through the supported launch path, so this gate cannot
+  # establish or record what it would run, and no command-text recognition is
+  # attempted. This is total across adapters by design, not narrowed to any
+  # spelling or wrapper.
   if [ "$RAW_LAUNCH" = 1 ]; then
-    for guarded_profile in $guarded_profiles; do
-      case "$LAUNCH" in
-      *"$guarded_profile"*)
-        echo "error: $ID cannot launch: hand-typed launches of the single-slot engine $guarded_profile are unsupported; launch with --harness pi --model $guarded_profile so the single-slot guard can enforce and record it" >&2
-        exit 1
-        ;;
-      esac
-    done
-    return 0
+    echo "error: $ID cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it" >&2
+    exit 1
   fi
   [ "$HARNESS" = pi ] || return 0
   # An ordinary launch with no resolved model keeps the pre-existing skip: the
