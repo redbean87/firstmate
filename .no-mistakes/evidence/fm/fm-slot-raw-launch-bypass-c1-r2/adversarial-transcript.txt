@@ -1,0 +1,43 @@
+raw=[pi --harness pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  rc=1
+  | fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home
+  | warning: secondmate smuggle sync skipped before launch: primary default-branch commit cannot be resolved
+  | error: smuggle cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+raw=[/bin/sh -c 'exec pi --tui-mode regular --approve --model strata-local/qwen3.8-flash-next-coder-iq1_m']
+  rc=1
+  | fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home
+  | warning: secondmate smuggle sync skipped before launch: primary default-branch commit cannot be resolved
+  | error: smuggle cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+raw=[env -i PATH=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/fakebin:$PATH pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  rc=1
+  | fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home
+  | warning: secondmate smuggle sync skipped before launch: primary default-branch commit cannot be resolved
+  | error: smuggle cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+raw=[bash -lc "pi --model strata-local/qwen3.8-flash-next-coder-iq1_m"]
+  rc=1
+  | fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home
+  | warning: secondmate smuggle sync skipped before launch: primary default-branch commit cannot be resolved
+  | error: smuggle cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+raw=[printf x | pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  rc=1
+  | fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home
+  | warning: secondmate smuggle sync skipped before launch: primary default-branch commit cannot be resolved
+  | error: smuggle cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+raw=[( pi --model strata-local/qwen3.8-flash-next-coder-iq1_m )]
+  rc=1
+  | fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home
+  | warning: secondmate smuggle sync skipped before launch: primary default-branch commit cannot be resolved
+  | error: smuggle cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+raw=[pi --model "$(printf %s strata-local/qwen3.8-flash-next-coder-iq1_m)"]
+  rc=1
+  | fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home
+  | warning: secondmate smuggle sync skipped before launch: primary default-branch commit cannot be resolved
+  | error: smuggle cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+raw=[claude --model sonnet --harness pi]
+  rc=1
+  | fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home
+  | warning: secondmate smuggle sync skipped before launch: primary default-branch commit cannot be resolved
+  | error: smuggle cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS: no adversarial hand-typed spelling smuggled the supported flags or reached an engine
+edge: leading-dash raw shape rc=1 diagnostic=[fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-adv.r1OFTd/lab-home basename: illegal option -- - usage: basename string [suffix]        basename [-a] [-s suffix] string [...]]
+FAILS=0

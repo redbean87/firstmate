@@ -1,0 +1,74 @@
+=== live driver base: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB ===
+=== repo: /Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M58HS8G1RYV7TDBR13MWEJ4S ===
+=== target commit: 4c4355a0e46fe8bd011dfbe08a2f5c0ca8d40b79 ===
+
+--- phase 1: hand-typed refusal shapes (id=rawref, no engine must start) ---
+shape=plain rc=1 raw=[pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=single-quoted rc=1 raw=[pi --model 'strata-local/qwen3.8-flash-next-coder-iq1_m']
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=double-quoted rc=1 raw=[pi --model="strata-local/qwen3.8-flash-next-coder-iq1_m"]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=env-prefixed rc=1 raw=[FOO=1 pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=exec rc=1 raw=[exec pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=command rc=1 raw=[command pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=nohup rc=1 raw=[nohup pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=command-substitution rc=1 raw=[$(command -v pi) --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=quoted-launcher rc=1 raw=['pi' --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=shell-wrapper rc=1 raw=[sh -c 'pi --model strata-local/qwen3.8-flash-next-coder-iq1_m']
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=chained rc=1 raw=[cd . && pi --model strata-local/qwen3.8-flash-next-coder-iq1_m]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=non-pi-runner rc=1 raw=[claude --model sonnet]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+shape=non-pi-lookalike rc=1 raw=[custom-agent --flag pi]
+  diagnostic: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS: all 13 hand-typed shapes refused with one identical diagnostic and no engine start
+identical diagnostic text: error: rawref cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+
+--- phase 2: supported launch on the guarded single-slot profile ---
+rc=0
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB/lab-home
+warning: secondmate smlive sync skipped before launch: primary default-branch commit cannot be resolved
+spawned smlive harness=pi kind=secondmate mode=secondmate yolo=off window=lab:fm-smlive worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB/sm-smlive
+recorded endpoint lab:fm-smlive liveness=alive
+recorded worker (live):
+    window=lab:fm-smlive
+    endpoint_task_id=smlive
+    worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB/sm-smlive
+    project=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB/sm-smlive
+    harness=pi
+    kind=secondmate
+    mode=secondmate
+    yolo=off
+    tasktmp=/tmp/fm-smlive
+    model=strata-local/qwen3.8-flash-next-coder-iq1_m
+    effort=default
+    busy_gen=g1792362860.12281.20998
+    spawn_gen=s1792362861.12049.16244
+    home=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB/sm-smlive
+    projects=
+
+--- phase 3: second supported launch while the first is live ---
+rc=1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB/lab-home
+warning: secondmate smlive2 sync skipped before launch: primary default-branch commit cannot be resolved
+error: smlive2 cannot launch: strata-local/qwen3.8-flash-next-coder-iq1_m runs a single slot (one request at a time) and smlive is live on that profile; re-dispatch smlive2 after smlive lands
+
+--- phase 4: holder exits, slot reopens, recorded worker remains discoverable ---
+holder after exit: liveness=dead
+rc=0
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB/lab-home
+warning: secondmate smlive2 sync skipped before launch: primary default-branch commit cannot be resolved
+spawned smlive2 harness=pi kind=secondmate mode=secondmate yolo=off window=lab:fm-smlive2 worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live.Ph4eBB/sm-smlive2
+reopened endpoint lab:fm-smlive2 liveness=alive
+
+=== results ===
+PASS: all 13 hand-typed shapes refused with one identical diagnostic and no engine start
+FAILS=0
