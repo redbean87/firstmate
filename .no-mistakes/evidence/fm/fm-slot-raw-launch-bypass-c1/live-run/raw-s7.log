@@ -1,0 +1,5 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z
+WARNING: watcher still down (same stale episode; last beat: 49s ago, grace 300s) - full banner already printed this episode.
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s7/launch-brief.md records no ship branch; defaulting to legacy branch fm/s7
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s7/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: s7 cannot launch: hand-typed launches of the single-slot engine single-slot-test/guarded-model are unsupported; launch with --harness pi --model single-slot-test/guarded-model so the single-slot guard can enforce and record it

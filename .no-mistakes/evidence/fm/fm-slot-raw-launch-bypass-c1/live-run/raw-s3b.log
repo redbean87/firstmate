@@ -1,0 +1,13 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 26s ago).
+●  snapshot: model=extension reason=no-watcher lock=unheld pid=none(absent identity -) beacon=27s extension-ownership=not-proven
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M57PCKRD7EF0M0HVF8KVD5NZ/.pi/extensions/fm-primary-turnend-guard.ts -e /Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M57PCKRD7EF0M0HVF8KVD5NZ/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s3b/launch-brief.md records no ship branch; defaulting to legacy branch fm/s3b
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s3b/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+notice: task s3b consultation waiver is recorded in its task record; this home keeps no backlog note for it (this home keeps no markdown backlog at /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.hJBe0z/data/backlog.md)
+spawned s3b harness=custom-agent kind=ship mode=no-mistakes yolo=off window=primary:fm-s3b worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.hJBe0z/treehouse/.treehouse/proj-3f4fbf/2/proj

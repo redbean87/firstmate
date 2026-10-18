@@ -1,0 +1,4 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s2-1/launch-brief.md records no ship branch; defaulting to legacy branch fm/s2-1
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s2-1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: s2-1 cannot launch: hand-typed launches of the single-slot engine strata-local/qwen3.8-flash-next-coder-iq1_m are unsupported; launch with --harness pi --model strata-local/qwen3.8-flash-next-coder-iq1_m so the single-slot guard can enforce and record it

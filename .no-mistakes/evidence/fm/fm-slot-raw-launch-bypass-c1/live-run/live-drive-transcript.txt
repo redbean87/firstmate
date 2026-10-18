@@ -1,0 +1,106 @@
+------------------------------------------------------------------------
+SCENARIO 1: a hand-typed Strata launch is refused before any engine starts
+  lab=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z  tmux=fm-lab  socket=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.hJBe0z/tmux/tmux-501/fm-lab
+  exit=1
+error: s1 cannot launch: hand-typed launches of the single-slot engine strata-local/qwen3.8-flash-next-coder-iq1_m are unsupported; launch with --harness pi --model strata-local/qwen3.8-flash-next-coder-iq1_m so the single-slot guard can enforce and record it
+[PASS] s1-refused -- exit 1
+[PASS] s1-message -- output names hand-typed single-slot refusal
+[PASS] s1-supported-path-named -- output names --harness pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s1-no-record -- no state/s1.meta written
+[PASS] s1-no-window -- no new tmux window
+------------------------------------------------------------------------
+SCENARIO 2 (adversarial): quoting, wrappers, env prefixes, chaining, substitution and tabs cannot hide the engine
+[PASS] s2-1 -- spelling refused, no record, no window: pi --model 'strata-local/qwen3.8-flash-next-coder-iq1_m'
+[PASS] s2-2 -- spelling refused, no record, no window: pi --model="strata-local/qwen3.8-flash-next-coder-iq1_m"
+[PASS] s2-3 -- spelling refused, no record, no window: pi --model='strata-local/qwen3.8-flash-next-coder-iq1_m'
+[PASS] s2-4 -- spelling refused, no record, no window: exec pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-5 -- spelling refused, no record, no window: /usr/bin/env pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-6 -- spelling refused, no record, no window: env FOO=1 pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-7 -- spelling refused, no record, no window: env -i pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-8 -- spelling refused, no record, no window: sh -c 'pi --model strata-local/qwen3.8-flash-next-coder-iq1_m'
+[PASS] s2-9 -- spelling refused, no record, no window: bash -lc "pi --model strata-local/qwen3.8-flash-next-coder-iq1_m"
+[PASS] s2-10 -- spelling refused, no record, no window: cd . && pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-11 -- spelling refused, no record, no window: true; pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-12 -- spelling refused, no record, no window: sudo pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-13 -- spelling refused, no record, no window: command pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-14 -- spelling refused, no record, no window: nice pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-15 -- spelling refused, no record, no window: $(command -v pi) --model strata-local/qwen3.8-flash-next-coder-iq1_m
+[PASS] s2-16 -- spelling refused, no record, no window: pi --model strata-local/qwen3.8-flash-next-coder-iq1_m	--tui-mode regular
+------------------------------------------------------------------------
+SCENARIO 3: raw launches naming no guarded engine still pass through the gate
+  exit=0 :: spawned s3a harness=echo kind=ship mode=no-mistakes yolo=off window=primary:fm-s3a worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.hJBe0z/treehouse/.treehouse/proj-3f4fbf/1/proj
+[PASS] s3a-allowed -- raw echo launch exits 0
+[PASS] s3a-window -- a tmux window fm-s3a was created
+[PASS] s3a-meta -- record written with harness=echo
+[PASS] s3b-other-adapter -- raw custom-agent mentioning pi exits 0
+[PASS] s3b-meta -- record written with harness=custom-agent
+[PASS] s3c-unguarded-pi -- raw pi on an unguarded model is not gate-refused
+------------------------------------------------------------------------
+SCENARIO 4: a live ordinary Strata worker (built-in default, no config file) refuses a second ordinary launch
+  holder window: fm-holder-live standin
+  exit=1
+error: s4 cannot launch: strata-local/qwen3.8-flash-next-coder-iq1_m runs a single slot (one request at a time) and holder-live is live on that profile; re-dispatch s4 after holder-live lands
+[PASS] s4-refused -- second ordinary launch exits 1
+[PASS] s4-slot-message -- refusal is the single-slot refusal
+[PASS] s4-names-holder -- refusal names the live holder-live
+[PASS] s4-no-record -- refused launch wrote no state/s4.meta
+------------------------------------------------------------------------
+SCENARIO 5: once the holding agent has exited, the same launch passes the gate
+  exit=1
+error: task s5 cannot launch without its stored ChatGPT-generated prompt
+[PASS] s5-gate-open -- exited holder does not trigger the single-slot refusal
+------------------------------------------------------------------------
+SCENARIO 6: every unusable config/single-slot-profile state keeps the built-in guard on
+[PASS] s6-empty-warns -- empty override warns and names the file
+[PASS] s6-default-still-guards -- empty override still refuses the second launch
+[PASS] s6b-stale-keeps-default -- stale override cannot disable the built-in default
+------------------------------------------------------------------------
+SCENARIO 7: the config-added guarded engine is refused hand-typed too
+  exit=1 :: error: s7 cannot launch: hand-typed launches of the single-slot engine single-slot-test/guarded-model are unsupported; launch with --harness pi --model single-slot-test/guarded-model so the single-slot guard can enforce and record it
+[PASS] s7-refused -- hand-typed config-added engine refused
+[PASS] s7-no-window -- no window started
+------------------------------------------------------------------------
+SCENARIO 8: an ordinary non-pi harness naming the guarded model is not gated
+[PASS] s8-not-slot-refused -- claude launch does not get the single-slot refusal
+[PASS] s8-not-raw-refused -- claude launch does not get the hand-typed refusal
+------------------------------------------------------------------------
+SUMMARY: pass=39 fail=0
+  PASS | s1-refused | exit 1
+  PASS | s1-message | output names hand-typed single-slot refusal
+  PASS | s1-supported-path-named | output names --harness pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s1-no-record | no state/s1.meta written
+  PASS | s1-no-window | no new tmux window
+  PASS | s2-1 | spelling refused, no record, no window: pi --model 'strata-local/qwen3.8-flash-next-coder-iq1_m'
+  PASS | s2-2 | spelling refused, no record, no window: pi --model="strata-local/qwen3.8-flash-next-coder-iq1_m"
+  PASS | s2-3 | spelling refused, no record, no window: pi --model='strata-local/qwen3.8-flash-next-coder-iq1_m'
+  PASS | s2-4 | spelling refused, no record, no window: exec pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-5 | spelling refused, no record, no window: /usr/bin/env pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-6 | spelling refused, no record, no window: env FOO=1 pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-7 | spelling refused, no record, no window: env -i pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-8 | spelling refused, no record, no window: sh -c 'pi --model strata-local/qwen3.8-flash-next-coder-iq1_m'
+  PASS | s2-9 | spelling refused, no record, no window: bash -lc "pi --model strata-local/qwen3.8-flash-next-coder-iq1_m"
+  PASS | s2-10 | spelling refused, no record, no window: cd . && pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-11 | spelling refused, no record, no window: true; pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-12 | spelling refused, no record, no window: sudo pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-13 | spelling refused, no record, no window: command pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-14 | spelling refused, no record, no window: nice pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-15 | spelling refused, no record, no window: $(command -v pi) --model strata-local/qwen3.8-flash-next-coder-iq1_m
+  PASS | s2-16 | spelling refused, no record, no window: pi --model strata-local/qwen3.8-flash-next-coder-iq1_m	--tui-mode regular
+  PASS | s3a-allowed | raw echo launch exits 0
+  PASS | s3a-window | a tmux window fm-s3a was created
+  PASS | s3a-meta | record written with harness=echo
+  PASS | s3b-other-adapter | raw custom-agent mentioning pi exits 0
+  PASS | s3b-meta | record written with harness=custom-agent
+  PASS | s3c-unguarded-pi | raw pi on an unguarded model is not gate-refused
+  PASS | s4-refused | second ordinary launch exits 1
+  PASS | s4-slot-message | refusal is the single-slot refusal
+  PASS | s4-names-holder | refusal names the live holder-live
+  PASS | s4-no-record | refused launch wrote no state/s4.meta
+  PASS | s5-gate-open | exited holder does not trigger the single-slot refusal
+  PASS | s6-empty-warns | empty override warns and names the file
+  PASS | s6-default-still-guards | empty override still refuses the second launch
+  PASS | s6b-stale-keeps-default | stale override cannot disable the built-in default
+  PASS | s7-refused | hand-typed config-added engine refused
+  PASS | s7-no-window | no window started
+  PASS | s8-not-slot-refused | claude launch does not get the single-slot refusal
+  PASS | s8-not-raw-refused | claude launch does not get the hand-typed refusal

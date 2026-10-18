@@ -1,0 +1,5 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s3a/launch-brief.md records no ship branch; defaulting to legacy branch fm/s3a
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s3a/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+notice: task s3a consultation waiver is recorded in its task record; this home keeps no backlog note for it (this home keeps no markdown backlog at /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.hJBe0z/data/backlog.md)
+spawned s3a harness=echo kind=ship mode=no-mistakes yolo=off window=primary:fm-s3a worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.hJBe0z/treehouse/.treehouse/proj-3f4fbf/1/proj

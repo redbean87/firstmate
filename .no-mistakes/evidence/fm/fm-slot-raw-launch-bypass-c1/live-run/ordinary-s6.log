@@ -1,0 +1,6 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z
+WARNING: watcher still down (same stale episode; last beat: 47s ago, grace 300s) - full banner already printed this episode.
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s6/launch-brief.md records no ship branch; defaulting to legacy branch fm/s6
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s6/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+warning: config/single-slot-profile holds an unusable value ('<empty>'); ignoring it and keeping the built-in guarded profile
+error: s6 cannot launch: strata-local/qwen3.8-flash-next-coder-iq1_m runs a single slot (one request at a time) and holder-live is live on that profile; re-dispatch s6 after holder-live lands

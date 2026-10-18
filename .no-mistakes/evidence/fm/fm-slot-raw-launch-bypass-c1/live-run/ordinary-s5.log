@@ -1,0 +1,12 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z
+WARNING: watcher still down (same stale episode; last beat: 44s ago, grace 300s) - full banner already printed this episode.
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s5/launch-brief.md records no ship branch; defaulting to legacy branch fm/s5
+warning: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s5/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: task s5 cannot launch without its stored ChatGPT-generated prompt
+  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.hJBe0z/data/s5/chatgpt-loop.json
+  no consultation record exists there
+  consultation channel: healthy a bounded test turn completed at http://127.0.0.1:17841/v1
+Create the prompt before launching:
+  bin/fm-chatgpt-loop.sh init --task s5 --objective-file <objective-file>
+  bin/fm-chatgpt-loop.sh consult --stage audit|plan --task s5
+To launch anyway, pass an explicit waiver whose reason is recorded in the task record and the backlog note: --consult-waived <reason>
