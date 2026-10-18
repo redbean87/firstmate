@@ -812,7 +812,7 @@ Changing this pin affects the next secondmate spawn or control-plane relaunch; t
 ### Per-launch overrides and inherited defaults
 
 An explicit harness argument to `fm-spawn.sh` still overrides either config file for that spawn only.
-An explicit `--model` or `--effort` overrides the matching token from `config/secondmate-harness`; for a local route, an explicit harness or raw launch command starts with clean model and effort defaults unless those flags are also passed.
+An explicit `--model` or `--effort` overrides the matching token from `config/secondmate-harness`; for a local route, an explicit harness starts with clean model and effort defaults unless those flags are also passed.
 
 Remote secondmate routes accept verified harness adapters only and reject raw launch commands.
 When `config/crew-dispatch.json` exists, crewmate and scout spawns require an explicit resolved harness instead of automatically falling back to `config/crew-harness`.
@@ -1095,7 +1095,7 @@ Regression coverage executes emitted launch commands with synthetic nonsecret va
 ### Compact adviser setting
 
 Every crewmate, scout, and secondmate Firstmate launches starts with `COMPACT_ADVISER_DISABLE=1` in its environment, on a fresh spawn and on a relaunch alike, so an unattended session never activates the compact adviser.
-This guarantee also covers raw launch commands, remote secondmates, and launches filtered by `config/launch-env-allowlist`; it does not depend on the destination environment already containing the variable.
+This guarantee also covers remote secondmates and launches filtered by `config/launch-env-allowlist`; it does not depend on the destination environment already containing the variable.
 
 Firstmate provides no configuration or flag to change this value.
 This applies only to agents Firstmate launches; the captain's own primary Firstmate session is never given the variable.
@@ -1171,7 +1171,7 @@ Firstmate resolves the rule's profile object or array under `AGENTS.md` section 
 
 **Spawn requirements**
 
-- When the file exists, `fm-spawn.sh` enforces that contract by refusing crewmate and scout spawns that lack an explicit harness (`--harness`, a positional adapter, or a raw launch command).
+- When the file exists, `fm-spawn.sh` enforces that contract by refusing crewmate and scout spawns that lack an explicit harness (`--harness` or a positional adapter); a hand-typed launch command is refused outright before any engine starts, so it never stands in for one.
 - When the file carries a deterministic project mapping, `fm-spawn.sh` additionally refuses any crewmate or scout spawn whose harness or model disagrees with the project's pinned profile, and a raw launch command never satisfies a pin.
 - Batch spawns satisfy the same requirement with a shared `--harness`.
 - Secondmate spawns are exempt and still resolve through `config/secondmate-harness` and its optional model and effort tokens.
