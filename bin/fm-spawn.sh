@@ -3611,7 +3611,7 @@ slot_resolve_raw_model() { # <id> <command>
           token=$token${text:$i:1}
         fi
         ;;
-      ' ' | '\t' | $'\n')
+      ' ' | $'\t' | $'\n')
         case "$c" in
         $'\n') flag_nl=1 ;;
         esac
@@ -3692,6 +3692,11 @@ slot_resolve_raw_model() { # <id> <command>
     # adapter's raw launch and stays outside this gate.
     while IFS= read -r w; do
       for piece in $w; do
+        # Quote characters survive in the piece, but a wrapped shell
+        # strips them before executing, so compare the quote-stripped
+        # form: `sh -c "'pi' --model ..."` still starts the pi engine.
+        piece=${piece//\'/}
+        piece=${piece//\"/}
         case "$(basename "./$piece")" in
         pi)
           echo "error: $id cannot launch: the raw launch command wraps a pi invocation ('$slot_launcher ...'), so the single-slot guard cannot resolve the model it would run; launch with a plain pi command carrying --model <profile>" >&2

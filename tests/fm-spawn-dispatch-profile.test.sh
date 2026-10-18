@@ -560,7 +560,8 @@ test_single_slot_raw_quoted_and_prefixed_models_enforced() {
   # by the launcher-identity check and covered in
   # test_single_slot_raw_unsafe_launcher_refused_before_start.
   for raw in "pi --model '$SLOT_DEFAULT'" "pi --model=\"$SLOT_DEFAULT\"" "pi --model='$SLOT_DEFAULT'" \
-    "/usr/local/bin/pi --model $SLOT_DEFAULT" "FOO=1 pi --model $SLOT_DEFAULT"; do
+    "/usr/local/bin/pi --model $SLOT_DEFAULT" "FOO=1 pi --model $SLOT_DEFAULT" \
+    "pi --model $SLOT_DEFAULT"$'\t'"--tui-mode regular"; do
     out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
       "$raw")
     status=$?
@@ -620,7 +621,8 @@ test_single_slot_raw_ambiguous_forms_refuse_before_start() {
   # Literal $ and backticks below are the point under test, not a quoting slip.
   # shellcheck disable=SC2016
   for raw in 'pi --model $SOME_UNSET_MODEL_VAR_XYZ' "pi --model=\"\$SOME_UNSET_MODEL_VAR_XYZ\"" \
-    'pi --model `pick-model`' "sh -c 'pi --model $SLOT_DEFAULT'" "pi --model A --model B"; do
+    'pi --model `pick-model`' "sh -c 'pi --model $SLOT_DEFAULT'" "pi --model A --model B" \
+    "sh -c \"'pi' --model $SLOT_DEFAULT\"" "sh -c '\"pi\" --model $SLOT_DEFAULT'"; do
     out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
       "$raw")
     status=$?
