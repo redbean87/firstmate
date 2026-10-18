@@ -377,293 +377,126 @@ test_single_slot_stale_override_keeps_default_guard() {
   pass "a stale but well-formed override cannot silently disable the built-in default"
 }
 
-test_single_slot_raw_launch_resolves_model_from_command() {
-  local rec id blocker out status
-  id=slot-raw-z41
-  blocker=slot-raw-holder-z29k
-  rec=$(make_spawn_case slot-raw pi "$id")
+# Hand-typed (raw) launches are refused outright rather than parsed, so no
+# shell spelling can hide the guarded engine. Each case must refuse before any
+# engine process starts: no task record, nothing sent to a pane.
+test_single_slot_hand_typed_strata_refused_before_start() {
+  local rec id out status raw
+  id=slot-handtyped-z60
+  rec=$(make_spawn_case slot-hand-typed pi "$id")
   read_case_record "$rec"
   rm -f "$HOME_DIR/config/single-slot-profile"
-  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
 
-  # A raw pi command embeds its own --model; the gate resolves it out of the
-  # command text, so the guarded profile cannot be bypassed by going raw...
-  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --model $SLOT_DEFAULT")
+  # The same engine, spelled every way a shell could spell it. The refusal is
+  # a literal, quote-blind match, so quoting, wrappers, command substitution,
+  # environment prefixes, exec/env, and chaining cannot hide it.
+  # Literal shell syntax below is the point under test, not a quoting slip.
+  # shellcheck disable=SC2016
+  for raw in "pi --model $SLOT_DEFAULT" \
+    "pi --model '$SLOT_DEFAULT'" \
+    "pi --model=\"$SLOT_DEFAULT\"" \
+    "pi --model='$SLOT_DEFAULT'" \
+    "exec pi --model $SLOT_DEFAULT" \
+    "/usr/bin/env pi --model $SLOT_DEFAULT" \
+    "env FOO=1 pi --model $SLOT_DEFAULT" \
+    "env -i pi --model $SLOT_DEFAULT" \
+    "sh -c 'pi --model $SLOT_DEFAULT'" \
+    "bash -lc \"pi --model $SLOT_DEFAULT\"" \
+    "cd . && pi --model $SLOT_DEFAULT" \
+    "sudo pi --model $SLOT_DEFAULT" \
+    '$(command -v pi) --model '"$SLOT_DEFAULT"; do
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "$raw")
+    status=$?
+    expect_code 1 "$status" "a hand-typed Strata launch ('$raw') must be refused"
+    assert_contains "$out" "$id cannot launch" "the refusal of '$raw' must use the cannot-launch shape"
+    assert_contains "$out" "hand-typed launches of the single-slot engine" "the refusal of '$raw' must name the unsupported form"
+    assert_contains "$out" "--harness pi --model $SLOT_DEFAULT" "the refusal of '$raw' must name the supported path"
+    assert_absent "$HOME_DIR/state/$id.meta" "a refused hand-typed launch ('$raw') wrote its own task record"
+    [ ! -s "$LAUNCH_LOG" ] || fail "a refused hand-typed launch ('$raw') started an engine"
+  done
+  pass "every hand-typed Strata spelling is refused before any engine starts"
+}
+
+test_single_slot_override_engine_refused_hand_typed() {
+  local rec id out status
+  id=slot-handtyped-ovr-z61
+  rec=$(make_spawn_case slot-hand-typed-override pi "$id")
+  read_case_record "$rec"
+  write_slot_config "$HOME_DIR"
+
+  # A second guarded engine added by config is refused hand-typed too.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "exec pi --model $SLOT_OVERRIDE")
   status=$?
-  expect_code 1 "$status" "a raw pi launch on the guarded profile must be refused while the slot is live"
-  assert_contains "$out" "$id cannot launch" "the raw refusal must use the deterministic cannot-launch shape"
-  assert_contains "$out" "$blocker" "the raw refusal must name the blocking live worker"
-  assert_absent "$HOME_DIR/state/$id.meta" "a raw-refused spawn wrote its own task record"
+  expect_code 1 "$status" "a hand-typed launch of the config-added guarded engine must be refused"
+  assert_contains "$out" "hand-typed launches of the single-slot engine $SLOT_OVERRIDE" "the override refusal must name the guarded engine"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused override hand-typed launch wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused override hand-typed launch started an engine"
+  pass "a config-added guarded engine is refused hand-typed as well"
+}
 
-  # ...including the --model=<value> form, which then launches normally.
+test_single_slot_supported_path_enforces_and_records() {
+  local rec holder id out status
+  holder=slot-supported-z62
+  id=slot-supported-second-z63
+  rec=$(make_spawn_case slot-supported pi "$holder" "$id")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  # The supported launch path starts while the slot is free and records the
+  # live worker on the guarded profile, so later checks can discover it.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$holder" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 0 "$status" "a supported Strata launch on the free slot must proceed"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$holder.meta" pi "$SLOT_DEFAULT" default
+  [ -s "$LAUNCH_LOG" ] || fail "a supported Strata launch left no launch trace"
+
+  # While that worker is live, a second supported launch is refused, and the
+  # refused launch never reaches an engine.
+  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder" FM_FAKE_PANE_COMMAND=pi \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 1 "$status" "a second supported Strata launch must be refused while the first is live"
+  assert_contains "$out" "$id cannot launch" "the second-launch refusal must use the cannot-launch shape"
+  assert_contains "$out" "$holder" "the refusal must name the live holder"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused second launch wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused second launch started an engine"
+  pass "the supported path enforces the slot and records the live worker"
+}
+
+test_single_slot_raw_unguarded_and_other_adapters_pass_through() {
+  local rec id id2 id3 out status
+  id=slot-passthru-pi-z64
+  id2=slot-passthru-agent-z65
+  id3=slot-passthru-signed-z66
+  rec=$(make_spawn_case slot-passthru pi "$id" "$id2" "$id3")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  # A raw launch that names no guarded engine is not this gate's business: a
+  # pi launch on an unguarded model still runs, and other adapters mentioning
+  # `pi` in their arguments are untouched.
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
     "pi --model=openai-codex/gpt-5.6-sol")
   status=$?
-  expect_code 0 "$status" "a raw pi launch on a non-guarded model must proceed"$'\n'"$out"
-  assert_contains "$out" "spawned $id harness=pi" "the raw pi launch did not complete"
-  pass "a raw pi launch's embedded --model is resolved and gated"
-}
+  expect_code 0 "$status" "a raw pi launch on an unguarded model must proceed"$'\n'"$out"
+  assert_contains "$out" "spawned $id harness=pi" "the unguarded raw pi launch did not complete"
+  [ -s "$LAUNCH_LOG" ] || fail "an allowed unguarded raw launch left no launch trace"
 
-test_single_slot_raw_launch_without_model_refuses() {
-  local rec id out status
-  id=slot-raw-nomodel-z42
-  rec=$(make_spawn_case slot-raw-nomodel pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  # A raw pi command with no resolvable --model cannot be verified against the
-  # guarded set, so it is refused rather than allowed past the gate.
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --tui-mode regular")
-  status=$?
-  expect_code 1 "$status" "a raw pi launch without --model must be refused"
-  assert_contains "$out" "$id cannot launch" "the unresolvable-model refusal must use the cannot-launch shape"
-  assert_contains "$out" "--model" "the unresolvable-model refusal must name --model"
-  assert_absent "$HOME_DIR/state/$id.meta" "an unresolvable-model refusal wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "an unresolvable-model refusal launched a worker"
-  pass "a raw pi launch with no resolvable --model is refused with a clear diagnostic"
-}
-
-test_single_slot_raw_launch_model_followed_by_option_refuses() {
-  local rec id blocker out status
-  id=slot-raw-optval-z44
-  blocker=slot-raw-optval-holder-z29l
-  rec=$(make_spawn_case slot-raw-optval pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
-
-  # The token after --model is an option, not a model value: taking it at face
-  # value would resolve a bogus model, miss the guarded set, and let the gate
-  # skip - so the malformed argument is refused before any launch.
-  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --model --tui-mode regular")
-  status=$?
-  expect_code 1 "$status" "a raw --model followed by an option must be refused"
-  assert_contains "$out" "$id cannot launch" "the malformed-model refusal must use the cannot-launch shape"
-  assert_contains "$out" "--model is followed by the option '--tui-mode'" "the refusal must name the malformed argument"
-  assert_absent "$HOME_DIR/state/$id.meta" "a malformed-model refusal wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "a malformed-model refusal launched a worker"
-  pass "a raw --model followed by another option cannot slip past the gate"
-}
-
-test_single_slot_raw_launch_empty_inline_model_refuses() {
-  local rec id out status
-  id=slot-raw-emptyval-z45
-  rec=$(make_spawn_case slot-raw-emptyval pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --model=")
-  status=$?
-  expect_code 1 "$status" "a raw --model= with an empty value must be refused"
-  assert_contains "$out" "$id cannot launch" "the empty-inline-model refusal must use the cannot-launch shape"
-  assert_contains "$out" "--model= carries an empty value" "the refusal must name the empty --model= argument"
-  assert_absent "$HOME_DIR/state/$id.meta" "an empty-inline-model refusal wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "an empty-inline-model refusal launched a worker"
-  pass "a raw --model= with an empty value is refused with an accurate diagnostic"
-}
-
-test_single_slot_raw_launch_trailing_bare_model_refuses() {
-  local rec id out status
-  id=slot-raw-bare-z46
-  rec=$(make_spawn_case slot-raw-bare pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --tui-mode regular --model")
-  status=$?
-  expect_code 1 "$status" "a raw command ending in a bare --model must be refused"
-  assert_contains "$out" "$id cannot launch" "the trailing-bare-model refusal must use the cannot-launch shape"
-  assert_contains "$out" "ends with a bare --model" "the refusal must name the trailing bare --model"
-  assert_absent "$HOME_DIR/state/$id.meta" "a trailing-bare-model refusal wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "a trailing-bare-model refusal launched a worker"
-  pass "a raw command ending in a bare --model is refused with an accurate diagnostic"
-}
-
-test_single_slot_raw_holder_blocks_ordinary_launch() {
-  local rec holder id out status
-  holder=slot-rawholder-z50
-  id=slot-rawholder-second-z51
-  rec=$(make_spawn_case slot-raw-holder pi "$holder" "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  # A hand-typed Strata launch really runs: with the slot free it succeeds,
-  # and its worker record carries the effective engine identity.
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$holder" "$PROJ_DIR" \
-    "pi --model $SLOT_DEFAULT")
-  status=$?
-  expect_code 0 "$status" "a raw pi launch on the free guarded profile must proceed"$'\n'"$out"
-  assert_contains "$out" "spawned $holder harness=pi" "the raw pi launch did not complete"
-  assert_meta_profile "$HOME_DIR/state/$holder.meta" pi "$SLOT_DEFAULT" default
-  [ -s "$LAUNCH_LOG" ] || fail "a successful raw launch left no launch trace"
-
-  # With that hand-typed worker live, an ordinary launch on the same engine
-  # is refused, and the refused launch never reaches an engine.
-  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder" FM_FAKE_PANE_COMMAND=pi \
-    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    --harness pi --model "$SLOT_DEFAULT")
-  status=$?
-  expect_code 1 "$status" "an ordinary launch must be refused while a raw-launched Strata worker is live"
-  assert_contains "$out" "$id cannot launch" "the refusal must use the deterministic cannot-launch shape"
-  assert_contains "$out" "$holder" "the refusal must name the live raw-launched worker"
-  assert_absent "$HOME_DIR/state/$id.meta" "a refused ordinary spawn wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "a refused ordinary spawn launched a worker"
-  pass "a live hand-typed Strata worker blocks an ordinary Strata launch"
-}
-
-test_single_slot_ordinary_holder_blocks_raw_launch() {
-  local rec holder id out status
-  holder=slot-ordholder-z52
-  id=slot-ordholder-raw-z53
-  rec=$(make_spawn_case slot-ordinary-holder pi "$holder" "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$holder" "$PROJ_DIR" \
-    --harness pi --model "$SLOT_DEFAULT")
-  status=$?
-  expect_code 0 "$status" "an ordinary launch on the free guarded profile must proceed"$'\n'"$out"
-  assert_meta_profile "$HOME_DIR/state/$holder.meta" pi "$SLOT_DEFAULT" default
-
-  # With that ordinary worker live, the hand-typed form of the same engine
-  # is refused, and the refused launch never reaches an engine.
-  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder" FM_FAKE_PANE_COMMAND=pi \
-    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --model $SLOT_DEFAULT")
-  status=$?
-  expect_code 1 "$status" "a raw launch must be refused while an ordinary Strata worker is live"
-  assert_contains "$out" "$id cannot launch" "the raw refusal must use the deterministic cannot-launch shape"
-  assert_contains "$out" "$holder" "the raw refusal must name the live ordinary worker"
-  assert_absent "$HOME_DIR/state/$id.meta" "a refused raw spawn wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "a refused raw spawn launched a worker"
-  pass "a live ordinary Strata worker blocks a hand-typed Strata launch"
-}
-
-test_single_slot_raw_quoted_and_prefixed_models_enforced() {
-  local rec blocker id out status raw
-  blocker=slot-qpholder-z54
-  id=slot-qp-z55
-  rec=$(make_spawn_case slot-raw-quoted pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
-
-  # Quoted-model, path-wrapped, and VAR=-prefixed spellings resolve to the
-  # executed engine identity with a record-safe launcher word, so each is
-  # refused while the slot is live. Launcher spellings the record cannot
-  # represent (`env ...`, quoted launcher words) are refused before start
-  # by the launcher-identity check and covered in
-  # test_single_slot_raw_unsafe_launcher_refused_before_start.
-  for raw in "pi --model '$SLOT_DEFAULT'" "pi --model=\"$SLOT_DEFAULT\"" "pi --model='$SLOT_DEFAULT'" \
-    "/usr/local/bin/pi --model $SLOT_DEFAULT" "FOO=1 pi --model $SLOT_DEFAULT" \
-    "pi --model $SLOT_DEFAULT"$'\t'"--tui-mode regular"; do
-    out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-      "$raw")
-    status=$?
-    expect_code 1 "$status" "a raw launch spelling '$raw' must be refused while the slot is live"
-    assert_contains "$out" "$id cannot launch" "the refusal of '$raw' must use the cannot-launch shape"
-    assert_contains "$out" "$blocker" "the refusal of '$raw' must name the blocking live worker"
-    assert_absent "$HOME_DIR/state/$id.meta" "a refused spelling '$raw' wrote its own task record"
-    [ ! -s "$LAUNCH_LOG" ] || fail "a refused spelling '$raw' launched a worker"
-  done
-  pass "quoted-model, path-wrapped, and VAR=-prefixed raw spellings are enforced"
-}
-
-test_single_slot_raw_unsafe_launcher_refused_before_start() {
-  local rec id out status raw
-  id=slot-unlauncher-z57
-  rec=$(make_spawn_case slot-raw-unlauncher pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  # Launcher spellings the worker record cannot represent as harness=pi
-  # would run the guarded engine while recording a holder no later check
-  # can discover, so each is refused before any engine starts - even with
-  # the slot free. The diagnostic names the offending launcher word.
-  for raw in "env FOO=1 pi --model $SLOT_DEFAULT" "env -i pi --model $SLOT_DEFAULT" \
-    "env -u FOO pi --model $SLOT_DEFAULT" "'pi' --model $SLOT_DEFAULT" \
-    "\"pi\" --model $SLOT_DEFAULT"; do
-    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-      "$raw")
-    status=$?
-    expect_code 1 "$status" "an unsafe launcher spelling '$raw' must be refused"
-    assert_contains "$out" "$id cannot launch" "the refusal of '$raw' must use the cannot-launch shape"
-    assert_contains "$out" "instead of a plain pi command" "the refusal of '$raw' must name the plain-pi restatement"
-    assert_absent "$HOME_DIR/state/$id.meta" "a refused launcher spelling '$raw' wrote its own task record"
-    [ ! -s "$LAUNCH_LOG" ] || fail "a refused launcher spelling '$raw' launched a worker"
-  done
-
-  # The refusal is scoped to the guarded engine: the same `env` spelling on
-  # an unguarded profile still launches, proving ordinary raw use is kept.
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "env FOO=1 pi --model openai-codex/gpt-5.6-sol")
-  status=$?
-  expect_code 0 "$status" "an env-prefixed raw launch on an unguarded profile must proceed"$'\n'"$out"
-  assert_contains "$out" "spawned $id harness=env" "the unguarded env-prefixed launch did not complete"
-  [ -s "$LAUNCH_LOG" ] || fail "an allowed env-prefixed launch left no launch trace"
-  pass "record-unsafe launcher spellings are refused before any engine starts"
-}
-
-test_single_slot_raw_ambiguous_forms_refuse_before_start() {
-  local rec id out status raw
-  id=slot-amb-z56
-  rec=$(make_spawn_case slot-raw-ambiguous pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  # Forms whose effective engine identity cannot be established without
-  # evaluating shell text are refused before any engine starts.
-  # Literal $ and backticks below are the point under test, not a quoting slip.
-  # shellcheck disable=SC2016
-  for raw in 'pi --model $SOME_UNSET_MODEL_VAR_XYZ' "pi --model=\"\$SOME_UNSET_MODEL_VAR_XYZ\"" \
-    'pi --model `pick-model`' "sh -c 'pi --model $SLOT_DEFAULT'" "pi --model A --model B" \
-    "sh -c \"'pi' --model $SLOT_DEFAULT\"" "sh -c '\"pi\" --model $SLOT_DEFAULT'" \
-    '$(command -v pi) --model '"$SLOT_DEFAULT" "sudo pi --model $SLOT_DEFAULT"; do
-    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-      "$raw")
-    status=$?
-    expect_code 1 "$status" "an ambiguous raw form '$raw' must be refused"
-    assert_contains "$out" "$id cannot launch" "the refusal of '$raw' must use the cannot-launch shape"
-    assert_absent "$HOME_DIR/state/$id.meta" "a refused ambiguous form '$raw' wrote its own task record"
-    [ ! -s "$LAUNCH_LOG" ] || fail "a refused ambiguous form '$raw' launched a worker"
-  done
-  pass "ambiguous raw launch forms are refused before any engine starts"
-}
-
-test_single_slot_raw_other_adapter_mentioning_pi_passes_through() {
-  local rec id id2 out status
-  id=slot-other-pi-z58
-  id2=slot-other-pi-z59
-  rec=$(make_spawn_case slot-raw-other-pi pi-signed "$id" "$id2")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  # Launcher syntax and argument content are judged separately: a `pi`
-  # inside an ordinary argument says nothing about the engine, so a raw
-  # launch that resolves to another adapter stays outside this gate and
-  # launches through the raw escape hatch as before.
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id2" "$PROJ_DIR" \
     "custom-agent --flag pi")
   status=$?
   expect_code 0 "$status" "an other-adapter raw launch mentioning pi must proceed"$'\n'"$out"
-  assert_contains "$out" "spawned $id harness=custom-agent" "the other-adapter launch did not complete"
-  assert_not_contains "$out" "wraps a pi" "a pi argument value must not trigger the wrapper scan"
-  [ -s "$LAUNCH_LOG" ] || fail "an allowed other-adapter launch left no launch trace"
+  assert_contains "$out" "spawned $id2 harness=custom-agent" "the other-adapter launch did not complete"
 
-  # And a neighbouring adapter's own raw launch carrying a `pi` mention
-  # proceeds normally, proving the gate leaves other adapters alone.
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id2" "$PROJ_DIR" \
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id3" "$PROJ_DIR" \
     "pi-signed --tui-mode regular --note pi")
   status=$?
   expect_code 0 "$status" "a pi-signed raw launch mentioning pi must proceed"$'\n'"$out"
-  assert_contains "$out" "spawned $id2 harness=pi-signed" "the pi-signed raw launch did not complete"
-  [ -s "$LAUNCH_LOG" ] || fail "an allowed pi-signed launch left no launch trace"
-  pass "other-adapter raw launches mentioning pi stay outside the gate"
+  assert_contains "$out" "spawned $id3 harness=pi-signed" "the pi-signed raw launch did not complete"
+  pass "raw launches naming no guarded engine keep working"
 }
 
 test_single_slot_config_scope_is_pi_only() {
@@ -3024,17 +2857,10 @@ test_single_slot_ignores_a_dead_agent_row
 test_single_slot_reopens_after_the_holder_exits
 test_single_slot_unusable_override_falls_back_to_default
 test_single_slot_stale_override_keeps_default_guard
-test_single_slot_raw_launch_resolves_model_from_command
-test_single_slot_raw_launch_without_model_refuses
-test_single_slot_raw_launch_model_followed_by_option_refuses
-test_single_slot_raw_launch_empty_inline_model_refuses
-test_single_slot_raw_launch_trailing_bare_model_refuses
-test_single_slot_raw_holder_blocks_ordinary_launch
-test_single_slot_ordinary_holder_blocks_raw_launch
-test_single_slot_raw_quoted_and_prefixed_models_enforced
-test_single_slot_raw_unsafe_launcher_refused_before_start
-test_single_slot_raw_ambiguous_forms_refuse_before_start
-test_single_slot_raw_other_adapter_mentioning_pi_passes_through
+test_single_slot_hand_typed_strata_refused_before_start
+test_single_slot_override_engine_refused_hand_typed
+test_single_slot_supported_path_enforces_and_records
+test_single_slot_raw_unguarded_and_other_adapters_pass_through
 test_single_slot_config_scope_is_pi_only
 test_single_slot_refuses_a_secondmate_spawn
 

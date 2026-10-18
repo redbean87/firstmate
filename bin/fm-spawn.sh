@@ -230,9 +230,10 @@
 #   /updatefirstmate, restart). A raw launch command never satisfies a
 #   deterministic project pin (docs/configuration.md "Crew dispatch profiles").
 #   A pi launch on the guarded local-engine profile is additionally count-and-refused
-#   while another live worker holds that profile's single slot; the guarded
-#   profile for the engine in use is a built-in default and
-#   config/single-slot-profile only adds guarded profiles
+#   while another live worker holds that profile's single slot, and a hand-typed
+#   (raw) launch whose command text names a guarded engine is refused outright
+#   rather than parsed; the guarded profile for the engine in use is a built-in
+#   default and config/single-slot-profile only adds guarded profiles
 #   (docs/configuration.md "Single-slot launch guard").
 #   A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin)
 #   overrides it for this spawn (either kind). A non-flag string containing
@@ -3511,353 +3512,45 @@ if [ "$KIND" != secondmate ]; then
 fi
 
 # Single-slot launch gate (supervision-hardening round 1, retargeted to the
-# engine in use 2026-10-16). The AI server's local engine serves one request
-# at a time - it occupies essentially all of that box's memory, so it is
-# strictly one run at a time (data/captain.md, captain 2026-10-14) - and a
-# second concurrent worker on a guarded profile must be refused. The guarded
-# profile identifier for the engine in use is this built-in default, so the
-# gate protects Strata with no configuration at all; the optional
-# config/single-slot-profile (docs/configuration.md "Single-slot launch
-# guard") may ADD one more guarded profile - a rollback engine, a second
-# single-slot engine - and never removes the default. An unusable override
-# (not a readable regular file, empty, whitespace/control-bearing, or
-# comment-prefixed) is ignored with a loud warning and the built-in default
-# stays in force, so no state of the file can leave the gate off. Like the
-# pin refusal above, this is a deterministic count-and-refuse, never a queue:
-# it runs before any endpoint, worktree, or record exists, so a refusal costs
-# nothing to unwind. Secondmates are NOT exempt, because the slot constraint
-# is physical. A matching record only blocks while its agent is actually
-# LIVE: a retained row for an exited agent is agent-free and must not
-# deadlock recovery behind a holder that no longer exists. The liveness
-# verdict comes from the same backend agent-state reader supervision uses
-# (bin/fm-backend.sh's fm_backend_agent_alive), never from the record's mere
-# presence. A relaunch of the same task id must not self-block, so the task's
-# own record is skipped; it is the only exemption. A raw launch command
-# embeds its own launcher and arguments, so when the command resolves to the
-# pi launcher the gate resolves its effective --model out of the command
-# text the way the executing shell would read it - quotes stripped, leading
-# environment assignments (and a leading `env`) skipped. A plain `pi`
-# command records that identity on the worker record, so the holder scan
-# discovers a raw-launched Strata worker exactly like an ordinary one. Any
-# other launcher spelling that resolves to pi - a leading `env`, a quoted
-# launcher word, or any form the launch probe does not normalize to exactly
-# `pi` - is refused before any engine starts whenever the guarded profile
-# is at stake, because its worker record would not identify a pi holder
-# that later checks could discover. A raw pi command whose --model
-# is missing, empty, trailing-bare, followed by another option, quoted but
-# unresolvable, expanded, wrapped, or otherwise ambiguous is likewise
-# refused before any engine starts rather than allowed past with an empty
-# or mismatched model: a raw launch must never bypass the gate by leaving
-# the parsed model
-# empty, quoted past the comparison, or hidden behind a wrapper.
-# Resolve the effective --model of a raw launch command the way the
-# executing shell would read it: single and double quotes are stripped, a
-# backslash escapes the next character, and leading environment assignments
-# (plus an optional leading `env` with its own assignments) are skipped to
-# find the real program. Anything that cannot be resolved deterministically
-# - unbalanced quotes, expansions or separators that would need evaluation,
-# or conflicting --model values - is refused before any engine starts, so
-# the guard validates the model the launcher will actually execute. Prints
-# the resolved model on stdout and exits nonzero with a form-accurate
-# diagnostic otherwise. Never evaluates the command text.
-# Strip one layer of shell word punctuation from both ends of a raw
-# command piece so wrapper detection compares what the executing shell
-# would see: quotes a wrapper strips, command-substitution and grouping
-# parentheses, and separators. Interior characters are left alone, so
-# argument content such as a path or prompt text never matches.
-slot_strip_piece() { # <piece>: print the edge-stripped form
-  local p=$1 o
-  while :; do
-    o=$p
-    case "$p" in
-    [\'\"\`\(\)\[\]\{\}\;\&\|\<\>\$]*) p=${p#?} ;;
-    esac
-    case "$p" in
-    *[\'\"\`\(\)\[\]\{\}\;\&\|\<\>\$]) p=${p%?} ;;
-    esac
-    [ "$p" = "$o" ] && break
-  done
-  printf '%s\n' "$p"
-}
-slot_resolve_raw_model() { # <id> <command>
-  local id=$1 text=$2
-  local i=0 n c token='' words='' in_s=0 in_d=0 skip_next=0
-  local slot_launcher='' in_prefix=1 w piece model='' seen_model=0
-  local flag_nl=0 flag_unbal=0 flag_expand=0 flag_dqexpand=0
-  local flag_meta=0 flag_glob=0 flag_dangle=0 badc=''
-  n=${#text}
-  while [ "$i" -lt "$n" ]; do
-    c=${text:$i:1}
-    if [ "$in_s" = 1 ]; then
-      case "$c" in
-      "'") in_s=0 ;;
-      *) token=$token$c ;;
-      esac
-    elif [ "$in_d" = 1 ]; then
-      case "$c" in
-      '"') in_d=0 ;;
-      # An expansion inside double quotes still runs, so note it for the
-      # pi-only strictness check below; other adapters keep existing behavior.
-      '$' | '`') flag_dqexpand=1; badc=$c; token=$token$c ;;
-      [\\])
-        i=$((i + 1))
-        if [ "$i" -ge "$n" ]; then
-          flag_dangle=1
-        else
-          token=$token${text:$i:1}
-        fi
-        ;;
-      *) token=$token$c ;;
-      esac
-    else
-      case "$c" in
-      "'") in_s=1 ;;
-      '"') in_d=1 ;;
-      # Unquoted expansions, separators, and globs would need evaluation to
-      # resolve: note them for the pi-only strictness check below rather
-      # than refusing here, so chained raw launches for other adapters
-      # (e.g. `cd . && git commit`) keep working exactly as before.
-      '$' | '`') flag_expand=1; badc=$c; token=$token$c ;;
-      ';' | '&' | '|' | '<' | '>' | '(' | ')')
-        flag_meta=1; badc=$c; token=$token$c
-        ;;
-      '*' | '?' | '[') flag_glob=1; badc=$c; token=$token$c ;;
-      [\\])
-        i=$((i + 1))
-        if [ "$i" -ge "$n" ]; then
-          flag_dangle=1
-        else
-          token=$token${text:$i:1}
-        fi
-        ;;
-      ' ' | $'\t' | $'\n')
-        case "$c" in
-        $'\n') flag_nl=1 ;;
-        esac
-        words=$words$token$'\n'
-        token=''
-        ;;
-      *) token=$token$c ;;
-      esac
-    fi
-    i=$((i + 1))
-  done
-  if [ "$in_s" = 1 ] || [ "$in_d" = 1 ]; then
-    flag_unbal=1
-  fi
-  words=$words$token$'\n'
-  while IFS= read -r w; do
-    if [ "$skip_next" = 1 ]; then
-      skip_next=0
-      continue
-    fi
-    if [ "$in_prefix" = 1 ]; then
-      case "$w" in
-      '') continue ;;
-      env) continue ;;
-      -i) continue ;;
-      -u) skip_next=1; continue ;;
-      -*) slot_launcher=$w; in_prefix=0 ;;
-      [A-Za-z_]*=*) continue ;;
-      *) slot_launcher=$w; in_prefix=0 ;;
-      esac
-      continue
-    fi
-    case "$w" in
-    --)
-      break
-      ;;
-    --model)
-      IFS= read -r w || w=
-      case "$w" in
-      '' | --)
-        echo "error: $id cannot launch: the raw pi launch command ends with a bare --model and no value, so the single-slot guard cannot resolve the model it would run; pass --model <profile> in the raw command" >&2
-        return 1
-        ;;
-      -*)
-        echo "error: $id cannot launch: the raw pi launch command's --model is followed by the option '$w' instead of a model value; pass --model <profile>" >&2
-        return 1
-        ;;
-      esac
-      if [ "$seen_model" = 1 ] && [ "$w" != "$model" ]; then
-        echo "error: $id cannot launch: the raw pi launch command names two different --model values ('$model' and '$w'), so the single-slot guard cannot resolve the model it would run; pass exactly one --model <profile>" >&2
-        return 1
-      fi
-      model=$w
-      seen_model=1
-      ;;
-    --model=*)
-      w=${w#--model=}
-      if [ -z "$w" ]; then
-        echo "error: $id cannot launch: the raw pi launch command's --model= carries an empty value; pass --model=<profile>" >&2
-        return 1
-      fi
-      if [ "$seen_model" = 1 ] && [ "$w" != "$model" ]; then
-        echo "error: $id cannot launch: the raw pi launch command names two different --model values ('$model' and '$w'), so the single-slot guard cannot resolve the model it would run; pass exactly one --model <profile>" >&2
-        return 1
-      fi
-      model=$w
-      seen_model=1
-      ;;
-    esac
-  done <<< "$words"
-  case "$(basename "./$slot_launcher")" in
-  pi) ;;
-  *)
-    # Not a plain pi launch. Launcher syntax and argument content are
-    # judged separately: a mere `pi` inside an ordinary argument (a flag
-    # value, a prompt, a path) says nothing about the engine and stays
-    # outside this gate, while a pi invocation in command position - the
-    # launcher itself, a wrapper's script, or a dynamically determined
-    # launcher word - can start the guarded engine and must be refused
-    # before it does. No command text is evaluated to decide this.
-    launcher_stripped=$(slot_strip_piece "$slot_launcher")
-    case "$slot_launcher" in
-    *'$'* | *'`'* | *\'* | *'"'* | *' ' | *$'\t' | *$'\n'* | '' | -*)
-      # The launcher word itself is dynamically determined or quoted:
-      # the executing shell may resolve it to pi, so refuse whenever any
-      # word of the command strips down to the pi engine. Anything else
-      # is another adapter's raw launch.
-      while IFS= read -r w; do
-        for piece in $w; do
-          case "$(basename "./$(slot_strip_piece "$piece")")" in
-          pi)
-            echo "error: $id cannot launch: the raw launch command's launcher ('$slot_launcher') cannot be resolved without evaluating shell text and the command names the pi engine, so the single-slot guard cannot establish which engine it would run; launch with a plain pi command carrying --model <profile>" >&2
-            return 1
-            ;;
-          esac
-        done
-      done <<< "$words"
-      echo "non-pi-raw"
-      return 0
-      ;;
-    esac
-    case "$(basename "./$launcher_stripped")" in
-    sh | bash | dash | zsh | ksh)
-      # A shell wrapper with an inline script: the script's first
-      # command word (past environment assignments and the transparent
-      # `exec`/`command` builtins, one level only) is what executes.
-      script=
-      prev=
-      while IFS= read -r w; do
-        if [ "$prev" = -c ]; then
-          script=$w
-          break
-        fi
-        prev=$w
-      done <<< "$words"
-      if [ -n "$script" ]; then
-        for piece in $script; do
-          piece=$(slot_strip_piece "$piece")
-          case "$piece" in
-          '' | *=* | exec | command) continue ;;
-          *)
-            case "$(basename "./$piece")" in
-            pi)
-              echo "error: $id cannot launch: the raw launch command wraps a pi invocation behind '$slot_launcher -c', so the single-slot guard cannot resolve the model it would run; launch with a plain pi command carrying --model <profile>" >&2
-              return 1
-              ;;
-            esac
-            break
-            ;;
-          esac
-        done
-      fi
-      echo "non-pi-raw"
-      return 0
-      ;;
-    sudo | nohup)
-      # A privilege/persistence wrapper names its program in the open:
-      # refuse when any word of the command strips down to pi, because
-      # the record would name the wrapper and no later check could see
-      # the guarded worker. Anything else runs another program.
-      while IFS= read -r w; do
-        for piece in $w; do
-          case "$(basename "./$(slot_strip_piece "$piece")")" in
-          pi)
-            echo "error: $id cannot launch: the raw launch command wraps a pi invocation behind '$slot_launcher', so its worker record would not identify a pi holder and later single-slot checks could not see this worker; launch with a plain pi command carrying --model <profile>" >&2
-            return 1
-            ;;
-          esac
-        done
-      done <<< "$words"
-      echo "non-pi-raw"
-      return 0
-      ;;
-    esac
-    echo "non-pi-raw"
-    return 0
-    ;;
-  esac
-  # A plain pi launch must resolve deterministically: refuse every noted
-  # ambiguity before any engine starts.
-  if [ "$flag_unbal" = 1 ]; then
-    echo "error: $id cannot launch: the raw pi launch command has an unbalanced quote, so the single-slot guard cannot resolve the model it would run; balance the quotes and pass --model <profile>" >&2
-    return 1
-  fi
-  if [ "$flag_nl" = 1 ]; then
-    echo "error: $id cannot launch: the raw pi launch command spans multiple lines, so the single-slot guard cannot resolve the model it would run; pass a single-line command with --model <profile>" >&2
-    return 1
-  fi
-  if [ "$flag_expand" = 1 ]; then
-    echo "error: $id cannot launch: the raw pi launch command contains an unevaluated '$badc' expansion, so the single-slot guard cannot resolve the model it would run; pass a literal --model <profile>" >&2
-    return 1
-  fi
-  if [ "$flag_dqexpand" = 1 ]; then
-    echo "error: $id cannot launch: the raw pi launch command expands '$badc' inside double quotes, so the single-slot guard cannot resolve the model it would run; pass a literal --model <profile>" >&2
-    return 1
-  fi
-  if [ "$flag_meta" = 1 ]; then
-    echo "error: $id cannot launch: the raw pi launch command contains the shell metacharacter '$badc', so the single-slot guard cannot resolve which engine it would run; pass a single plain pi command with --model <profile>" >&2
-    return 1
-  fi
-  if [ "$flag_glob" = 1 ]; then
-    echo "error: $id cannot launch: the raw pi launch command contains the unquoted glob character '$badc', so the single-slot guard cannot resolve the model it would run; quote or remove it and pass a literal --model <profile>" >&2
-    return 1
-  fi
-  if [ "$flag_dangle" = 1 ]; then
-    echo "error: $id cannot launch: the raw pi launch command ends in a dangling backslash, so the single-slot guard cannot resolve the model it would run" >&2
-    return 1
-  fi
-  if [ "$seen_model" = 0 ]; then
-    echo "error: $id cannot launch: the raw pi launch command carries no --model, so the single-slot guard cannot resolve the model it would run; add an explicit --model <profile> to the raw command" >&2
-    return 1
-  fi
-  printf '%s\n' "$model"
-}
+# engine in use 2026-10-16; hand-typed launches closed by refusal 2026-10-18).
+# The AI server's local engine serves one request at a time - it occupies
+# essentially all of that box's memory, so it is strictly one run at a time
+# (data/captain.md, captain 2026-10-14) - and a second concurrent worker on a
+# guarded profile must be refused. The guarded profile identifier for the
+# engine in use is this built-in default, so the gate protects Strata with no
+# configuration at all; the optional config/single-slot-profile
+# (docs/configuration.md "Single-slot launch guard") may ADD one more guarded
+# profile - a rollback engine, a second single-slot engine - and never removes
+# the default. An unusable override (not a readable regular file, empty,
+# whitespace/control-bearing, or comment-prefixed) is ignored with a loud
+# warning and the built-in default stays in force, so no state of the file can
+# leave the gate off. Like the pin refusal above, this is a deterministic
+# count-and-refuse, never a queue: it runs before any endpoint, worktree, or
+# record exists, so a refusal costs nothing to unwind. Secondmates are NOT
+# exempt, because the slot constraint is physical. A matching record only
+# blocks while its agent is actually LIVE: a retained row for an exited agent
+# is agent-free and must not deadlock recovery behind a holder that no longer
+# exists. The liveness verdict comes from the same backend agent-state reader
+# supervision uses (bin/fm-backend.sh's fm_backend_agent_alive), never from
+# the record's mere presence. A relaunch of the same task id must not
+# self-block, so the task's own record is skipped; it is the only exemption.
+#
+# Hand-typed (raw) launches are refused outright rather than parsed. This gate
+# deliberately does NOT inspect, tokenize, evaluate, or try to recognise shell
+# command text: every earlier attempt to recover an executed engine identity
+# from a raw command's quoting, wrappers, expansions, or prefixes left another
+# spelling that started the guarded engine while the guard looked elsewhere. A
+# raw launch whose command text names a guarded profile - quote-blind literal
+# containment, so quoting, wrappers, command substitution, environment
+# prefixes, `exec`/`env`, and `&&` chaining cannot hide it - is refused before
+# any engine process starts, and Strata launches must use the supported
+# `--harness pi --model <profile>` path, which enforces this guard and records
+# the live worker for later single-slot checks. A raw launch that names no
+# guarded profile is another adapter's business and is left exactly as it was.
 spawn_refuse_if_single_slot_taken() {
   local holder holder_id holder_harness holder_model holder_backend holder_target
-  local slot_profile slot_profile_present eff_model
+  local slot_profile slot_profile_present guarded_profile
   local guarded_profiles='strata-local/qwen3.8-flash-next-coder-iq1_m'
-  if [ "$RAW_LAUNCH" = 1 ]; then
-    # A raw launch command embeds its own launcher and arguments, which the
-    # ordinary flag parser never sees, so the launcher is resolved here from
-    # the command text itself: the HARNESS probe above stops at a leading
-    # `env` or wrapper word, which must never exempt a wrapped pi launch.
-    # A raw launch that resolves to another adapter stays outside this gate;
-    # a wrapped pi invocation is refused by the resolver before any engine
-    # starts. An unresolvable raw pi launch is refused rather than allowed
-    # past the gate with an empty model.
-    if ! eff_model=$(slot_resolve_raw_model "$ID" "$LAUNCH"); then
-      exit 1
-    fi
-    if [ "$eff_model" = non-pi-raw ]; then
-      return 0
-    fi
-    # Record the effective engine identity on the worker record, so the
-    # holder scan below discovers a plain-`pi` raw-launched Strata worker
-    # exactly like an ordinary one. Launcher spellings the record cannot
-    # represent as harness=pi are refused below whenever the guarded
-    # profile is at stake. The meta writer below stores
-    # model=${MODEL:-default}.
-    MODEL=$eff_model
-  else
-    # An ordinary launch with no resolved model keeps the pre-existing skip:
-    # the model is firstmate's own dispatch choice and the harness's ambient
-    # default is not knowable here.
-    [ "$HARNESS" = pi ] || return 0
-    eff_model=$MODEL
-  fi
   if ! slot_profile_present=$(fm_config_source_present "$CONFIG/single-slot-profile"); then
     exit 1
   fi
@@ -3881,27 +3574,28 @@ spawn_refuse_if_single_slot_taken() {
       esac
     fi
   fi
-  # The model this launch would run is already resolved above: the raw
-  # branch carries the effective --model out of the command text (and
-  # recorded it on MODEL for the worker record), while an ordinary launch
-  # with no resolved model keeps the pre-existing skip.
-  [ -n "$eff_model" ] || return 0
+  # A hand-typed launch is never parsed: refuse it outright when its text
+  # names a guarded engine, and otherwise leave it to the adapter it names.
+  if [ "$RAW_LAUNCH" = 1 ]; then
+    for guarded_profile in $guarded_profiles; do
+      case "$LAUNCH" in
+      *"$guarded_profile"*)
+        echo "error: $ID cannot launch: hand-typed launches of the single-slot engine $guarded_profile are unsupported; launch with --harness pi --model $guarded_profile so the single-slot guard can enforce and record it" >&2
+        exit 1
+        ;;
+      esac
+    done
+    return 0
+  fi
+  [ "$HARNESS" = pi ] || return 0
+  # An ordinary launch with no resolved model keeps the pre-existing skip: the
+  # model is firstmate's own dispatch choice and the harness's ambient default
+  # is not knowable here.
+  [ -n "$MODEL" ] || return 0
   case " $guarded_profiles " in
-  *" $eff_model "*) ;;
+  *" $MODEL "*) ;;
   *) return 0 ;;
   esac
-  # A raw launch counts as a holder only while its worker record reads
-  # harness=pi, and the record writer stores $HARNESS verbatim. A raw pi
-  # launch whose derived HARNESS is anything but exactly `pi` - a leading
-  # `env`, a quoted launcher word, or any spelling the launch probe does
-  # not normalize - would run the guarded engine while recording a holder
-  # no later single-slot check can discover. Refuse that form before any
-  # engine starts rather than record an invisible holder; restate it as a
-  # plain command whose launcher word is exactly `pi`.
-  if [ "$RAW_LAUNCH" = 1 ] && [ "$HARNESS" != pi ]; then
-    echo "error: $ID cannot launch: the raw launch command reaches the guarded profile through the launcher word '$HARNESS' instead of a plain pi command, so its worker record would not identify a pi holder and later single-slot checks could not see this worker; launch with a plain pi command carrying --model <profile>" >&2
-    exit 1
-  fi
   for holder in "$STATE"/*.meta; do
     [ -f "$holder" ] || continue
     holder_id=$(basename "$holder" .meta)
@@ -3909,11 +3603,11 @@ spawn_refuse_if_single_slot_taken() {
     holder_harness=$(fm_meta_get "$holder" harness)
     holder_model=$(fm_meta_get "$holder" model)
     [ "$holder_harness" = pi ] || continue
-    [ "$holder_model" = "$eff_model" ] || continue
+    [ "$holder_model" = "$MODEL" ] || continue
     holder_backend=$(fm_backend_of_meta "$holder")
     holder_target=$(fm_backend_target_of_meta "$holder")
     [ "$(fm_backend_agent_alive "$holder_backend" "$holder_target")" = alive ] || continue
-    echo "error: $ID cannot launch: $eff_model runs a single slot (one request at a time) and $holder_id is live on that profile; re-dispatch $ID after $holder_id lands" >&2
+    echo "error: $ID cannot launch: $MODEL runs a single slot (one request at a time) and $holder_id is live on that profile; re-dispatch $ID after $holder_id lands" >&2
     exit 1
   done
 }

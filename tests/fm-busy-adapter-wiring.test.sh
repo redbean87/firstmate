@@ -768,10 +768,10 @@ test_raw_secondmate_launch_writes_no_busy_wiring() {
     case_dir="$TMP_ROOT/sm-raw-$harness"
     id="sm-raw-$harness"
     raw="$harness --fm-raw-flag"
-    # The single-slot gate resolves a raw pi launch's effective --model and
-    # refuses one it cannot resolve (docs/configuration.md "Single-slot launch
-    # guard"), so the raw pi case names an explicit non-guarded profile. This
-    # test is about busy wiring, so the profile is incidental.
+    # The single-slot gate refuses a raw launch that names a guarded engine
+    # (docs/configuration.md "Single-slot launch guard") rather than parsing
+    # one; the raw pi case's explicit profile is incidental and only keeps the
+    # fixture naming a concrete model. This test is about busy wiring.
     if [ "$harness" = pi ]; then
       raw="$raw --model raw-test-model"
     fi
