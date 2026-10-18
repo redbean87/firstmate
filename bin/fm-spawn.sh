@@ -3560,6 +3560,25 @@ fi
 # the guard validates the model the launcher will actually execute. Prints
 # the resolved model on stdout and exits nonzero with a form-accurate
 # diagnostic otherwise. Never evaluates the command text.
+# Strip one layer of shell word punctuation from both ends of a raw
+# command piece so wrapper detection compares what the executing shell
+# would see: quotes a wrapper strips, command-substitution and grouping
+# parentheses, and separators. Interior characters are left alone, so
+# argument content such as a path or prompt text never matches.
+slot_strip_piece() { # <piece>: print the edge-stripped form
+  local p=$1 o
+  while :; do
+    o=$p
+    case "$p" in
+    [\'\"\`\(\)\[\]\{\}\;\&\|\<\>\$]*) p=${p#?} ;;
+    esac
+    case "$p" in
+    *[\'\"\`\(\)\[\]\{\}\;\&\|\<\>\$]) p=${p%?} ;;
+    esac
+    [ "$p" = "$o" ] && break
+  done
+  printf '%s\n' "$p"
+}
 slot_resolve_raw_model() { # <id> <command>
   local id=$1 text=$2
   local i=0 n c token='' words='' in_s=0 in_d=0 skip_next=0
@@ -3685,26 +3704,87 @@ slot_resolve_raw_model() { # <id> <command>
   case "$(basename "./$slot_launcher")" in
   pi) ;;
   *)
-    # Not a plain pi launch: refuse only when the command still wraps one -
-    # any whitespace-separated piece resolving to the pi binary means the
-    # engine identity cannot be established from the launcher position, so
-    # the command must be restated plainly. Anything else is another
-    # adapter's raw launch and stays outside this gate.
-    while IFS= read -r w; do
-      for piece in $w; do
-        # Quote characters survive in the piece, but a wrapped shell
-        # strips them before executing, so compare the quote-stripped
-        # form: `sh -c "'pi' --model ..."` still starts the pi engine.
-        piece=${piece//\'/}
-        piece=${piece//\"/}
-        case "$(basename "./$piece")" in
-        pi)
-          echo "error: $id cannot launch: the raw launch command wraps a pi invocation ('$slot_launcher ...'), so the single-slot guard cannot resolve the model it would run; launch with a plain pi command carrying --model <profile>" >&2
-          return 1
-          ;;
-        esac
-      done
-    done <<< "$words"
+    # Not a plain pi launch. Launcher syntax and argument content are
+    # judged separately: a mere `pi` inside an ordinary argument (a flag
+    # value, a prompt, a path) says nothing about the engine and stays
+    # outside this gate, while a pi invocation in command position - the
+    # launcher itself, a wrapper's script, or a dynamically determined
+    # launcher word - can start the guarded engine and must be refused
+    # before it does. No command text is evaluated to decide this.
+    launcher_stripped=$(slot_strip_piece "$slot_launcher")
+    case "$slot_launcher" in
+    *'$'* | *'`'* | *\'* | *'"'* | *' ' | *$'\t' | *$'\n'* | '' | -*)
+      # The launcher word itself is dynamically determined or quoted:
+      # the executing shell may resolve it to pi, so refuse whenever any
+      # word of the command strips down to the pi engine. Anything else
+      # is another adapter's raw launch.
+      while IFS= read -r w; do
+        for piece in $w; do
+          case "$(basename "./$(slot_strip_piece "$piece")")" in
+          pi)
+            echo "error: $id cannot launch: the raw launch command's launcher ('$slot_launcher') cannot be resolved without evaluating shell text and the command names the pi engine, so the single-slot guard cannot establish which engine it would run; launch with a plain pi command carrying --model <profile>" >&2
+            return 1
+            ;;
+          esac
+        done
+      done <<< "$words"
+      echo "non-pi-raw"
+      return 0
+      ;;
+    esac
+    case "$(basename "./$launcher_stripped")" in
+    sh | bash | dash | zsh | ksh)
+      # A shell wrapper with an inline script: the script's first
+      # command word (past environment assignments and the transparent
+      # `exec`/`command` builtins, one level only) is what executes.
+      script=
+      prev=
+      while IFS= read -r w; do
+        if [ "$prev" = -c ]; then
+          script=$w
+          break
+        fi
+        prev=$w
+      done <<< "$words"
+      if [ -n "$script" ]; then
+        for piece in $script; do
+          piece=$(slot_strip_piece "$piece")
+          case "$piece" in
+          '' | *=* | exec | command) continue ;;
+          *)
+            case "$(basename "./$piece")" in
+            pi)
+              echo "error: $id cannot launch: the raw launch command wraps a pi invocation behind '$slot_launcher -c', so the single-slot guard cannot resolve the model it would run; launch with a plain pi command carrying --model <profile>" >&2
+              return 1
+              ;;
+            esac
+            break
+            ;;
+          esac
+        done
+      fi
+      echo "non-pi-raw"
+      return 0
+      ;;
+    sudo | nohup)
+      # A privilege/persistence wrapper names its program in the open:
+      # refuse when any word of the command strips down to pi, because
+      # the record would name the wrapper and no later check could see
+      # the guarded worker. Anything else runs another program.
+      while IFS= read -r w; do
+        for piece in $w; do
+          case "$(basename "./$(slot_strip_piece "$piece")")" in
+          pi)
+            echo "error: $id cannot launch: the raw launch command wraps a pi invocation behind '$slot_launcher', so its worker record would not identify a pi holder and later single-slot checks could not see this worker; launch with a plain pi command carrying --model <profile>" >&2
+            return 1
+            ;;
+          esac
+        done
+      done <<< "$words"
+      echo "non-pi-raw"
+      return 0
+      ;;
+    esac
     echo "non-pi-raw"
     return 0
     ;;

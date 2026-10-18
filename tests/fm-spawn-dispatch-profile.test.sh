@@ -622,7 +622,8 @@ test_single_slot_raw_ambiguous_forms_refuse_before_start() {
   # shellcheck disable=SC2016
   for raw in 'pi --model $SOME_UNSET_MODEL_VAR_XYZ' "pi --model=\"\$SOME_UNSET_MODEL_VAR_XYZ\"" \
     'pi --model `pick-model`' "sh -c 'pi --model $SLOT_DEFAULT'" "pi --model A --model B" \
-    "sh -c \"'pi' --model $SLOT_DEFAULT\"" "sh -c '\"pi\" --model $SLOT_DEFAULT'"; do
+    "sh -c \"'pi' --model $SLOT_DEFAULT\"" "sh -c '\"pi\" --model $SLOT_DEFAULT'" \
+    '$(command -v pi) --model '"$SLOT_DEFAULT" "sudo pi --model $SLOT_DEFAULT"; do
     out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
       "$raw")
     status=$?
@@ -632,6 +633,37 @@ test_single_slot_raw_ambiguous_forms_refuse_before_start() {
     [ ! -s "$LAUNCH_LOG" ] || fail "a refused ambiguous form '$raw' launched a worker"
   done
   pass "ambiguous raw launch forms are refused before any engine starts"
+}
+
+test_single_slot_raw_other_adapter_mentioning_pi_passes_through() {
+  local rec id id2 out status
+  id=slot-other-pi-z58
+  id2=slot-other-pi-z59
+  rec=$(make_spawn_case slot-raw-other-pi pi-signed "$id" "$id2")
+  read_case_record "$rec"
+  rm -f "$HOME_DIR/config/single-slot-profile"
+
+  # Launcher syntax and argument content are judged separately: a `pi`
+  # inside an ordinary argument says nothing about the engine, so a raw
+  # launch that resolves to another adapter stays outside this gate and
+  # launches through the raw escape hatch as before.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    "custom-agent --flag pi")
+  status=$?
+  expect_code 0 "$status" "an other-adapter raw launch mentioning pi must proceed"$'\n'"$out"
+  assert_contains "$out" "spawned $id harness=custom-agent" "the other-adapter launch did not complete"
+  assert_not_contains "$out" "wraps a pi" "a pi argument value must not trigger the wrapper scan"
+  [ -s "$LAUNCH_LOG" ] || fail "an allowed other-adapter launch left no launch trace"
+
+  # And a neighbouring adapter's own raw launch carrying a `pi` mention
+  # proceeds normally, proving the gate leaves other adapters alone.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id2" "$PROJ_DIR" \
+    "pi-signed --tui-mode regular --note pi")
+  status=$?
+  expect_code 0 "$status" "a pi-signed raw launch mentioning pi must proceed"$'\n'"$out"
+  assert_contains "$out" "spawned $id2 harness=pi-signed" "the pi-signed raw launch did not complete"
+  [ -s "$LAUNCH_LOG" ] || fail "an allowed pi-signed launch left no launch trace"
+  pass "other-adapter raw launches mentioning pi stay outside the gate"
 }
 
 test_single_slot_config_scope_is_pi_only() {
@@ -3002,6 +3034,7 @@ test_single_slot_ordinary_holder_blocks_raw_launch
 test_single_slot_raw_quoted_and_prefixed_models_enforced
 test_single_slot_raw_unsafe_launcher_refused_before_start
 test_single_slot_raw_ambiguous_forms_refuse_before_start
+test_single_slot_raw_other_adapter_mentioning_pi_passes_through
 test_single_slot_config_scope_is_pi_only
 test_single_slot_refuses_a_secondmate_spawn
 
