@@ -1136,6 +1136,29 @@ A malformed or unreadable file refuses every fresh ship or scout spawn until it 
 Firstmate cannot see which part of a worker's life uses the resource, so the number bounds whole workers from launch to handoff, and the tightest resource every worker needs should decide it.
 [`bin/fm-project-capacity-lib.sh`](../bin/fm-project-capacity-lib.sh) owns the file format, what holds a place, and why concurrent spawns cannot both take the last one.
 
+## Single-slot launch guard (config/single-slot-profile)
+
+The local AI server runs one engine that serves exactly one request at a time, so `bin/fm-spawn.sh` refuses a second concurrent launch on a guarded profile with a deterministic, nonzero refusal - never a queue - before any endpoint, worktree, or record exists.
+Secondmates get no exemption, because the constraint is physical, and a recorded holder counts only while its agent is actually live, judged by the same backend reader supervision uses; a relaunch of the holding task itself is the one exemption, so a task never blocks its own replacement.
+The guarded profile identifier for the engine in use is a built-in default in `bin/fm-spawn.sh` (`strata-local/qwen3.8-flash-next-coder-iq1_m`, the AI server's Strata engine since 2026-10-14), so the guard protects that engine with no configuration at all.
+The optional local, gitignored `config/single-slot-profile` adds one more guarded profile - one exact model string in the same form `--model` takes - for a rollback engine or a second single-slot engine; it never removes the built-in default.
+To also guard the retired engine while the box is rolled back, the file's whole content is that one value:
+
+```text
+qwen-local/qwen3.8-27b-unsloth-ud-iq3xxs
+```
+
+Every state of the file is defined and tested:
+
+- absent: the built-in default guards, and launches proceed normally - a home with no file is fully protected and never blocked;
+- one valid identifier: that profile joins the guarded set alongside the default;
+- empty, whitespace- or control-bearing, comment-prefixed, or a file that is not a readable regular file: the file is ignored with a loud warning naming it, and the built-in default stays in force - no state of the file can leave the guard off;
+- a stale but well-formed value: it guards the older engine only as an addition, so the built-in default keeps the engine in use guarded and a stale file cannot silently disable protection.
+
+To move the guard to a new engine, update the built-in default in `bin/fm-spawn.sh` and the value named in this section; the file only ever adds coverage, so a value left naming an older engine during a transition is harmless.
+A raw launch command resolves to the `pi` harness when its first non-environment word is `pi`; the gate parses the effective `--model` (either `--model <value>` or `--model=<value>`) out of the raw command text, and a raw `pi` command whose `--model` is missing, empty, trailing-bare, or followed by another option is refused with a diagnostic naming that malformed argument, because a raw launch must not bypass the guard by leaving the parsed model empty or malformed.
+New secondmate homes inherit the file with the rest of the home's local configuration ([`bin/fm-config-inherit-lib.sh`](../bin/fm-config-inherit-lib.sh)), so a fleet override reaches every home that launches workers.
+
 ## Crew dispatch profiles (config/crew-dispatch.json)
 
 `config/crew-dispatch.json` is an optional local, gitignored file containing natural-language rules that firstmate reads before dispatching a crewmate or scout.
