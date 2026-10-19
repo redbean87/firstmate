@@ -100,17 +100,105 @@ stop_reply_listener() {
   return 1
 }
 
+# Bounded, absence-tolerant dump of one awaited generation's capture state:
+# both awaited paths with their sizes, the listener claim and its pid's
+# liveness, the owner verdict, the generation files present, and the captured
+# start output for this source. Every line goes to stderr ahead of the
+# caller's unchanged fail message.
+await_state_dump() { # <result-path> <reason>
+  local result=$1 handled=${1%.result}.handled owner pid f
+  local start_out="$TMP_ROOT/start-await.${handled##*/}.out"
+  owner=$(reply_owner 2>/dev/null || echo unreadable)
+  pid=$(sed -n '2p' "$CLAIMS/$SID.claim" 2>/dev/null || true)
+  printf 'await_reply_result: %s\n' "$2" >&2
+  printf 'awaited: non-empty %s and marker %s\n' "$result" "$handled" >&2
+  if [ -s "$result" ]; then
+    printf '%s: %s bytes\n' "$result" "$(wc -c < "$result" | tr -d ' ')" >&2
+  elif [ -e "$result" ]; then
+    printf '%s: present but empty\n' "$result" >&2
+  else
+    printf '%s: absent\n' "$result" >&2
+  fi
+  if [ -L "$handled" ]; then
+    printf '%s: symlink to %s\n' "$handled" "$(readlink "$handled" 2>/dev/null)" >&2
+  elif [ -e "$handled" ]; then
+    printf '%s: present\n' "$handled" >&2
+  else
+    printf '%s: absent\n' "$handled" >&2
+  fi
+  printf 'source owner: %s\n' "$owner" >&2
+  case "$pid" in
+    ''|*[!0-9]*) printf 'claim: no numeric listener pid recorded\n' >&2 ;;
+    *)
+      if kill -0 "$pid" 2>/dev/null; then
+        printf 'claim pid %s: alive\n' "$pid" >&2
+      else
+        printf 'claim pid %s: gone\n' "$pid" >&2
+      fi
+      ;;
+  esac
+  printf 'generation files: ' >&2
+  for f in "$PARENT/state/procevent-inbox/$SID".*; do
+    [ -e "$f" ] || continue
+    printf '%s ' "${f##*/}" >&2
+  done
+  printf '\n' >&2
+  printf 'captured start output (%s):\n' "$start_out" >&2
+  tail -n 10 "$start_out" 2>/dev/null >&2 || printf '  (none captured)\n' >&2
+}
+
 # Block until this generation's capture has been applied. A live listener keeps
 # its claim across polls, so start is only launched when nothing owns the source.
+# The .result/.handled pair is the runner's own completion signal; the wait also
+# watches the producer itself. The claim's pid is the runner loop that writes
+# both files, so once it is conclusively gone - absent from the process table
+# on several consecutive checks, with any start this wait launched also exited,
+# and the product's own identity-checked owner verdict confirming no live
+# owner - no process remains that could ever satisfy the pair, and the wait
+# fails at once with the full captured state instead of burning the rest of its
+# 40-second budget. A reused pid that still reads alive merely keeps the
+# original budget as the bound, as does any live-but-slow listener, uncertain
+# or orphaned claim, or launch still starting up.
 await_reply_result() { # <result-path>
-  local result=$1 handled=${1%.result}.handled _
+  local result=$1 handled=${1%.result}.handled
+  local start_out="$TMP_ROOT/start-await.${handled##*/}.out" start_pid=''
+  local dead_checks=0 i owner pid
   if [ "$(reply_owner)" != live ]; then
-    remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null 2>&1 &
+    remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >> "$start_out" 2>&1 &
+    start_pid=$!
   fi
-  for _ in $(seq 1 800); do
+  for i in $(seq 1 800); do
     [ -s "$result" ] && [ -f "$handled" ] && return 0
+    # Cheap producer-liveness probe on a reduced cadence; the claim file and
+    # the start process are both written/owned by the runner being awaited.
+    if [ "$((i % 4))" -eq 0 ]; then
+      if [ -n "$start_pid" ] && kill -0 "$start_pid" 2>/dev/null; then
+        dead_checks=0
+      else
+        pid=$(sed -n '2p' "$CLAIMS/$SID.claim" 2>/dev/null || true)
+        case "$pid" in
+          ''|*[!0-9]*) dead_checks=0 ;;
+          *)
+            if kill -0 "$pid" 2>/dev/null; then
+              dead_checks=0
+            else
+              dead_checks=$((dead_checks + 1))
+              if [ "$dead_checks" -ge 3 ]; then
+                owner=$(reply_owner 2>/dev/null || echo unreadable)
+                if [ "$owner" != live ]; then
+                  await_state_dump "$result" 'the listener that writes .result/.handled is gone and no live owner remains; the pair can no longer arrive'
+                  return 1
+                fi
+                dead_checks=0
+              fi
+            fi
+            ;;
+        esac
+      fi
+    fi
     sleep 0.05
   done
+  await_state_dump "$result" "the reply-generation wait exhausted its 800-poll budget"
   return 1
 }
 
