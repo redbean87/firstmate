@@ -144,7 +144,10 @@ await_state_dump() { # <result-path> <reason>
   done
   printf '\n' >&2
   printf 'captured start output (%s):\n' "$start_out" >&2
-  tail -n 10 "$start_out" 2>/dev/null >&2 || printf '  (none captured)\n' >&2
+  # Duplicate stderr onto stdout BEFORE silencing stderr (the reverse order
+  # would make tail's stdout a copy of /dev/null and silently drop the
+  # excerpt); the focused fixture at the dump's own call site pins this.
+  tail -n 10 "$start_out" >&2 2>/dev/null || printf '  (none captured)\n' >&2
 }
 
 # Block until this generation's capture has been applied. A live listener keeps
@@ -244,6 +247,19 @@ ADAPTER="$ROOT/bin/fm-procevent-remote-reply.sh"
 SID=$(remote_env "$ADAPTER" source-id ios)
 out=$(remote_env "$ADAPTER" arm ios)
 assert_contains "$out" "armed: $SID offset=0" "remote reply source was not armed at the empty cursor"
+
+# Focused fixture for the dump's redirect order: with `2>/dev/null >&2` the
+# tail's stdout became a copy of /dev/null and the excerpt vanished, so the
+# dump printed its header without the start output it exists to show. The
+# marker below must survive the dump into captured stderr.
+DUMP_MARKER_PATH="$TMP_ROOT/start-await.$SID.99.handled.out"
+printf 'dump-excerpt-marker-line\n' > "$DUMP_MARKER_PATH"
+dump_out=$(await_state_dump "$PARENT/state/procevent-inbox/$SID.99.result" 'fixture reason' 2>&1)
+assert_contains "$dump_out" 'fixture reason' "the reply dump must name its reason"
+assert_contains "$dump_out" 'dump-excerpt-marker-line' "the reply dump must carry the captured start-output excerpt"
+assert_contains "$dump_out" "$SID.99.result: absent" "the reply dump must report the awaited path's state"
+rm -f "$DUMP_MARKER_PATH"
+pass "the failure-time reply dump carries the excerpts it promises"
 
 remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" > "$TMP_ROOT/start-one.out" 2>&1 &
 wait_for "$CLAIMS/$SID.claim" || fail "process-event runner never claimed the remote reply source"

@@ -1282,12 +1282,35 @@ hook_state_dump() {  # <home> <reason>
       ;;
   esac
   printf 'offer-count: %s\n' "$(cat "$home/offer-count" 2>/dev/null || echo absent)" >&2
+  # The tails duplicate stderr onto stdout BEFORE silencing stderr: with the
+  # reverse order (`2>/dev/null >&2`) the redirects apply left to right, the
+  # stdout copy lands on the already-silenced stderr, and every excerpt this
+  # dump exists to show vanishes. The fixture test pins this ordering.
   printf 'hook.err (tail):\n' >&2
-  tail -n 10 "$home/hook.err" 2>/dev/null >&2 || printf '  (absent)\n' >&2
+  tail -n 10 "$home/hook.err" >&2 2>/dev/null || printf '  (absent)\n' >&2
   printf 'hook.out (tail):\n' >&2
-  tail -n 10 "$home/hook.out" 2>/dev/null >&2 || printf '  (absent)\n' >&2
+  tail -n 10 "$home/hook.out" >&2 2>/dev/null || printf '  (absent)\n' >&2
   printf 'state/.supervision-host.log (tail):\n' >&2
-  tail -n 10 "$home/state/.supervision-host.log" 2>/dev/null >&2 || printf '  (absent)\n' >&2
+  tail -n 10 "$home/state/.supervision-host.log" >&2 2>/dev/null || printf '  (absent)\n' >&2
+}
+
+# The dump must carry the log excerpts it promises. With the old redirect
+# order (`2>/dev/null >&2`) tail's stdout became a copy of /dev/null and this
+# fixture failed on every marker below; the corrected order shows them all.
+test_hook_state_dump_carries_the_log_excerpts_it_promises() {
+  local home out
+  home="$TMP_ROOT/hook-dump-fixture"
+  mkdir -p "$home/state"
+  printf 'hook-err-marker-line\n' > "$home/hook.err"
+  printf 'hook-out-marker-line\n' > "$home/hook.out"
+  printf 'host-log-marker-line\n' > "$home/state/.supervision-host.log"
+  out=$(hook_state_dump "$home" 'fixture reason' 2>&1) || fail "hook dump fixture: the dump returned nonzero"
+  assert_contains "$out" 'fixture reason' "the hook dump must name its reason"
+  assert_contains "$out" 'hook-err-marker-line' "the hook dump must carry the hook.err excerpt"
+  assert_contains "$out" 'hook-out-marker-line' "the hook dump must carry the hook.out excerpt"
+  assert_contains "$out" 'host-log-marker-line' "the hook dump must carry the supervision-host log excerpt"
+  assert_contains "$out" 'hook.rc: absent' "the hook dump must report the awaited file's state"
+  pass "host+hook: the failure-time hook dump carries the log excerpts it promises"
 }
 
 # Main's rewoken turn drains; the caller runs the printed acknowledgement
@@ -3089,6 +3112,7 @@ test_main_only_pass_through_leaves_the_successor_watcher_running
 test_attended_close_with_unidentified_main_session_passes_to_main
 test_close_accepted_away_that_turns_attended_passes_to_main
 test_attended_close_that_turns_main_only_before_its_turn_passes_to_main
+test_hook_state_dump_carries_the_log_excerpts_it_promises
 test_claude_stop_hook_delivers_a_main_only_pass_through
 test_claude_stop_hook_rewakes_a_present_captain_beside_a_quiet_record
 test_claude_stop_hook_runs_the_host_without_the_file_and_off_opts_out
