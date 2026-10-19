@@ -356,7 +356,7 @@
 #   task teardown removes only the current home's launch namespace.
 # Launch environment (config/launch-env-allowlist):
 #   Absent means unchanged ambient inheritance. A present readable regular file
-#   opts every launch (ship, scout, secondmate, raw command, and relaunch) into
+#   opts every launch (ship, scout, secondmate, and relaunch) into
 #   /usr/bin/env -i followed by /bin/sh -c of the existing launch command.
 #   Each line is one POSIX environment name, never a value or shell expression;
 #   blank lines and lines beginning with # are ignored. Invalid input refuses
@@ -377,7 +377,7 @@
 #   An enabled task trace also retains TRACEPARENT. Explicit Firstmate launch
 #   assignments still apply inside the filtered environment, including the
 #   FM_TASK_INBOX export every launch carries (the absolute state/<id>.inbox
-#   path the steering doorbell names). Raw commands must
+#   path the steering doorbell names). The emitted launch command must
 #   be POSIX sh compatible under this opt-in; the absent-file path is unchanged.
 #   This is an exec environment boundary, not a sandbox for the pane's startup
 #   shell, credential files, same-user processes, or later shell initialization.
@@ -401,14 +401,14 @@
 #   Opt-in. With no file, a Claude or Pi launch is unchanged: Claude still
 #   receives this process's own CLAUDE_CONFIG_DIR when it is set, and Pi the
 #   destination pane's ambient account. A present file pins every launch of
-#   that runner from this home - ship, scout, local secondmate, raw Claude
-#   command, and relaunch - to the declared account root, and the spawn
+#   that runner from this home - ship, scout, local secondmate, and relaunch -
+#   to the declared account root, and the spawn
 #   refuses before any endpoint, worktree, or record exists when the file is
 #   malformed, the root is unusable, or the runner's own check says it is not
 #   signed in. A pinned Claude launch sheds the environment credentials Claude
 #   ranks above the root's login; a pinned Pi launch needs --model
-#   <provider>/<id> for a declared provider and also carries --provider, and a
-#   raw Pi command refuses. The pin is recorded as account= (and Pi's
+#   <provider>/<id> for a declared provider and also carries --provider.
+#   The pin is recorded as account= (and Pi's
 #   account_provider=) in the task record and on the spawned line. A local
 #   secondmate reads this launching home's file; pins are never inherited.
 #   bin/fm-worker-account-lib.sh owns parsing, the check, and the shed list.
@@ -477,9 +477,6 @@
 # source exists. Grok keeps its rendered-tail fallback and is not given a parent
 # turn-end hook. Cursor's transcript binding is written for a secondmate the same way
 # as for a crewmate. Muse, gemini, agy, devin, and rovo are refused as secondmates.
-# A raw launch command for a claude, pi, pi-signed, or omp secondmate is not armed
-# and retires any arm an earlier launch of that mate left, so its verdict is unknown:
-# the raw command carries no --settings or -e flag to load the wiring.
 # A claude secondmate gets no Stop busy hook; its home's tracked Stop guard is its
 # only Stop writer, through the .fm-busy-stop pointer in that home. A home whose
 # guard predates that pointer keeps the ordinary Stop idle hook instead.
@@ -1585,11 +1582,12 @@ spawn_herdr_presentation_order_lock_acquire() {
 
 clear_relaunch_harness_wiring() {
   local harness=$1 wt=$2 state=$3 id=$4 kind=${5-} token_path token auth_path path
-  # The wiring arms above match on harness PREFIXES, because a task launched
-  # from a raw command records that command's basename rather than the exact
-  # adapter name. The retirement tables are keyed by the exact adapter, so the
-  # recorded value is resolved to its adapter first; otherwise a task recorded
-  # as, say, `grok-2` would have wiring armed and never retired. An
+  # The wiring arms above match on harness PREFIXES, because a task record
+  # created before hand-typed launches were refused can carry a raw command's
+  # basename rather than the exact adapter name. The retirement tables are keyed
+  # by the exact adapter, so the recorded value is resolved to its adapter first;
+  # otherwise a task recorded as, say, `grok-2` would have wiring armed and never
+  # retired. An
   # unrecognized value resolves to no adapter, which is also the case in which
   # no wiring was armed to begin with.
   harness=$(fm_control_harness_family "$harness") || harness=
