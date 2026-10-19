@@ -27,6 +27,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/fake-supported-adapter-fixture.sh
+. "$ROOT/tests/fake-supported-adapter-fixture.sh"
 
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
@@ -122,11 +124,12 @@ git -C "$PROJ" remote add origin "file://$PROJ.origin.git"
 # --- spawn with NO explicit backend config; HERDR_ENV=1 is the only marker --
 
 OUT_FILE="$TMP_ROOT/spawn.out"; ERR_FILE="$TMP_ROOT/spawn.err"
-env -u TMUX -u FM_BACKEND PATH="$PATH" HERDR_ENV=1 \
+AUTODETECT_FAKE_BIN=$(fm_test_install_fake_pi_adapter "$TMP_ROOT/fake-autodetect" "autodetect-smoke-ok")
+env -u TMUX -u FM_BACKEND PATH="$AUTODETECT_FAKE_BIN:$PATH" HERDR_ENV=1 \
   FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
   FM_CONFIG_OVERRIDE="$CONFIG" FM_PROJECTS_OVERRIDE="$TMP_ROOT/unused-projects" \
   FM_SPAWN_NO_GUARD=1 \
-  "$ROOT/bin/fm-spawn.sh" "$ID" "$PROJ" "sh -c 'echo autodetect-smoke-ok'" --mode no-mistakes --yolo off \
+  "$ROOT/bin/fm-spawn.sh" "$ID" "$PROJ" --harness pi --mode no-mistakes --yolo off \
   >"$OUT_FILE" 2>"$ERR_FILE"
 status=$?
 [ "$status" -eq 0 ] || fail "fm-spawn.sh did not succeed auto-detecting herdr"$'\n'"--- stdout ---"$'\n'"$(cat "$OUT_FILE")"$'\n'"--- stderr ---"$'\n'"$(cat "$ERR_FILE")"

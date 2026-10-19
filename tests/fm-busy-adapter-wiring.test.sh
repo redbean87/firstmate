@@ -378,18 +378,21 @@ test_gemini_hooks_stale_incarnation_harmless() {
   pass "gemini hook events from a superseded incarnation are rejected without breaking the hook"
 }
 
-test_raw_gemini_launch_has_no_semantic_wiring() {
+test_raw_gemini_launch_is_refused_without_wiring() {
   local rec id=busy-gm-raw out state
   rec=$(make_spawn_case gemini-raw gemini "$id")
   read_case_record "$rec"
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR" 'gemini --debug')
-  expect_code 0 $? "raw gemini spawn should succeed: $out"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR" 'gemini --debug' 2>&1)
+  expect_code 1 $? "a hand-typed gemini spawn must be refused: $out"
   state="$HOME_DIR/state"
+  assert_contains "$out" "hand-typed launch commands are unsupported for every adapter" \
+    "the raw gemini refusal must name the blanket rule"
+  assert_absent "$state/$id.meta" "raw gemini launch must not write a task record"
   assert_absent "$state/$id.busy-gen" "raw gemini launch must not arm a busy generation"
   assert_absent "$state/$id.gemini-settings.json" "raw gemini launch must not write hook settings"
   out=$(classify gemini "$id" "$state")
-  [ "$out" = "unknown missing" ] || fail "raw gemini launch must classify unknown, got '$out'"
-  pass "raw gemini launch remains unwired and classifies unknown"
+  [ "$out" = "unknown missing" ] || fail "a refused raw gemini launch must classify unknown, got '$out'"
+  pass "a hand-typed gemini launch is refused before any wiring or record exists"
 }
 
 test_gemini_is_refused_as_a_secondmate() {
@@ -759,28 +762,23 @@ test_secondmate_opencode_plugin_closes_without_a_parent_turnend() {
   pass "an opencode secondmate plugin closes the parent busy record without a parent turn-end"
 }
 
-# A raw launch command carries none of the launch-template flags (--settings,
-# -e) that load the secondmate wiring, so a record armed for it would never be
-# updated by the launched command.
-test_raw_secondmate_launch_writes_no_busy_wiring() {
-  local harness raw case_dir id state sm out launch
+# A hand-typed (raw) launch command is refused outright for every adapter
+# before any engine starts, so a raw secondmate launch can neither arm busy
+# wiring nor write any record. (The supported path's wiring is covered above.)
+test_raw_secondmate_launch_refused_without_wiring() {
+  local harness raw case_dir id state sm out
   for harness in claude pi pi-signed omp; do
     case_dir="$TMP_ROOT/sm-raw-$harness"
     id="sm-raw-$harness"
     raw="$harness --fm-raw-flag"
-    # The single-slot gate resolves a raw pi launch's effective --model and
-    # refuses one it cannot resolve (docs/configuration.md "Single-slot launch
-    # guard"), so the raw pi case names an explicit non-guarded profile. This
-    # test is about busy wiring, so the profile is incidental.
-    if [ "$harness" = pi ]; then
-      raw="$raw --model raw-test-model"
+    if out=$(spawn_secondmate_harness "$case_dir" "$id" "$raw" "$harness" 2>&1); then
+      fail "raw $harness secondmate spawn must be refused: $out"
     fi
-    out=$(spawn_secondmate_harness "$case_dir" "$id" "$raw" "$harness") \
-      || fail "raw $harness secondmate spawn must still succeed: $out"
     state="$case_dir/primary/state"
     sm="$case_dir/sm"
-    launch=$(cat "$case_dir/launch.log")
-    assert_contains "$launch" "$raw" "raw $harness secondmate did not launch the raw command"
+    assert_contains "$out" "hand-typed launch commands are unsupported for every adapter" \
+      "the raw $harness secondmate refusal must name the blanket rule"
+    assert_absent "$state/$id.meta" "raw $harness secondmate wrote a task record"
     assert_absent "$state/$id.busy-gen" "raw $harness secondmate armed a busy generation"
     assert_absent "$state/$id.busy-state" "raw $harness secondmate seeded a busy record"
     assert_absent "$state/$id.claude-settings.json" "raw $harness secondmate wrote Claude hook settings"
@@ -788,29 +786,30 @@ test_raw_secondmate_launch_writes_no_busy_wiring() {
     assert_absent "$sm/.claude/settings.local.json" "raw $harness secondmate wrote the home's settings.local.json"
     assert_absent "$state/$id.pi-ext.ts" "raw $harness secondmate wrote the Pi busy extension"
     assert_absent "$state/$id.omp-ext.ts" "raw $harness secondmate wrote the omp busy extension"
-    out=$(classify "$harness" "$id" "$state")
-    [ "$out" = "unknown missing" ] || fail "raw $harness secondmate must classify unknown missing, got '$out'"
+    [ ! -s "$case_dir/launch.log" ] || fail "raw $harness secondmate launched an engine"
   done
 
+  # A refused raw respawn must leave an already-armed secondmate's record
+  # intact: the refusal runs before the retirement step, not after it.
   case_dir="$TMP_ROOT/sm-raw-over-armed"
   id='sm-raw-over-armed'
-  out=$(spawn_secondmate_harness "$case_dir" "$id" claude) \
-    || fail "canonical claude secondmate spawn failed: $out"
+  spawn_secondmate_harness "$case_dir" "$id" claude >/dev/null \
+    || fail "canonical claude secondmate spawn failed"
   state="$case_dir/primary/state"
   sm="$case_dir/sm"
   assert_present "$state/$id.busy-gen" "canonical claude secondmate spawn did not arm a busy generation"
   assert_present "$sm/.fm-busy-stop" "canonical claude secondmate spawn did not write the Stop pointer"
   : > "$case_dir/launch.log"
-  out=$(FM_BACKEND=tmux FM_FAKE_LAUNCH_LOG="$case_dir/launch.log" \
-    fm_test_run_spawn "$case_dir/primary" "$sm" "$case_dir/fake/fakebin" "$id" "$sm" 'claude --fm-raw-flag' --secondmate) \
-    || fail "raw claude respawn over an armed secondmate must succeed: $out"
-  assert_contains "$(cat "$case_dir/launch.log")" 'claude --fm-raw-flag' "raw respawn did not launch the raw command"
-  assert_absent "$state/$id.busy-gen" "raw respawn kept the earlier busy generation"
-  assert_absent "$state/$id.busy-state" "raw respawn kept the earlier busy record"
-  assert_absent "$sm/.fm-busy-stop" "raw respawn kept the earlier Stop pointer"
-  out=$(classify claude "$id" "$state")
-  [ "$out" = "unknown missing" ] || fail "raw respawn over an armed secondmate must classify unknown missing, got '$out'"
-  pass "a raw claude, pi, pi-signed, or omp secondmate launch writes no busy wiring and classifies unknown"
+  if out=$(FM_BACKEND=tmux FM_FAKE_LAUNCH_LOG="$case_dir/launch.log" \
+    fm_test_run_spawn "$case_dir/primary" "$sm" "$case_dir/fake/fakebin" "$id" "$sm" 'claude --fm-raw-flag' --secondmate 2>&1); then
+    fail "raw claude respawn over an armed secondmate must be refused: $out"
+  fi
+  assert_contains "$out" "hand-typed launch commands are unsupported for every adapter" \
+    "the raw respawn refusal must name the blanket rule"
+  assert_present "$state/$id.busy-gen" "a refused raw respawn must not retire the armed busy generation"
+  assert_present "$sm/.fm-busy-stop" "a refused raw respawn must not remove the Stop pointer"
+  [ ! -s "$case_dir/launch.log" ] || fail "a refused raw respawn launched an engine"
+  pass "a hand-typed secondmate launch is refused before any wiring or record exists"
 }
 
 test_secondmate_codex_and_grok_do_not_arm_a_parent_turnend() {
@@ -842,7 +841,7 @@ test_secondmate_codex_and_grok_do_not_arm_a_parent_turnend() {
 }
 
 test_secondmate_claude_spawn_arms_busy_for_the_stall_gate
-test_raw_secondmate_launch_writes_no_busy_wiring
+test_raw_secondmate_launch_refused_without_wiring
 test_secondmate_claude_stop_guard_owns_the_stop_verdict
 test_secondmate_claude_older_home_guard_keeps_the_stop_idle_hook
 test_secondmate_claude_spawn_leaves_local_settings_untouched
@@ -859,7 +858,7 @@ test_claude_hooks_semantic_lifecycle
 test_claude_hooks_stale_incarnation_harmless
 test_gemini_hooks_semantic_lifecycle
 test_gemini_hooks_stale_incarnation_harmless
-test_raw_gemini_launch_has_no_semantic_wiring
+test_raw_gemini_launch_is_refused_without_wiring
 test_gemini_is_refused_as_a_secondmate
 test_codex_unverified_until_a_semantic_source_exists
 

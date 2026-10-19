@@ -377,111 +377,111 @@ test_single_slot_stale_override_keeps_default_guard() {
   pass "a stale but well-formed override cannot silently disable the built-in default"
 }
 
-test_single_slot_raw_launch_resolves_model_from_command() {
-  local rec id blocker out status
-  id=slot-raw-z41
-  blocker=slot-raw-holder-z29k
-  rec=$(make_spawn_case slot-raw pi "$id")
+# Hand-typed (raw) launches are refused outright for every adapter. The gate
+# never reads the command text, so no spelling can matter: each case must
+# refuse before any engine process starts - no task record, nothing sent to a
+# pane - with the same single diagnostic.
+test_single_slot_hand_typed_refused_before_start() {
+  local rec id out status raw
+  id=slot-handtyped-z60
+  rec=$(make_spawn_case slot-hand-typed pi "$id")
   read_case_record "$rec"
   rm -f "$HOME_DIR/config/single-slot-profile"
-  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
 
-  # A raw pi command embeds its own --model; the gate resolves it out of the
-  # command text, so the guarded profile cannot be bypassed by going raw...
-  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --model $SLOT_DEFAULT")
-  status=$?
-  expect_code 1 "$status" "a raw pi launch on the guarded profile must be refused while the slot is live"
-  assert_contains "$out" "$id cannot launch" "the raw refusal must use the deterministic cannot-launch shape"
-  assert_contains "$out" "$blocker" "the raw refusal must name the blocking live worker"
-  assert_absent "$HOME_DIR/state/$id.meta" "a raw-refused spawn wrote its own task record"
-
-  # ...including the --model=<value> form, which then launches normally.
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --model=openai-codex/gpt-5.6-sol")
-  status=$?
-  expect_code 0 "$status" "a raw pi launch on a non-guarded model must proceed"$'\n'"$out"
-  assert_contains "$out" "spawned $id harness=pi" "the raw pi launch did not complete"
-  pass "a raw pi launch's embedded --model is resolved and gated"
+  # Literal shell syntax below is the point under test, not a quoting slip.
+  # shellcheck disable=SC2016
+  for raw in "pi --model $SLOT_DEFAULT" \
+    "pi --model '$SLOT_DEFAULT'" \
+    "pi --model=\"$SLOT_DEFAULT\"" \
+    "pi --tui-mode regular" \
+    "exec pi --model $SLOT_DEFAULT" \
+    "env FOO=1 pi --model $SLOT_DEFAULT" \
+    "/usr/bin/env pi --model $SLOT_DEFAULT" \
+    "command pi --model $SLOT_DEFAULT" \
+    "nohup pi --model $SLOT_DEFAULT" \
+    "'pi' --model $SLOT_DEFAULT" \
+    "sh -c 'pi --model $SLOT_DEFAULT'" \
+    "cd . && pi --model $SLOT_DEFAULT" \
+    '$(command -v pi) --model '"$SLOT_DEFAULT"; do
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "$raw")
+    status=$?
+    expect_code 1 "$status" "a hand-typed launch ('$raw') must be refused"
+    assert_contains "$out" "$id cannot launch" "the refusal of '$raw' must use the cannot-launch shape"
+    assert_contains "$out" "hand-typed launch commands are unsupported for every adapter" \
+      "the refusal of '$raw' must name the unsupported form"
+    assert_contains "$out" "--harness <adapter>" "the refusal of '$raw' must name the supported launch path"
+    assert_absent "$HOME_DIR/state/$id.meta" "a refused hand-typed launch ('$raw') wrote its own task record"
+    [ ! -s "$LAUNCH_LOG" ] || fail "a refused hand-typed launch ('$raw') started an engine"
+  done
+  pass "every hand-typed launch is refused before any engine starts"
 }
 
-test_single_slot_raw_launch_without_model_refuses() {
-  local rec id out status
-  id=slot-raw-nomodel-z42
-  rec=$(make_spawn_case slot-raw-nomodel pi "$id")
+test_single_slot_hand_typed_refused_for_every_adapter() {
+  local rec id out status raw
+  id=slot-handtyped-all-z61
+  rec=$(make_spawn_case slot-hand-typed-all claude "$id")
   read_case_record "$rec"
   rm -f "$HOME_DIR/config/single-slot-profile"
 
-  # A raw pi command with no resolvable --model cannot be verified against the
-  # guarded set, so it is refused rather than allowed past the gate.
+  # The refusal is deliberately total: a hand-typed launch stops working for
+  # every tool, not only for commands that look like pi.
+  for raw in "claude --model sonnet" "custom-agent --flag pi" "other --prompt 'use pi here'"; do
+    out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" "$raw")
+    status=$?
+    expect_code 1 "$status" "a hand-typed launch for any adapter ('$raw') must be refused"
+    assert_contains "$out" "hand-typed launch commands are unsupported for every adapter" \
+      "the refusal of '$raw' must name the blanket rule"
+    assert_absent "$HOME_DIR/state/$id.meta" "a refused hand-typed launch ('$raw') wrote its own task record"
+    [ ! -s "$LAUNCH_LOG" ] || fail "a refused hand-typed launch ('$raw') started an engine"
+  done
+
+  # The supported path for a non-guarded adapter still launches and records.
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --tui-mode regular")
+    --harness claude --model sonnet)
   status=$?
-  expect_code 1 "$status" "a raw pi launch without --model must be refused"
-  assert_contains "$out" "$id cannot launch" "the unresolvable-model refusal must use the cannot-launch shape"
-  assert_contains "$out" "--model" "the unresolvable-model refusal must name --model"
-  assert_absent "$HOME_DIR/state/$id.meta" "an unresolvable-model refusal wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "an unresolvable-model refusal launched a worker"
-  pass "a raw pi launch with no resolvable --model is refused with a clear diagnostic"
+  expect_code 0 "$status" "a supported claude launch must still proceed"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" claude sonnet default
+  [ -s "$LAUNCH_LOG" ] || fail "a supported claude launch left no launch trace"
+  pass "a hand-typed launch is refused for every adapter while the supported path still launches"
 }
 
-test_single_slot_raw_launch_model_followed_by_option_refuses() {
-  local rec id blocker out status
-  id=slot-raw-optval-z44
-  blocker=slot-raw-optval-holder-z29l
-  rec=$(make_spawn_case slot-raw-optval pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-  seed_slot_holder "$HOME_DIR" "$blocker" pi "$SLOT_DEFAULT"
-
-  # The token after --model is an option, not a model value: taking it at face
-  # value would resolve a bogus model, miss the guarded set, and let the gate
-  # skip - so the malformed argument is refused before any launch.
-  out=$(run_slot_spawn live "$blocker" "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --model --tui-mode regular")
-  status=$?
-  expect_code 1 "$status" "a raw --model followed by an option must be refused"
-  assert_contains "$out" "$id cannot launch" "the malformed-model refusal must use the cannot-launch shape"
-  assert_contains "$out" "--model is followed by the option '--tui-mode'" "the refusal must name the malformed argument"
-  assert_absent "$HOME_DIR/state/$id.meta" "a malformed-model refusal wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "a malformed-model refusal launched a worker"
-  pass "a raw --model followed by another option cannot slip past the gate"
-}
-
-test_single_slot_raw_launch_empty_inline_model_refuses() {
-  local rec id out status
-  id=slot-raw-emptyval-z45
-  rec=$(make_spawn_case slot-raw-emptyval pi "$id")
+test_single_slot_supported_path_enforces_and_records() {
+  local rec holder id out status
+  holder=slot-supported-z62
+  id=slot-supported-second-z63
+  rec=$(make_spawn_case slot-supported pi "$holder" "$id")
   read_case_record "$rec"
   rm -f "$HOME_DIR/config/single-slot-profile"
 
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --model=")
+  # The supported launch path starts while the slot is free and records the
+  # live worker on the guarded profile, so later checks can discover it.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$holder" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
   status=$?
-  expect_code 1 "$status" "a raw --model= with an empty value must be refused"
-  assert_contains "$out" "$id cannot launch" "the empty-inline-model refusal must use the cannot-launch shape"
-  assert_contains "$out" "--model= carries an empty value" "the refusal must name the empty --model= argument"
-  assert_absent "$HOME_DIR/state/$id.meta" "an empty-inline-model refusal wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "an empty-inline-model refusal launched a worker"
-  pass "a raw --model= with an empty value is refused with an accurate diagnostic"
-}
+  expect_code 0 "$status" "a supported Strata launch on the free slot must proceed"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$holder.meta" pi "$SLOT_DEFAULT" default
+  [ -s "$LAUNCH_LOG" ] || fail "a supported Strata launch left no launch trace"
 
-test_single_slot_raw_launch_trailing_bare_model_refuses() {
-  local rec id out status
-  id=slot-raw-bare-z46
-  rec=$(make_spawn_case slot-raw-bare pi "$id")
-  read_case_record "$rec"
-  rm -f "$HOME_DIR/config/single-slot-profile"
-
-  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
-    "pi --tui-mode regular --model")
+  # The recorded worker is discoverable by subsequent checks: while it is live,
+  # a second supported launch is refused, and that launch never reaches an engine.
+  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder" FM_FAKE_PANE_COMMAND=pi \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
   status=$?
-  expect_code 1 "$status" "a raw command ending in a bare --model must be refused"
-  assert_contains "$out" "$id cannot launch" "the trailing-bare-model refusal must use the cannot-launch shape"
-  assert_contains "$out" "ends with a bare --model" "the refusal must name the trailing bare --model"
-  assert_absent "$HOME_DIR/state/$id.meta" "a trailing-bare-model refusal wrote its own task record"
-  [ ! -s "$LAUNCH_LOG" ] || fail "a trailing-bare-model refusal launched a worker"
-  pass "a raw command ending in a bare --model is refused with an accurate diagnostic"
+  expect_code 1 "$status" "a second supported Strata launch must be refused while the first is live"
+  assert_contains "$out" "$id cannot launch" "the second-launch refusal must use the cannot-launch shape"
+  assert_contains "$out" "$holder" "the refusal must name the live holder"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused second launch wrote its own task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused second launch started an engine"
+
+  # And the slot reopens once the recorded holder's agent exits.
+  out=$(FM_FAKE_LIVENESS=1 FM_FAKE_WINDOW_LIST="fm-$holder" FM_FAKE_PANE_COMMAND=zsh \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --harness pi --model "$SLOT_DEFAULT")
+  status=$?
+  expect_code 0 "$status" "the slot must reopen once the recorded holder exits"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" pi "$SLOT_DEFAULT" default
+  pass "the supported path enforces the slot and records a discoverable live worker"
 }
 
 test_single_slot_config_scope_is_pi_only() {
@@ -856,48 +856,31 @@ test_active_dispatch_profile_allows_positional_harness() {
   pass "active crew-dispatch profile allows the legacy positional harness form"
 }
 
-test_active_dispatch_profile_allows_raw_launch_command() {
-  local rec id out status launch
+test_active_dispatch_profile_refuses_raw_launch_command() {
+  local rec id out status
   id=profile-raw-z15
   rec=$(make_spawn_case profile-raw claude "$id")
   read_case_record "$rec"
   enable_dispatch_profile "$HOME_DIR"
 
+  # A hand-typed launch command is refused outright, so it can no longer stand
+  # in for the explicit harness an active dispatch profile requires.
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
     "$id" "$PROJ_DIR" "custom-agent --flag")
   status=$?
-  expect_code 0 "$status" "raw launch command should satisfy active dispatch-profile requirement"
-  assert_contains "$out" "spawned $id harness=custom-agent" "spawn did not report raw command harness"
-  assert_meta_profile "$HOME_DIR/state/$id.meta" custom-agent default default
-  launch=$(cat "$LAUNCH_LOG")
-  # The unverified-adapter escape hatch is still an agent this fleet launched,
-  # so it carries the compact-adviser floor and the AI-trailer strip; nothing
-  # else may rewrite the captain's own command.
-  [ "$launch" = "export COMPACT_ADVISER_DISABLE=1; $(task_inbox_export "$HOME_DIR" "$id")$(ai_trailer_hooks_prefix "$HOME_DIR" "$id")custom-agent --flag" ] || fail "raw launch command changed"$'\n'"actual: $launch"
-  pass "active crew-dispatch profile allows the raw launch-command escape hatch"
-}
+  expect_code 1 "$status" "a raw launch command must be refused under an active dispatch profile"
+  assert_contains "$out" "hand-typed launch commands are unsupported for every adapter" \
+    "the raw refusal must name the blanket rule"
+  assert_absent "$HOME_DIR/state/$id.meta" "a refused raw launch wrote a task record"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused raw launch launched a worker"
 
-test_chained_raw_launch_strips_ai_trailer_in_every_step() {
-  local rec id out status launch body
-  id=chained-raw-z15
-  rec=$(make_spawn_case chained-raw claude "$id")
-  read_case_record "$rec"
-
+  # The supported path satisfies the same requirement and records the worker.
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
-    "$id" "$PROJ_DIR" "cd . && git commit -q --allow-empty --trailer 'Co-authored-by: Cursor <cursoragent@cursor.com>' -m 'fix: chained raw launch'")
+    "$id" "$PROJ_DIR" --harness claude --model sonnet)
   status=$?
-  expect_code 0 "$status" "chained raw launch should spawn: $out"
-  launch=$(cat "$LAUNCH_LOG")
-  (
-    cd "$WT_DIR" || exit 1
-    unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-    fm_git_identity 'Captain Tests' 'captain@example.invalid'
-    bash -c "$launch"
-  ) || fail "executing the chained raw launch failed"$'\n'"launch: $launch"
-  body=$(git -C "$WT_DIR" log -1 --format=%B)
-  assert_contains "$body" "fix: chained raw launch" "the chained launch did not commit"
-  assert_not_contains "$body" "cursoragent@cursor.com" "the AI trailer reached a commit made after the first step of a chained raw launch"
-  pass "a chained raw launch commits through the AI-trailer strip in every step"
+  expect_code 0 "$status" "the supported harness must satisfy an active dispatch profile"$'\n'"$out"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" claude sonnet default
+  pass "an active crew-dispatch profile refuses a raw launch command and takes the supported path"
 }
 
 test_claude_threads_model_and_effort() {
@@ -2275,7 +2258,7 @@ test_active_dispatch_profile_does_not_block_secondmate_launch() {
 # fake backend records delivery, while real shells exercise the env boundary.
 # No developer environment or credential values are inspected by these probes.
 test_launch_environment_allowlist() {
-  local setting rec id out status probe result expected launch value pane_shell pane_path
+  local setting rec id out status result expected launch value pane_shell pane_path
   # shellcheck disable=SC2016
   value='synthetic value; $(touch SHOULD_NOT_EXIST) `false` "quoted"'
   for setting in absent missing-config enabled empty; do
@@ -2287,15 +2270,20 @@ test_launch_environment_allowlist() {
       enabled) printf '# Synthetic credential name\nFM_TEST_ALLOWED\nFM_TEST_EMPTY\nFM_TEST_UNSET\n' > "$HOME_DIR/config/launch-env-allowlist" ;;
       empty) : > "$HOME_DIR/config/launch-env-allowlist" ;;
     esac
-    probe="$CASE_DIR/probe.sh"
-    cat > "$probe" <<'SH'
+    # The supported pi path pins its resolved absolute binary, so the probe can
+    # be the fake pi itself: no hand-typed command is needed (and none is allowed).
+    cat > "$FAKEBIN_DIR/pi" <<'SH'
 #!/bin/sh
+case "${1:-}" in
+--help) printf '%s\n' 'Pi 0.84.0' 'Options: --help --tui-mode <mode> --approve'; exit 0 ;;
+esac
 printf '%s\n' "${FM_TEST_AMBIENT_SENTINEL-unset}" "${FM_TEST_ALLOWED-unset}" \
   "${FM_TEST_EMPTY-unset}" "${FM_TEST_UNSET-unset}" "$HOME" "$PATH" "$TERM" "$TMUX" "$GOTMPDIR"
 SH
+    chmod +x "$FAKEBIN_DIR/pi"
     out=$(FM_TEST_AMBIENT_SENTINEL=synthetic-unrelated \
       run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
-      "$id" "$PROJ_DIR" --harness "/bin/sh '$probe'")
+      "$id" "$PROJ_DIR" --harness pi)
     status=$?
     expect_code 0 "$status" "allowlist=$setting spawn should succeed: $out"
     launch=$(cat "$LAUNCH_LOG")
@@ -2769,8 +2757,7 @@ test_active_dispatch_profile_requires_explicit_harness_for_ship
 test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness
 test_active_dispatch_profile_allows_positional_harness
-test_active_dispatch_profile_allows_raw_launch_command
-test_chained_raw_launch_strips_ai_trailer_in_every_step
+test_active_dispatch_profile_refuses_raw_launch_command
 test_claude_threads_model_and_effort
 test_codex_threads_model_and_effort
 test_codex_threads_model_and_max_effort
@@ -2842,11 +2829,9 @@ test_single_slot_ignores_a_dead_agent_row
 test_single_slot_reopens_after_the_holder_exits
 test_single_slot_unusable_override_falls_back_to_default
 test_single_slot_stale_override_keeps_default_guard
-test_single_slot_raw_launch_resolves_model_from_command
-test_single_slot_raw_launch_without_model_refuses
-test_single_slot_raw_launch_model_followed_by_option_refuses
-test_single_slot_raw_launch_empty_inline_model_refuses
-test_single_slot_raw_launch_trailing_bare_model_refuses
+test_single_slot_hand_typed_refused_before_start
+test_single_slot_hand_typed_refused_for_every_adapter
+test_single_slot_supported_path_enforces_and_records
 test_single_slot_config_scope_is_pi_only
 test_single_slot_refuses_a_secondmate_spawn
 

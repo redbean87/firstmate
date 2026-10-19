@@ -315,48 +315,30 @@ test_a_pin_governs_only_its_own_runner() {
   pass "a Claude pin leaves codex and Pi launches unchanged"
 }
 
-test_raw_claude_command_receives_the_pin() {
-  local out rc id=acct-raw
+test_raw_claude_launch_refused_under_pin_and_unpinned() {
+  local out rc id
+  # Hand-typed launches are refused for every adapter before any engine starts,
+  # so neither a pinned nor an unpinned home can apply an account to one.
+  id=acct-raw-pinned
   new_case raw-claude claude
   signed_in_claude_root "$CASE/work"
   printf '%s\n' "$CASE/work" > "$HOME_DIR/config/claude-account"
   out=$(spawn_ship "$id" --harness "claude --print raw"); rc=$?
-  expect_code 0 "$rc" "a raw Claude spawn under a signed-in pin should succeed: $out"
-  assert_contains "$out" "account=$CASE/work" "a raw Claude spawn should report the pin"
-  run_pane
-  assert_grep "CLAUDE_CONFIG_DIR=$CASE/work" "$CASE/claude-worker" "a raw Claude worker should run under the pinned root"
-  assert_grep "ANTHROPIC_API_KEY=unset" "$CASE/claude-worker" "a raw Claude worker must not keep an ambient API key"
-  pass "a raw Claude launch command receives the home's pin"
-}
+  expect_code 1 "$rc" "a raw Claude spawn under a pin must be refused"
+  assert_refused_before_launch "$id" "$out" "hand-typed launch commands are unsupported"
+  assert_contains "$out" "hand-typed launch commands are unsupported for every adapter" \
+    "the raw refusal must name the blanket rule"
+  assert_absent "$CASE/claude-worker" "a refused raw Claude spawn must never start Claude"
 
-test_raw_claude_account_override_refuses_under_a_pin() {
-  local out rc id=acct-raw-override var
-  new_case raw-override claude
-  signed_in_claude_root "$CASE/work"
-  signed_in_claude_root "$CASE/other"
-  printf '%s\n' "$CASE/work" > "$HOME_DIR/config/claude-account"
-  for var in "CLAUDE_CONFIG_DIR=$CASE/other" ANTHROPIC_API_KEY=override-key; do
-    out=$(spawn_ship "$id-${var%%=*}" --harness "FOO=1 $var claude --print raw"); rc=$?
-    expect_code 1 "$rc" "a raw Claude command setting ${var%%=*} must refuse under a pin"
-    assert_refused_before_launch "$id-${var%%=*}" "$out" "the raw launch command sets ${var%%=*}"
-    assert_contains "$out" "remove ${var%%=*} from the raw command, or change or remove config/claude-account" \
-      "the refusal should say how to proceed"
-  done
-  assert_absent "$CASE/claude-worker" "a refused raw override must never start Claude"
-  pass "a pinned home refuses a raw Claude command that overrides the account"
-}
-
-test_raw_claude_account_override_is_kept_without_a_pin() {
-  local out rc id=acct-raw-unpinned
+  id=acct-raw-unpinned
   new_case raw-unpinned claude
   mkdir -p "$CASE/other"
   out=$(spawn_ship "$id" --harness "CLAUDE_CONFIG_DIR=$CASE/other ANTHROPIC_API_KEY=override-key claude --print raw"); rc=$?
-  expect_code 0 "$rc" "an unpinned home should accept a raw Claude account override: $out"
-  assert_not_contains "$out" "account=" "an unpinned raw spawn must not report an account"
-  run_pane
-  assert_grep "CLAUDE_CONFIG_DIR=$CASE/other" "$CASE/claude-worker" "an unpinned raw override should keep its own root"
-  assert_grep "ANTHROPIC_API_KEY=override-key" "$CASE/claude-worker" "an unpinned raw override should keep its own key"
-  pass "an unpinned home keeps a raw Claude account override"
+  expect_code 1 "$rc" "a raw Claude spawn in an unpinned home must be refused"
+  assert_contains "$out" "hand-typed launch commands are unsupported for every adapter" \
+    "the unpinned raw refusal must name the blanket rule"
+  assert_absent "$CASE/claude-worker" "a refused unpinned raw spawn must never start Claude"
+  pass "a raw Claude launch is refused before any engine starts, pinned or not"
 }
 
 test_local_secondmate_reads_the_launching_home_pin() {
@@ -393,9 +375,7 @@ test_pi_pin_selects_the_root_and_the_declared_provider
 test_pi_pin_refusals
 test_pi_extension_provider_and_old_pi_fall_back_to_the_model_listing
 test_a_pin_governs_only_its_own_runner
-test_raw_claude_command_receives_the_pin
-test_raw_claude_account_override_refuses_under_a_pin
-test_raw_claude_account_override_is_kept_without_a_pin
+test_raw_claude_launch_refused_under_pin_and_unpinned
 test_local_secondmate_reads_the_launching_home_pin
 
 echo "# all fm-worker-account tests passed"
