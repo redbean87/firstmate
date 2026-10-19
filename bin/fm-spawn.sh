@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
 # secondmate in its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--consult-waived <reason>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
-#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--consult-waived <reason>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
-#        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
+# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--consult-waived <reason>] [--harness <name>|harness] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+#        fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--consult-waived <reason>] [--harness <name>|harness] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+#        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
+#   Hand-typed launch commands are refused before any engine starts; launch every
+#   adapter through the supported --harness path (docs/configuration.md
+#   "Single-slot launch guard").
 #   --mode and --yolo are this task's delivery contract, REQUIRED for every ship
 #   spawn and refused on --scout and --secondmate spawns. Firstmate resolves both
 #   per task at intake (AGENTS.md section 7); data/projects.md holds the captain's
@@ -283,7 +286,7 @@
 #   whitespace-separated tokens ("<harness> [<model>] [<effort>]"). For a
 #   --secondmate spawn, those tokens apply only when this spawn also resolves its
 #   harness from config/secondmate-harness. An explicit per-spawn --harness,
-#   positional harness arg, or raw launch command starts with clean model/effort
+#   positional harness arg starts with clean model/effort
 #   defaults unless the caller also passes explicit --model/--effort flags. When
 #   the file governs the spawn, its model/effort tokens are re-resolved on every
 #   respawn exactly like the harness axis, and explicit --model/--effort flags
@@ -2418,7 +2421,7 @@ launch_template() {
 }
 
 case "$ARG3" in
-*' '*) # raw launch command (unverified-adapter escape hatch)
+*' '*) # hand-typed launch command (refused by the single-slot gate)
   RAW_LAUNCH=1
   LAUNCH=$ARG3
   HARNESS=""
@@ -2451,14 +2454,14 @@ case "$ARG3" in
     harness_src='config/crew-harness'
   fi
   LAUNCH=$(launch_template "$HARNESS" "$KIND") || {
-    echo "error: no launch template for harness '$HARNESS' (from $harness_src or detection); pass a raw launch command to use an unverified adapter" >&2
+    echo "error: no launch template for harness '$HARNESS' (from $harness_src or detection); hand-typed launch commands are refused, so select a verified harness adapter" >&2
     exit 1
   }
   ;;
 *)
   HARNESS=$ARG3
   LAUNCH=$(launch_template "$HARNESS" "$KIND") || {
-    echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2
+    echo "error: unknown harness '$HARNESS'; hand-typed launch commands are refused, so select a verified harness adapter" >&2
     exit 1
   }
   ;;
