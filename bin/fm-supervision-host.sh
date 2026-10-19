@@ -1144,7 +1144,13 @@ while :; do
     # recovery marker reads downtime (leave_successor_for_main).
     if [ -n "$SUCCESSOR_GENERATION" ] \
       && ! fm_recovery_marker_publish "$STATE/.watcher-down" downtime >/dev/null 2>&1; then
-      log_line "pass-through	downtime-unrestored	$(printf '%s\n' "$REASON" | head -n 1)"
+      REFUSAL="pass-through	downtime-unrestored	$(printf '%s\n' "$REASON" | head -n 1)"
+      log_line "$REFUSAL"
+      # The verdict alone reaches stdout: emit would prefix the undelivered
+      # close, which the owner reads as an actionable wake whose rewake the
+      # handling marker refuses, so the close would be dropped in silence.
+      ARM_TEXT=
+      emit "$REFUSAL"
       exit 1
     fi
     emit
