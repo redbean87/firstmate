@@ -1,0 +1,1 @@
+pass-through	downtime-unrestored	signal: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.OweuBi/race-lost-post/state/demo.status

@@ -1,0 +1,29 @@
+== hook.rc ==
+2
+== hook.err ==
+firstmate watcher auto-arm FAILED - the Stop-owned automatic supervision mechanism is broken after 2 bounded attempts, and no live watcher with a fresh beacon was verified.
+watcher: already running pid 76596
+watcher: FAILED - cycle ended without an actionable reason
+The supervision host (docs/supervision-host.md) ran these cycles; its last one exited 0 without a wake.
+Do not launch a manual background arm from this notice; investigate the automatic Stop hook and watcher startup before ending blind.
+== hook.out ==
+== host stdout captured by the hook ==
+watcher: already running pid 76596
+watcher: FAILED - cycle ended without an actionable reason
+== offer-count ==
+2
+== watcher-down ==
+announced:handling:74580.1792417858.jcunoI
+== autoarm ledger ==
+epoch=1 owner_pid=73780 outcome=failed updated_at=1792417894
+Mon Oct 19 08:50:56 2026     bash /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.2UnWBC/race-lost-prea/bin/fm-claude-stop-autoarm.sh
+== supervision-host.log ==
+1792417856	start	gen=host-74036-1792417856	primary=claude
+1792417860	pass-through	attended	main-only	signal: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.2UnWBC/race-lost-prea/state/demo.status
+1792417860	pass-through	downtime-unrestored	signal: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.2UnWBC/race-lost-prea/state/demo.status
+1792417861	start	gen=host-77305-1792417860	primary=claude
+1792417861	take-over	arm=76568
+1792417894	pass-through	a close without a wake
+== end ==
+RESULT: hook exited rc=2
+ok - race-lost drive: the Stop hook delivered its verdict

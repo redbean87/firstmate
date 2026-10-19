@@ -1,0 +1,6 @@
+1792417895	start	gen=host-83265-1792417895	primary=claude
+1792417900	pass-through	attended	main-only	signal: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.rwjsje/race-lost-preb/state/demo.status
+1792417900	pass-through	downtime-unrestored	signal: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.rwjsje/race-lost-preb/state/demo.status
+1792417900	start	gen=host-86694-1792417900	primary=claude
+1792417900	take-over	arm=85943
+1792417932	pass-through	a close without a wake

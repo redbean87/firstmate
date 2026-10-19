@@ -1,0 +1,2 @@
+watcher: started pid=47401 (beacon fresh)
+pass-through	downtime-unrestored	signal: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.pTIQVf/refusal-evidence/state/demo.status

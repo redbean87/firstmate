@@ -1,0 +1,24 @@
+== hook.rc ==
+2
+== hook.err ==
+firstmate watcher auto-arm FAILED - the Stop-owned automatic supervision mechanism is broken after 1 bounded attempts, and no live watcher with a fresh beacon was verified.
+watcher: started pid=47401 (beacon fresh)
+The supervision host (docs/supervision-host.md) ran these cycles; its last one exited 1 without a wake.
+Do not launch a manual background arm from this notice; investigate the automatic Stop hook and watcher startup before ending blind.
+== host stdout captured by the hook ==
+watcher: started pid=47401 (beacon fresh)
+pass-through	downtime-unrestored	signal: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.pTIQVf/refusal-evidence/state/demo.status
+== offer-count ==
+2
+== .watcher-down ==
+announced:handling:47401.1792417742.d0fUND
+== autoarm ledger ==
+epoch=1 owner_pid=47135 outcome=failed updated_at=1792417744
+Mon Oct 19 08:49:00 2026     bash /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.pTIQVf/refusal-evidence/bin/fm-claude-stop-autoarm.sh
+== supervision-host.log (pass-through/refusal rows) ==
+1792417744	pass-through	downtime-unrestored	signal: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.pTIQVf/refusal-evidence/state/demo.status
+== end ==
+ok - evidence drive complete
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.pTIQVf/refusal-evidence/state: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.pTIQVf/refusal-evidence: Directory not empty
+rm: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-supervision-host.pTIQVf: Directory not empty
