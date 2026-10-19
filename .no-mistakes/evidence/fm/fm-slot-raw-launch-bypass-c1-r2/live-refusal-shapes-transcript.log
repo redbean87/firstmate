@@ -1,0 +1,75 @@
+=== hand-typed shapes: each must be refused with the same single diagnostic, no engine, no record ===
+PASS plain            rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-1 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS single-quoted    rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: pi --model 'strata-local/qwen3.8-flash-next-coder-iq1_m'
+      error: raw-2 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS double-quoted    rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: pi --model="strata-local/qwen3.8-flash-next-coder-iq1_m"
+      error: raw-3 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS quoted-launcher  rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: 'pi' --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-4 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS env-prefix       rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: env FOO=1 pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-5 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS abspath-env      rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: /usr/bin/env pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-6 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS exec             rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: exec pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-7 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS command          rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: command pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-8 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS nohup            rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: nohup pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-9 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS sh-c-wrapper     rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: sh -c 'pi --model strata-local/qwen3.8-flash-next-coder-iq1_m'
+      error: raw-10 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS command-subst    rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: $(command -v pi) --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-11 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS chaining         rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: cd . && pi --model strata-local/qwen3.8-flash-next-coder-iq1_m
+      error: raw-12 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS backgrounded     rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: pi --model strata-local/qwen3.8-flash-next-coder-iq1_m &
+      error: raw-13 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS pi-no-model      rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: pi --tui-mode regular
+      error: raw-14 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS pi-other-engine  rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: pi --model some/other-model
+      error: raw-15 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS claude-raw       rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: claude --model sonnet
+      error: raw-16 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS custom-agent     rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: custom-agent --flag pi
+      error: raw-17 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+PASS other-tool       rc=1 refusal-names-supported-path=1 meta=no engine-starts=0
+      raw: other --prompt 'use pi here'
+      error: raw-18 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+
+=== operator-facing guidance (intent requirement 3) ===
+  3:Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--base-branch <branch>] [--consult-waived <reason>] [--harness <name>|harness] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+  4:       fm-spawn.sh <task-id> <project-dir> --scout [--base-branch <branch>] [--consult-waived <reason>] [--harness <name>|harness] [--model <name>] [--effort <level>] [--backend <name>] [--herdr-resume-lock-wait]
+  5:       fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
+  7:  adapter through the supported --harness path (docs/configuration.md
+  73:       fm-spawn.sh <task-id> --relaunch [--harness <name>] [--model <name>] [--effort <level>] [--consult-waived <reason>]
+  106:  --harness <name> is the explicit per-spawn harness/profile adapter. The old
+  236:  hand-typed (raw) launch command is refused outright for every adapter - the
+  243:  --harness to launch an adapter. For pi and pi-signed, fm-spawn resolves the selected executable
+  287:  harness from config/secondmate-harness. An explicit per-spawn --harness,
+  340:  source of truth; shared --scout/--harness/--model/--effort/--backend/--mode/--yolo
+  343:  If config/crew-dispatch.json exists, shared --harness is required for crewmate
+  usage line still advertises a raw launch-command form: 0
+  usage names the supported --harness path: 1
+
+=== unknown-harness diagnostic no longer offers a raw command ===
+  error: unknown harness 'definitely-not-an-adapter'; hand-typed launch commands are refused, so select a verified harness adapter
+
+=== summary: 18 refused as required, 0 unexpected ===

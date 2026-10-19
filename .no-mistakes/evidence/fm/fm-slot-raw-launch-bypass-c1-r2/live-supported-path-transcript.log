@@ -1,0 +1,43 @@
+private tmux server started on /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.DLuUyB/tmux (session primary)
+lab HOME=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.DLuUyB/scratch/home treehouse root=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.DLuUyB/scratch/treehouse
+
+==================== SCENARIO C: supported path starts + records ====================
+spawn rc=0
+  | spawned live-supported harness=pi kind=ship mode=no-mistakes yolo=off window=primary:fm-live-supported worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.DLuUyB/scratch/treehouse/.treehouse/project-546fcc/1/project
+--- recorded meta state/live-supported.meta ---
+  | window=primary:fm-live-supported
+  | endpoint_task_id=live-supported
+  | worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.DLuUyB/scratch/treehouse/.treehouse/project-546fcc/1/project
+  | project=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.DLuUyB/project
+  | harness=pi
+  | kind=ship
+  | mode=no-mistakes
+  | yolo=off
+  | branch=fm/live-supported
+  | tasktmp=/tmp/fm-live-supported
+  | model=strata-local/qwen3.8-flash-next-coder-iq1_m
+  | effort=default
+  | busy_gen=g1792369780.63805.28625
+  | spawn_gen=s1792369781.63305.29393
+--- engine starts observed: 1 ---
+--- tmux windows on the private server ---
+  @0 zsh zsh
+  @2 fm-live-supported sleep
+recorded window: primary:fm-live-supported
+
+==================== SCENARIO E: recorded worker discoverable by a later check ====================
+  | fm_backend_agent_alive(primary:fm-live-supported) = alive
+
+==================== SCENARIO D: second supported launch refused while first live ====================
+second spawn rc=1
+  | error: live-second cannot launch: strata-local/qwen3.8-flash-next-coder-iq1_m runs a single slot (one request at a time) and live-supported is live on that profile; re-dispatch live-second after live-supported lands
+second task meta present: no
+engine starts added by second attempt: 0
+
+==================== SCENARIO F: slot reopens after the holder exits ====================
+  | fm_backend_agent_alive(primary:fm-live-supported) = dead
+third spawn rc=0
+  | spawned live-second harness=pi kind=ship mode=no-mistakes yolo=off window=primary:fm-live-second worktree=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.DLuUyB/scratch/treehouse/.treehouse/project-546fcc/1/project
+
+==================== teardown ====================
+private tmux server killed

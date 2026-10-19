@@ -1,0 +1,13 @@
+harness-arg-space | rc=1 refusal=1 meta=no
+  msg: error: adv-1 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+harness-arg-wrapper | rc=1 refusal=1 meta=no
+  msg: error: adv-2 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+harness-eq-space | rc=1 refusal=1 meta=no
+  msg: error: adv-3 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+newline-separated | rc=1 refusal=1 meta=no
+  msg: error: adv-4 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+tab-separated | rc=1 refusal=1 meta=no
+  msg: error: adv-5 cannot launch: hand-typed launch commands are unsupported for every adapter; launch through the supported launch path instead (--harness <adapter> [--model <profile>]) so the single-slot guard can enforce and record it
+single-token-path | rc=1 refusal=0 meta=no
+  msg: error: unknown harness '/usr/bin/pi'; hand-typed launch commands are refused, so select a verified harness adapter
+engine starts across all adversarial shapes: 0
