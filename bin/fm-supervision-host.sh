@@ -30,10 +30,13 @@
 # session or generation no longer owns supervision and the owner stands down
 # silently; an exit status above 128, or no output at all, means the host
 # itself died and the owner retries it. Any other close is judged exactly as
-# the arm's. --restart starts the first cycle with fm-watch-arm.sh --restart,
-# and an FM_WATCH_PREDECESSOR_ARM_PID the owner passes reaches that first
-# cycle only, for owners that start their own successor after every close
-# (OpenCode, omp).
+# the arm's. An attended main-only hand-back whose downtime republication fails
+# prints its composed refusal verdict in place of the withheld close and exits
+# nonzero, so the owner reports a decided failure instead of retrying what
+# looks like a silent death. --restart starts the first cycle with
+# fm-watch-arm.sh --restart, and an FM_WATCH_PREDECESSOR_ARM_PID the owner
+# passes reaches that first cycle only, for owners that start their own
+# successor after every close (OpenCode, omp).
 #
 # THE LOOP. It owns watcher cycles through bin/fm-watch-arm.sh. The posture is
 # the away-posture record state/.afk-contract, read at every close and again
@@ -1144,7 +1147,13 @@ while :; do
     # recovery marker reads downtime (leave_successor_for_main).
     if [ -n "$SUCCESSOR_GENERATION" ] \
       && ! fm_recovery_marker_publish "$STATE/.watcher-down" downtime >/dev/null 2>&1; then
-      log_line "pass-through	downtime-unrestored	$(printf '%s\n' "$REASON" | head -n 1)"
+      REFUSAL="pass-through	downtime-unrestored	$(printf '%s\n' "$REASON" | head -n 1)"
+      log_line "$REFUSAL"
+      # The verdict alone reaches stdout: emit would prefix the undelivered
+      # close, which the owner reads as an actionable wake whose rewake the
+      # handling marker refuses, so the close would be dropped in silence.
+      ARM_TEXT=
+      emit "$REFUSAL"
       exit 1
     fi
     emit
