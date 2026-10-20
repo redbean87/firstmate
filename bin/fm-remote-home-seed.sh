@@ -105,7 +105,7 @@ else
   [ "${#PROJECT_NAMES[@]}" -gt 0 ] || die "at least one project or --no-projects is required"
 fi
 
-mkdir -p "$STATE" || die "cannot create parent state directory"
+(umask 077; mkdir -p "$STATE") || die "cannot create parent state directory"
 REGISTRY_LOCK=$(secondmate_registry_lock_path "$STATE")
 fm_lock_acquire_wait "$REGISTRY_LOCK" || die "cannot lock the secondmate registry"
 REGISTRY_LOCK_HELD=1
@@ -123,7 +123,7 @@ if [ -e "$REG" ] || [ -L "$REG" ]; then
   fi
 fi
 
-mkdir -p "$DATA"
+(umask 077; mkdir -p "$DATA")
 BRIEF="$DATA/$ID/brief.md"
 BRIEF_CREATED=0
 if [ ! -f "$BRIEF" ]; then

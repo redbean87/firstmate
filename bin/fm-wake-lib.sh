@@ -16,7 +16,9 @@ FM_LOCK_STALE_AFTER="${FM_LOCK_STALE_AFTER:-2}"
 # confirm and 0.5s attach polls, and forking uname per call is a measurable cost on
 # the platform (Git Bash/MSYS) that already pays the highest fork price.
 _FM_UNAME=$(uname 2>/dev/null || echo unknown)
-mkdir -p "$STATE"
+# Source-time defensive ensure: private so a missing state/ is born 700 rather
+# than 755 (the creator-of-record paths are covered in fm-home-seed.sh too).
+(umask 077; mkdir -p "$STATE")
 
 # Most wake-library consumers need only queue and lock primitives, including
 # deliberately minimal recovery fixtures and remote installations.
@@ -483,7 +485,7 @@ fm_lock_set_role() {
   fm_current_pid current || return 1
   pid=$(cat "$lockdir/pid" 2>/dev/null || true)
   [ "$pid" = "$current" ] || return 1
-  printf '%s\n' "$role" > "$lockdir/role" 2>/dev/null || return 1
+  (umask 077; printf '%s\n' "$role" > "$lockdir/role") 2>/dev/null || return 1
   back=$(cat "$lockdir/role" 2>/dev/null || true)
   [ "$back" = "$role" ]
 }
@@ -509,7 +511,7 @@ fm_lock_owner_dir() {
 fm_lock_prepare_owner() {
   local ownerdir=$1 mypid back
   fm_current_pid mypid || return 1
-  printf '%s\n' "$mypid" > "$ownerdir/pid" 2>/dev/null || return 1
+  (umask 077; printf '%s\n' "$mypid" > "$ownerdir/pid") 2>/dev/null || return 1
   back=$(cat "$ownerdir/pid" 2>/dev/null || true)
   [ "$back" = "$mypid" ]
 }
@@ -558,7 +560,7 @@ fm_lock_claim_blocked_by_steal() {
 fm_lock_claim() {
   local lockdir=$1 ownerdir=$2 allowed_steal_owner=${3:-} mypid back
   fm_current_pid mypid || return 1
-  if ! { printf '%s\n' "$mypid" > "$ownerdir/pid"; } 2>/dev/null; then
+  if ! { (umask 077; printf '%s\n' "$mypid" > "$ownerdir/pid"); } 2>/dev/null; then
     fm_lock_discard_owner "$ownerdir"
     return 1
   fi
@@ -1303,7 +1305,7 @@ _fm_lock_acquire_wait_handoff() {  # <lockdir> <caller-pid>
   fm_current_pid current || { fm_lock_release "$lockdir"; return 1; }
   back=$(cat "$ownerdir/pid" 2>/dev/null || true)
   if [ "$back" != "$current" ] \
-    || ! printf '%s\n' "$caller_pid" > "$ownerdir/pid" 2>/dev/null \
+    || ! (umask 077; printf '%s\n' "$caller_pid" > "$ownerdir/pid") 2>/dev/null \
     || [ "$(cat "$ownerdir/pid" 2>/dev/null || true)" != "$caller_pid" ]; then
     fm_lock_release "$lockdir"
     return 1
@@ -1969,7 +1971,7 @@ fm_autoarm_write_owned() {  # <state-dir> <gen> <outcome> [marker-file] [session
     fm_lock_release "$lock"
     return 1
   fi
-  if [ -n "$marker" ] && ! : > "$marker" 2>/dev/null; then
+  if [ -n "$marker" ] && ! (umask 077; : > "$marker") 2>/dev/null; then
     fm_lock_release "$lock"
     return 2
   fi
@@ -2166,10 +2168,10 @@ fm_wake_append_locked() {
       ''|*[!0-9]*) seq=0 ;;
     esac
     seq=$((seq + 1))
-    printf '%s\n' "$seq" > "$seq_file" || status=$?
+    (umask 077; printf '%s\n' "$seq" > "$seq_file") || status=$?
   fi
   if [ "$status" -eq 0 ]; then
-    printf '%s\t%s\t%s\t%s\t%s\n' "$epoch" "$seq" "$kind" "$clean_key" "$clean_payload" >> "$FM_WAKE_QUEUE" || status=$?
+    (umask 077; printf '%s\t%s\t%s\t%s\t%s\n' "$epoch" "$seq" "$kind" "$clean_key" "$clean_payload" >> "$FM_WAKE_QUEUE") || status=$?
   fi
   if [ "$status" -ne 0 ]; then
     _fm_wake_append_recovery_restore_locked || true
@@ -2305,7 +2307,7 @@ fm_wake_restore_queue() {
   local drained=$1 restore
   restore="$STATE/.wake-queue.restore.$(fm_current_pid)"
   if [ -e "$FM_WAKE_QUEUE" ]; then
-    cat "$drained" "$FM_WAKE_QUEUE" > "$restore" && mv "$restore" "$FM_WAKE_QUEUE"
+    (umask 077; cat "$drained" "$FM_WAKE_QUEUE" > "$restore") && mv "$restore" "$FM_WAKE_QUEUE"
   else
     mv "$drained" "$FM_WAKE_QUEUE"
   fi

@@ -1692,7 +1692,7 @@ status_presentation_marker_report() {
   if raw=$(cat "$marker" 2>/dev/null) && status_presentation_marker_parse "$raw"; then
     classified=$STATUS_PRESENTATION_CLASSIFIED
   fi
-  printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker"
+  (umask 077; printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker")
 }
 
 status_presentation_marker_commit() {
@@ -1702,7 +1702,7 @@ status_presentation_marker_commit() {
   [ -n "$ident" ] && [ "$ident" = "$current" ] || return 1
   reported=$(status_observed_signature "$file" "$endpoint" "$ident") || return 1
   classified="${endpoint}@${ident}"
-  printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker"
+  (umask 077; printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker")
 }
 
 status_retire_presentation_task() {  # <state> <task-id>
@@ -1755,7 +1755,7 @@ EOF
       rc=1
     elif ! data=$(LC_ALL=C command cat "$manifest" 2>/dev/null); then
       rc=1
-    elif ! : > "$tmp"; then
+    elif ! (umask 077; : > "$tmp"); then
       rc=1
     else
       while IFS=$(printf '\t') read -r row_task ident offset backstop extra; do
@@ -1820,7 +1820,7 @@ EOF
 status_commit_presentation_snapshot() {  # <state> <snapshot>
   local state=$1 snapshot=$2 task endpoint ident f cur_ident size tmp backstop acknowledged_task acknowledged_endpoint
   tmp="$state/.status-presentation-cursor.tmp.$$"
-  : > "$tmp" || return 1
+  (umask 077; : > "$tmp") || return 1
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     case "$endpoint" in ''|*[!0-9]*) rm -f "$tmp"; return 1 ;; esac
@@ -2285,7 +2285,7 @@ EOF
     body="${body}${start}"$'\t'"${end}"$'\n'
   fi
   tmp="$path.tmp.$$"
-  printf 'v1\nident=%s\n%s' "$ident" "$body" > "$tmp" || { rm -f "$tmp"; return 1; }
+  (umask 077; printf 'v1\nident=%s\n%s' "$ident" "$body" > "$tmp") || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$path" || { rm -f "$tmp"; return 1; }
 }
 

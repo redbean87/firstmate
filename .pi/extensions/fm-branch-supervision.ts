@@ -472,8 +472,8 @@ function readMirrorCursor(): MirrorCursor {
 }
 
 function writeMirrorCursor(cursor: MirrorCursor): void {
-  mkdirSync(state, { recursive: true });
-  writeFileSync(mirrorCursorFile, `${JSON.stringify(cursor)}\n`);
+  mkdirSync(state, { recursive: true, mode: 0o700 });
+  writeFileSync(mirrorCursorFile, `${JSON.stringify(cursor)}\n`, { mode: 0o600 });
 }
 
 type ReadonlyEntries = {
@@ -912,8 +912,8 @@ export default function (pi: ExtensionAPI) {
 
   function markLoaded(): void {
     try {
-      mkdirSync(state, { recursive: true });
-      writeFileSync(loadedMarker, `${process.pid}\n`);
+      mkdirSync(state, { recursive: true, mode: 0o700 });
+      writeFileSync(loadedMarker, `${process.pid}\n`, { mode: 0o600 });
     } catch {
       // Diagnostic marker only; never block activation on it.
     }
@@ -1298,7 +1298,7 @@ export default function (pi: ExtensionAPI) {
       );
     }
     if (!(await actingAsOwner(branchGeneration))) throw new Error("supervision session was replaced or lost lock ownership");
-    mkdirSync(sessionsDir, { recursive: true });
+    mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
     let sessionManager: SessionManager | null = null;
     // Only this main session's own branch conversation is continued. The
     // recorded pointer is never reopened across a session start, so a rebuild
@@ -1396,7 +1396,7 @@ ${context.command}
       throw new Error("supervision session was replaced or lost lock ownership");
     }
     try {
-      writeFileSync(sessionPointer, `${sessionManager.getSessionFile()}\n`);
+      writeFileSync(sessionPointer, `${sessionManager.getSessionFile()}\n`, { mode: 0o600 });
     } catch {
       // The pointer is a durable record of the branch's current conversation
       // for operators and for the effort picker's last-resort model lookup;

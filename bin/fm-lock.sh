@@ -33,7 +33,7 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 LOCK="$STATE/.lock"
 LOCK_SESSION="$STATE/.lock-session"
-mkdir -p "$STATE" 2>/dev/null || {
+(umask 077; mkdir -p "$STATE") 2>/dev/null || {
   echo "error: cannot create session-lock state directory $STATE; operate read-only until resolved" >&2
   exit 1
 }
@@ -245,7 +245,7 @@ if [ -f "$LOCK" ]; then
   fi
 fi
 LOCK_SESSION_PHASE=2
-if ! { printf '%s\n' "$me" > "$LOCK"; } 2>/dev/null; then
+if ! { (umask 077; printf '%s\n' "$me" > "$LOCK"); } 2>/dev/null; then
   lock_unchanged=0
   if [ -n "$LOCK_LINE_PRE" ] && cmp -s "$LOCK_LINE_PRE" "$LOCK"; then
     lock_unchanged=1

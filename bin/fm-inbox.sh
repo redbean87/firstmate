@@ -252,8 +252,8 @@ note_announced() {  # <id>
 }
 
 mark_announced() {  # <id>
-  mkdir -p "$ANNOUNCED_DIR"
-  printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$ANNOUNCED_DIR/$1"
+  (umask 077; mkdir -p "$ANNOUNCED_DIR")
+  (umask 077; printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$ANNOUNCED_DIR/$1")
 }
 
 # true | false | unknown, for the note recorded at <path>.
@@ -400,8 +400,8 @@ finish_note_result() {  # <outcome> <id> <request-id> <json> <strict-exit> <summ
 claim_request_id() {  # <request-id> <note-id>  -> 0 claimed, 1 already exists
   local request_id=$1 note_id=$2 reserved
   reserved="$REQUESTS/$request_id"
-  mkdir -p "$REQUESTS"
-  if ( set -C; printf '%s\n' "$note_id" >"$reserved" ) 2>/dev/null; then
+  (umask 077; mkdir -p "$REQUESTS")
+  if ( set -C; umask 077; printf '%s\n' "$note_id" >"$reserved" ) 2>/dev/null; then
     return 0
   fi
   return 1
@@ -429,7 +429,7 @@ queue_note() {
     strict=1
   fi
   [ -n "${body//[[:space:]]/}" ] || die "refusing to queue an empty note"
-  mkdir -p "$INBOX"
+  (umask 077; mkdir -p "$INBOX")
 
   local tmp id summary staging_name reserved
 
@@ -608,7 +608,7 @@ cmd_reply() {
     body="$*"
   fi
   [ -n "${body//[[:space:]]/}" ] || die "refusing to record an empty reply"
-  mkdir -p "$REPLIES"
+  (umask 077; mkdir -p "$REPLIES")
   load_wake_lib || die "the reply sequence needs $FM_ROOT/bin/fm-wake-lib.sh"
   fm_lock_acquire_wait "$REPLY_SEQ_LOCK" || die "could not claim the reply sequence"
   if [ -f "$REPLIES/$id" ]; then
@@ -1117,7 +1117,7 @@ cmd_drain() {
   if [ "${1:-}" = "--ack" ]; then
     shift
     [ "$#" -gt 0 ] || die "usage: fm-inbox.sh drain --ack <id>..."
-    mkdir -p "$INBOX/handled"
+    (umask 077; mkdir -p "$INBOX/handled")
     local id
     for id in "$@"; do
       if [ -f "$INBOX/$id.note" ]; then

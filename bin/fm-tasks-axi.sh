@@ -144,6 +144,13 @@ else
 fi
 
 cd "$FM_BACKLOG_AXI_ROOT" || fail "cannot enter the backlog root $FM_BACKLOG_AXI_ROOT"
+# Owner-only creation: tasks-axi creates or atomically rewrites data/backlog.md
+# (and any sidecar) with the invoking shell's umask, so every invocation - not
+# just the first - must run private or a later mutation reverts the file to
+# 644 (proven: a plain-umask rewrite replaced an existing 600 backlog at 644).
+# This wrapper's whole write surface is the backlog root, so one scoped umask
+# here covers add/hold/done/show/list without touching any caller's umask.
+umask 077
 case "${1:-}" in
   show|view|list)
     set -o pipefail

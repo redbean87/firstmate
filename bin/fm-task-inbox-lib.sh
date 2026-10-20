@@ -140,7 +140,7 @@ fm_task_inbox_record_busy() {  # <state-dir> <task-id> <record-path>
   case "${count:-}" in ''|*[!0-9]*) count=0 ;; esac
   [ -f "$3" ] || { printf '0'; return 0; }
   count=$((count + 1))
-  if ! { printf '%s\t%s\n' "$base" "$count" > "$dir/.busy-state"; } 2>/dev/null; then
+  if ! { (umask 077; printf '%s\t%s\n' "$base" "$count" > "$dir/.busy-state"); } 2>/dev/null; then
     [ -f "$3" ] || { printf '0'; return 0; }
     return 1
   fi
@@ -222,7 +222,7 @@ _fm_task_inbox_write_record_locked() {  # <inbox-dir> <text> [delivery-mode]
 fm_task_inbox_write() {  # <state-dir> <task-id> <text> [delivery-mode]
   local state=$1 task=$2 text=$3 delivery_mode=${4:-} dir lock rec status=0
   dir=$(fm_task_inbox_dir "$state" "$task")
-  mkdir -p "$dir/handled" || return 1
+  (umask 077; mkdir -p "$dir/handled") || return 1
   lock="$dir/.seq.lock"
   fm_task_inbox_lock_acquire "$lock" || return 1
   rec=$(_fm_task_inbox_write_record_locked "$dir" "$text" "$delivery_mode") || status=1
@@ -245,7 +245,7 @@ fm_task_inbox_write() {  # <state-dir> <task-id> <text> [delivery-mode]
 fm_task_inbox_write_idempotent() {  # <state-dir> <task-id> <text> [delivery-mode]
   local state=$1 task=$2 text=$3 delivery_mode=${4:-} dir lock want have f rec='' status=0
   dir=$(fm_task_inbox_dir "$state" "$task")
-  mkdir -p "$dir/handled" || return 1
+  (umask 077; mkdir -p "$dir/handled") || return 1
   lock="$dir/.seq.lock"
   fm_task_inbox_lock_acquire "$lock" || return 1
   if want=$(mktemp "$dir/.dedup.XXXXXX") && have=$(mktemp "$dir/.dedup.XXXXXX"); then
@@ -431,7 +431,7 @@ fm_task_inbox_oldest_unhandled() {  # <state-dir> <task-id>
 fm_task_inbox_mark_retry() {  # <state-dir> <task-id> <record-path>
   local dir
   dir=$(fm_task_inbox_dir "$1" "$2")
-  { printf '%s\n' "${3##*/}" > "$dir/.retry-ring"; } 2>/dev/null
+  { (umask 077; printf '%s\n' "${3##*/}" > "$dir/.retry-ring"); } 2>/dev/null
 }
 
 # Spend the retry mark after its ring, only while it still names that record:
@@ -525,7 +525,7 @@ EOF
   [ "$rec_base" = "$base" ] || count=0
   case "$count" in ''|*[!0-9]*) count=0 ;; esac
   [ -d "$dir" ] || return 0
-  if ! { printf '%s\t%s\t%s\n' "$base" "$((count + 1))" "$(date +%s)" > "$dir/.ring-state"; } 2>/dev/null; then
+  if ! { (umask 077; printf '%s\t%s\t%s\n' "$base" "$((count + 1))" "$(date +%s)" > "$dir/.ring-state"); } 2>/dev/null; then
     [ -d "$dir" ] || return 0
     return 1
   fi
