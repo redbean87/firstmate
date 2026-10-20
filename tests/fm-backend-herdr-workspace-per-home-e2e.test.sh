@@ -31,6 +31,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=tests/fake-supported-adapter-fixture.sh
+. "$ROOT/tests/fake-supported-adapter-fixture.sh"
 
 fail() { printf 'not ok - %s\n' "$1" >&2; cleanup_all; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
@@ -140,8 +142,9 @@ PROJ2="$TMP_ROOT/scratch-project-2"; make_scratch_project "$PROJ2"
 # --- 1. primary-shaped home: a crewmate spawns into the "firstmate" space ---
 
 CM1_OUT="$TMP_ROOT/cm1.out"; CM1_ERR="$TMP_ROOT/cm1.err"
-FM_SPAWN_NO_GUARD=1 FM_HOME="$PRIMARY_HOME" FM_ROOT_OVERRIDE="$ROOT" \
-  "$ROOT/bin/fm-spawn.sh" cm1 "$PROJ1" "sh -c 'echo primary-crew-ok'" --mode no-mistakes --yolo off --backend herdr \
+FAKE_CM1=$(fm_test_install_fake_pi_adapter "$TMP_ROOT/fake-cm1" "primary-crew-ok")
+FM_SPAWN_NO_GUARD=1 FM_HOME="$PRIMARY_HOME" FM_ROOT_OVERRIDE="$ROOT" PATH="$FAKE_CM1:$PATH" \
+  "$ROOT/bin/fm-spawn.sh" cm1 "$PROJ1" --harness pi --mode no-mistakes --yolo off --backend herdr \
   >"$CM1_OUT" 2>"$CM1_ERR"
 rc=$?
 [ "$rc" -eq 0 ] || fail "primary-shaped crewmate spawn failed"$'\n'"--- stdout ---"$'\n'"$(cat "$CM1_OUT")"$'\n'"--- stderr ---"$'\n'"$(cat "$CM1_ERR")"
@@ -169,8 +172,9 @@ pass "real herdr E2E: the primary-shaped home's crewmate landed in the 'firstmat
 # exactly this call - AGENTS.md task herdr-sm-spaces-k4, requirement 3.)
 
 SM_OUT="$TMP_ROOT/sm.out"; SM_ERR="$TMP_ROOT/sm.err"
-FM_SPAWN_NO_GUARD=1 FM_HOME="$PRIMARY_HOME" FM_ROOT_OVERRIDE="$ROOT" \
-  "$ROOT/bin/fm-spawn.sh" e2esm1 "$SM_HOME" "sh -c 'echo secondmate-launch-ok'" --secondmate --backend herdr \
+FAKE_SM1=$(fm_test_install_fake_pi_adapter "$TMP_ROOT/fake-sm1" "secondmate-launch-ok")
+FM_SPAWN_NO_GUARD=1 FM_HOME="$PRIMARY_HOME" FM_ROOT_OVERRIDE="$ROOT" PATH="$FAKE_SM1:$PATH" \
+  "$ROOT/bin/fm-spawn.sh" e2esm1 "$SM_HOME" --harness pi --secondmate --backend herdr \
   >"$SM_OUT" 2>"$SM_ERR"
 rc=$?
 [ "$rc" -eq 0 ] || fail "the primary's --secondmate spawn of e2esm1 failed"$'\n'"--- stdout ---"$'\n'"$(cat "$SM_OUT")"$'\n'"--- stderr ---"$'\n'"$(cat "$SM_ERR")"
@@ -195,8 +199,9 @@ pass "real herdr E2E: a --secondmate spawn by the PRIMARY lands in the SECONDMAT
 # secondmate workspace (this exact path has never run before this test) -----
 
 CM2_OUT="$TMP_ROOT/cm2.out"; CM2_ERR="$TMP_ROOT/cm2.err"
-FM_SPAWN_NO_GUARD=1 FM_HOME="$SM_HOME" FM_ROOT_OVERRIDE="$ROOT" \
-  "$ROOT/bin/fm-spawn.sh" cm2 "$PROJ2" "sh -c 'echo sm-crew-ok'" --mode no-mistakes --yolo off --backend herdr \
+FAKE_CM2=$(fm_test_install_fake_pi_adapter "$TMP_ROOT/fake-cm2" "sm-crew-ok")
+FM_SPAWN_NO_GUARD=1 FM_HOME="$SM_HOME" FM_ROOT_OVERRIDE="$ROOT" PATH="$FAKE_CM2:$PATH" \
+  "$ROOT/bin/fm-spawn.sh" cm2 "$PROJ2" --harness pi --mode no-mistakes --yolo off --backend herdr \
   >"$CM2_OUT" 2>"$CM2_ERR"
 rc=$?
 [ "$rc" -eq 0 ] || fail "a crewmate spawned FROM the secondmate-shaped home failed"$'\n'"--- stdout ---"$'\n'"$(cat "$CM2_OUT")"$'\n'"--- stderr ---"$'\n'"$(cat "$CM2_ERR")"

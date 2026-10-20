@@ -25,7 +25,7 @@ The failure repeated across harnesses and homes, and the workaround (remember to
 
 The [endpoint-absence proof](#reclaiming-a-task-whose-endpoint-is-gone) below is the only function here that runs backend reads; sourcing the file is still free.
 
-A recorded `harness=` is not always an exact adapter name: a task launched from a raw command records that command's basename instead.
+A recorded `harness=` is not always an exact adapter name: a task record created before hand-typed launches were refused can carry a raw command's basename instead.
 `fm_control_harness_family` is the one place that prefix rule is stated, and an unrecognized value resolves to no adapter rather than being guessed into one.
 
 ## Verbs

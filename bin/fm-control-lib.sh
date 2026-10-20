@@ -76,11 +76,12 @@ fm_control_harness_supported() {  # <harness>
 }
 
 # The verified adapter a RECORDED harness value belongs to. Every table below
-# is keyed by the exact verified adapter name, but a task launched from a raw
-# command records the command's basename instead (bin/fm-spawn.sh derives
-# harness= that way), which is why the spawn adapters match `claude*`, `muse*`,
-# and friends. This is the one place that prefix rule is stated. `pi` and
-# `pi-signed` are exact because a `pi*` prefix would swallow the signed adapter,
+# is keyed by the exact verified adapter name, but a task record created before
+# hand-typed launches were refused can carry a raw command's basename instead
+# (bin/fm-spawn.sh derived harness= that way), which is why the spawn adapters
+# match `claude*`, `muse*`, and friends. This is the one place that prefix rule
+# is stated. `pi` and `pi-signed` are exact because a `pi*` prefix would swallow
+# the signed adapter,
 # `omp` is exact because an `omp*` prefix would claim unrelated commands, `agy`
 # is exact for the same reason on an even shorter name, and an
 # unrecognized value returns nonzero rather than being guessed into a family.

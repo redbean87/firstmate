@@ -812,7 +812,7 @@ Changing this pin affects the next secondmate spawn or control-plane relaunch; t
 ### Per-launch overrides and inherited defaults
 
 An explicit harness argument to `fm-spawn.sh` still overrides either config file for that spawn only.
-An explicit `--model` or `--effort` overrides the matching token from `config/secondmate-harness`; for a local route, an explicit harness or raw launch command starts with clean model and effort defaults unless those flags are also passed.
+An explicit `--model` or `--effort` overrides the matching token from `config/secondmate-harness`; for a local route, an explicit harness starts with clean model and effort defaults unless those flags are also passed.
 
 Remote secondmate routes accept verified harness adapters only and reject raw launch commands.
 When `config/crew-dispatch.json` exists, crewmate and scout spawns require an explicit resolved harness instead of automatically falling back to `config/crew-harness`.
@@ -899,7 +899,7 @@ That built-in list merges with this file's entries without duplicates, applies o
 | Runtime | With a non-empty list |
 | --- | --- |
 | `pi`, `pi-signed` | Hides listed tool names, MCP tools included, on every ship and scout spawn and relaunch. |
-| Every other runtime, and a raw launch command | The launch refuses with an error naming `config/crew-exclude-tools`, because that runtime has no verified way to hide tools. |
+| Every other runtime | The launch refuses with an error naming `config/crew-exclude-tools`, because that runtime has no verified way to hide tools. |
 
 A relaunch validates the list and the replacement runtime's support before stopping the running worker, so an exclusion-list refusal preserves the running agent.
 
@@ -942,14 +942,11 @@ For Claude, `ordinary` unsets `CLAUDE_CONFIG_DIR` rather than pointing it at `~/
 A Pi root can hold several provider logins at once, so the root alone does not say which account a launch spends.
 A pinned Pi launch therefore needs `--model <provider>/<id>` naming a declared provider, and Firstmate also passes `--provider <that provider>` so Pi cannot resolve the model under another signed-in provider.
 
-An unqualified model, an undeclared provider, or a raw Pi launch command, which cannot receive that flag, refuses; Firstmate never guesses a provider.
+An unqualified model or an undeclared provider refuses; Firstmate never guesses a provider.
 
 ### Launch scope and sign-in checks
 
-When a file is present, every launch of that runner from this home uses it: ships, scouts, local secondmate agents, raw Claude launch commands, and relaunches.
-A raw Claude launch command refuses if its leading assignments set `CLAUDE_CONFIG_DIR` or a credential that a pinned launch unsets, such as `ANTHROPIC_API_KEY`.
-The assignment would override the pin.
-The refusal names the variable; remove that assignment from the raw command, or change or remove `config/claude-account`.
+When a file is present, every launch of that runner from this home uses it: ships, scouts, local secondmate agents, and relaunches.
 
 Before any worker endpoint, local copy, or task record exists, and before a relaunch stops the running worker, Firstmate asks the runner itself whether the pinned account is signed in: `claude auth status` for Claude, and `pi auth check --provider <provider> --json --no-refresh` for Pi, falling back to `pi --list-models <provider>` for a provider an extension registers.
 The check runs with only `HOME`, `PATH`, `TMPDIR`, `USER`, `LOGNAME`, and the pinned root in its environment, so a credential variable in firstmate's own environment cannot answer for an empty root.
@@ -1085,7 +1082,7 @@ Choose the minimum additions for the authentication method actually in use:
 ### Validation and security limits
 
 Verify the selected provider login and Git transport after opting in; Firstmate does not infer credentials from model names or install a secret manager.
-Raw launch commands run under noninteractive POSIX `sh` with this option and must use compatible syntax.
+The emitted launch command runs under noninteractive POSIX `sh` with this option and must use compatible syntax.
 
 The filter runs at the worker command boundary, after the terminal daemon and pane shell have started; it does not scrub either of those processes.
 This is not a sandbox: it cannot revoke same-user access to credential files, prevent tools or later shells from loading credentials again, or isolate processes from the same user's other processes.
@@ -1095,7 +1092,7 @@ Regression coverage executes emitted launch commands with synthetic nonsecret va
 ### Compact adviser setting
 
 Every crewmate, scout, and secondmate Firstmate launches starts with `COMPACT_ADVISER_DISABLE=1` in its environment, on a fresh spawn and on a relaunch alike, so an unattended session never activates the compact adviser.
-This guarantee also covers raw launch commands, remote secondmates, and launches filtered by `config/launch-env-allowlist`; it does not depend on the destination environment already containing the variable.
+This guarantee also covers remote secondmates and launches filtered by `config/launch-env-allowlist`; it does not depend on the destination environment already containing the variable.
 
 Firstmate provides no configuration or flag to change this value.
 This applies only to agents Firstmate launches; the captain's own primary Firstmate session is never given the variable.
@@ -1156,7 +1153,11 @@ Every state of the file is defined and tested:
 - a stale but well-formed value: it guards the older engine only as an addition, so the built-in default keeps the engine in use guarded and a stale file cannot silently disable protection.
 
 To move the guard to a new engine, update the built-in default in `bin/fm-spawn.sh` and the value named in this section; the file only ever adds coverage, so a value left naming an older engine during a transition is harmless.
-A raw launch command resolves to the `pi` harness when its first non-environment word is `pi`; the gate parses the effective `--model` (either `--model <value>` or `--model=<value>`) out of the raw command text, and a raw `pi` command whose `--model` is missing, empty, trailing-bare, or followed by another option is refused with a diagnostic naming that malformed argument, because a raw launch must not bypass the guard by leaving the parsed model empty or malformed.
+Hand-typed launch commands are unsupported for every adapter, and `bin/fm-spawn.sh` refuses one before any engine process starts rather than trying to read it: it never inspects, tokenizes, evaluates, or attempts to recognise shell command text, because every earlier attempt to recover an executed engine identity from a raw command's quoting, wrappers, expansions, or prefixes left another spelling that started the guarded engine while the guard looked elsewhere.
+The rule is therefore total: if a launch did not come through the supported launch path, it is refused, with a diagnostic naming that path.
+Launcher recognition is not treated as an enforcement boundary at all, so quoting, a path-spelled launcher, environment prefixes, `exec`/`env`/`command`/`nohup`, a shell wrapper such as `sh -c '...'`, command substitution, and `&&` chaining all receive the same refusal rather than a special case.
+Strata launches - and every other supported launch - must use `--harness <adapter> [--model <profile>]`, which enforces this guard and records the live worker for later single-slot checks.
+The compatibility cost is explicit and accepted: hand-typed launch commands stop working for every tool, not only for commands that name a guarded engine.
 New secondmate homes inherit the file with the rest of the home's local configuration ([`bin/fm-config-inherit-lib.sh`](../bin/fm-config-inherit-lib.sh)), so a fleet override reaches every home that launches workers.
 
 ## Crew dispatch profiles (config/crew-dispatch.json)
@@ -1167,7 +1168,7 @@ Firstmate resolves the rule's profile object or array under `AGENTS.md` section 
 
 **Spawn requirements**
 
-- When the file exists, `fm-spawn.sh` enforces that contract by refusing crewmate and scout spawns that lack an explicit harness (`--harness`, a positional adapter, or a raw launch command).
+- When the file exists, `fm-spawn.sh` enforces that contract by refusing crewmate and scout spawns that lack an explicit harness (`--harness` or a positional adapter); a hand-typed launch command is refused outright before any engine starts, so it never stands in for one.
 - When the file carries a deterministic project mapping, `fm-spawn.sh` additionally refuses any crewmate or scout spawn whose harness or model disagrees with the project's pinned profile, and a raw launch command never satisfies a pin.
 - Batch spawns satisfy the same requirement with a shared `--harness`.
 - Secondmate spawns are exempt and still resolve through `config/secondmate-harness` and its optional model and effort tokens.
