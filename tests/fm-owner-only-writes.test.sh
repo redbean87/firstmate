@@ -39,6 +39,19 @@ WRAPPER="$ROOT/bin/fm-tasks-axi.sh"
 mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 inode_of() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1"; }
 
+# seed_secondmate_home <parent-home> <child-home> <secondmate-id>
+# Real seed under the open caller umask, so the routing registry and the child
+# home exist exactly as a fleet handoff would leave them.
+seed_secondmate_home() { # <parent> <child> <id>
+  local parent=$1 child=$2 id=$3 out
+  mkdir -p "$parent/data" "$parent/state" "$parent/projects"
+  out=$(umask 022; FM_ROOT_OVERRIDE='' FM_HOME="$parent" \
+    FM_SECONDMATE_CHARTER='owner-only probe charter' \
+    FM_SECONDMATE_SCOPE='owner-only probe scope' \
+    "$ROOT/bin/fm-home-seed.sh" "$id" "$child" --no-projects 2>&1) \
+    || fail "secondmate seed failed for $id under umask 022: $(printf '%s\n' "$out" | tail -n 5)"
+}
+
 HAVE_TASKS_AXI=0
 command -v tasks-axi >/dev/null 2>&1 && HAVE_TASKS_AXI=1
 
@@ -465,12 +478,126 @@ test_home_seed_data_files_created_owner_only() {
   pass "seed: the parent registry, seeded projects registry and charter copy are 600 under an open caller umask"
 }
 
+# --- 12. captain-hold dispatch under every caller umask ---------------------
+
+test_captain_hold_keeps_backlog_owner_only() {
+  local home caller id out before after show
+  home="$TMP_ROOT/captain-hold-case/home"
+  mkdir -p "$home/data" "$home/state"
+  for caller in 000 0022 077; do
+    id="ev-hold-$caller"
+    rm -f "$home/data/backlog.md"
+    out=$(umask "$caller"; FM_HOME="$home" FM_DATA_OVERRIDE="$home/data" \
+      FM_STATE_OVERRIDE="$home/state" "$WRAPPER" add "$id" "hold probe $caller" 2>&1) \
+      || fail "seeding the captain-hold row under umask $caller failed: $out"
+    [ "$(mode_of "$home/data/backlog.md")" = 600 ] \
+      || fail "the seeded backlog must start 600, got $(mode_of "$home/data/backlog.md")"
+    before=$(inode_of "$home/data/backlog.md")
+    out=$(umask "$caller"; FM_HOME="$home" FM_DATA_OVERRIDE="$home/data" \
+      FM_STATE_OVERRIDE="$home/state" "$ROOT/bin/fm-captain-hold.sh" hold "$id" \
+      --reason "captain held by the owner-only probe $caller" 2>&1) \
+      || fail "captain hold under caller umask $caller failed: $out"
+    after=$(inode_of "$home/data/backlog.md")
+    [ "$after" != "$before" ] \
+      || fail "the hold must really rewrite the backlog (inode unchanged under umask $caller)"
+    [ "$(mode_of "$home/data/backlog.md")" = 600 ] \
+      || fail "a hold under caller umask $caller must keep the backlog at 600, got $(mode_of "$home/data/backlog.md")"
+    show=$(FM_HOME="$home" FM_DATA_OVERRIDE="$home/data" FM_STATE_OVERRIDE="$home/state" \
+      "$WRAPPER" show "$id" 2>&1) \
+      || fail "the owner could not read the held row back under umask $caller: $show"
+    printf '%s\n' "$show" | grep -F 'held: yes' >/dev/null \
+      || fail "the held row must still report held: yes under umask $caller: $show"
+    printf '%s\n' "$show" | grep -F "hold_reason: \"captain held by the owner-only probe $caller\"" >/dev/null \
+      || fail "the hold reason must survive under umask $caller: $show"
+  done
+  pass "captain hold: the backlog stays 600 and keeps its reason under caller umasks 000, 0022 and 077"
+}
+
+# --- 13. backlog handoff dispatch ----------------------------------------------
+
+test_backlog_handoff_keeps_backlog_owner_only() {
+  local case_dir parent child id key out before after rc
+  case_dir="$TMP_ROOT/handoff-case"
+  parent="$case_dir/parent"
+  child="$case_dir/child"
+  id=ev-smhandoff
+  key=ev-handoff1
+  seed_secondmate_home "$parent" "$child" "$id"
+  out=$(umask 022; FM_HOME="$parent" FM_DATA_OVERRIDE="$parent/data" \
+    "$WRAPPER" add "$key" "handoff probe row" 2>&1) \
+    || fail "seeding the handoff row failed: $out"
+  before=$(inode_of "$parent/data/backlog.md")
+  rc=0
+  out=$(umask 022; FM_ROOT_OVERRIDE='' FM_HOME="$parent" FM_DATA_OVERRIDE="$parent/data" \
+    FM_STATE_OVERRIDE="$parent/state" "$ROOT/bin/fm-backlog-handoff.sh" "$id" "$key" 2>&1) \
+    || rc=$?
+  printf '%s\n' "$out" | grep -F "handed off 1 item(s) to $id: $key" >/dev/null \
+    || fail "the handoff must report the staged move (rc=$rc): $out"
+  after=$(inode_of "$parent/data/backlog.md")
+  [ "$after" != "$before" ] || fail "the handoff must really rewrite the main backlog"
+  [ "$(mode_of "$parent/data/backlog.md")" = 600 ] \
+    || fail "the main backlog must stay 600 after a handoff, got $(mode_of "$parent/data/backlog.md")"
+  if grep -F "$key" "$parent/data/backlog.md" >/dev/null; then
+    fail "the handed-off row must leave the main backlog"
+  fi
+  [ "$(mode_of "$child/data/backlog.md")" = 600 ] \
+    || fail "the destination backlog must be 600, got $(mode_of "$child/data/backlog.md")"
+  grep -F "$key" "$child/data/backlog.md" >/dev/null \
+    || fail "the destination must own the handed-off row"
+  pass "handoff: the main backlog stays 600 with the row moved into a 600 destination (wake rc=$rc)"
+}
+
+# --- 14. backlog receive dispatch ----------------------------------------------
+
+test_backlog_receive_keeps_backlog_owner_only() {
+  local case_dir parent child id key out before after bytes hash
+  case_dir="$TMP_ROOT/receive-case"
+  parent="$case_dir/parent"
+  child="$case_dir/child"
+  id=ev-smrecv
+  key=ev-recv1
+  seed_secondmate_home "$parent" "$child" "$id"
+  out=$(umask 022; FM_HOME="$child" FM_DATA_OVERRIDE="$child/data" \
+    "$WRAPPER" add existing-row "row already in the destination" 2>&1) \
+    || fail "seeding the destination backlog failed: $out"
+  mkdir -p "$child/state/handoff"
+  printf '## Queued\n\n- [ ] %s - delivered row (repo: %s)\n' "$key" "$id" \
+    > "$child/state/handoff/$id.outbox.md" \
+    || fail "could not stage the delivered outbox"
+  bytes=$(LC_ALL=C wc -c < "$child/state/handoff/$id.outbox.md" | tr -d ' ')
+  if command -v shasum >/dev/null 2>&1; then
+    hash=$(shasum -a 256 "$child/state/handoff/$id.outbox.md" | awk '{print $1}')
+  else
+    hash=$(sha256sum "$child/state/handoff/$id.outbox.md" | awk '{print $1}')
+  fi
+  printf '1\n%s\n%s\n' "$bytes" "$hash" > "$child/state/handoff/.$id.upload-generation" \
+    || fail "could not stage the upload generation record"
+  before=$(inode_of "$child/data/backlog.md")
+  out=$(umask 022; FM_ROOT_OVERRIDE='' FM_HOME="$child" \
+    "$ROOT/bin/fm-backlog-receive.sh" "state/handoff/$id.outbox.md" "$bytes" "$hash" 1 2>&1) \
+    || fail "backlog receipt failed under umask 022: $out"
+  printf '%s\n' "$out" | grep -F 'moved=1' >/dev/null \
+    || fail "the receipt must report the delivered move: $out"
+  after=$(inode_of "$child/data/backlog.md")
+  [ "$after" != "$before" ] || fail "the receipt must really rewrite the destination backlog"
+  [ "$(mode_of "$child/data/backlog.md")" = 600 ] \
+    || fail "the destination backlog must stay 600 after a receipt, got $(mode_of "$child/data/backlog.md")"
+  grep -F "$key" "$child/data/backlog.md" >/dev/null \
+    || fail "the delivered row must land in the destination backlog"
+  grep -F 'existing-row' "$child/data/backlog.md" >/dev/null \
+    || fail "the receipt must preserve the destination's existing rows"
+  pass "receive: the destination backlog stays 600 and the delivered row lands for the owner"
+}
+
 # --- run ------------------------------------------------------------------------
 
 if [ "$HAVE_TASKS_AXI" = 1 ]; then
   test_backlog_create_and_rewrite_stay_owner_only
+  test_captain_hold_keeps_backlog_owner_only
+  test_backlog_handoff_keeps_backlog_owner_only
+  test_backlog_receive_keeps_backlog_owner_only
 else
-  echo "skip: tasks-axi not found; backlog creation case not run"
+  echo "skip: tasks-axi not found; backlog creation, hold, handoff and receipt cases not run"
 fi
 test_lock_records_created_owner_only_under_open_umask
 test_inbox_dirs_and_records_created_owner_only

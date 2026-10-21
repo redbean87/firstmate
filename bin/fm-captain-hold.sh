@@ -355,9 +355,9 @@ tasks_axi() {
   backend=$(fm_tasks_axi_backend "$root") || return 2
   if [ "$backend" = markdown ]; then
     file=$(fm_backlog_file "$data") || fail "$FM_BACKLOG_TRANSITION_ERROR"
-    (cd "$root" && tasks-axi "$@" --file "$file")
+    (umask 077; cd "$root" && tasks-axi "$@" --file "$file")
   else
-    (cd "$root" && tasks-axi "$@")
+    (umask 077; cd "$root" && tasks-axi "$@")
   fi
 }
 

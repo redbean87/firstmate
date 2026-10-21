@@ -80,7 +80,7 @@ remove_dead_stale_lock() { # <lock-path>
 
 run_move() { # <keys...>
   # Pin the markdown backend so a .tasks.toml in the caller's directory cannot redirect the move.
-  tasks-axi mv "$@" --file "$DELIVERED" --to "$DEST" --backend markdown
+  (umask 077; tasks-axi mv "$@" --file "$DELIVERED" --to "$DEST" --backend markdown)
 }
 
 [ "$#" -eq 4 ] || usage

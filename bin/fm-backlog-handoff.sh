@@ -321,7 +321,7 @@ backlog_key_noncanonical_body_lines() {
 
 seed_backlog_scaffold() { # <path>
   mkdir -p "$(dirname "$1")"
-  [ -f "$1" ] || printf '## In flight\n\n## Queued\n\n## Done\n' >"$1"
+  [ -f "$1" ] || (umask 077; printf '## In flight\n\n## Queued\n\n## Done\n' >"$1")
 }
 
 # A public commitment made through the relay binds its work by home AND id, so an
@@ -743,7 +743,7 @@ remove_interrupted_source_duplicates() { # <outbox> <keys...>
       backlog_key_section "$outbox" "$key" >/dev/null 2>&1 || continue
       if backlog_key_section "$MAIN_BACKLOG" "$key" >/dev/null 2>&1; then
         remaining=$((remaining + 1))
-        if tasks-axi rm "$key" --file "$MAIN_BACKLOG" --backend markdown >/dev/null 2>&1; then
+        if (umask 077; tasks-axi rm "$key" --file "$MAIN_BACKLOG" --backend markdown) >/dev/null 2>&1; then
           progress=$((progress + 1))
         fi
       fi
@@ -827,7 +827,7 @@ remote_handoff() { # <secondmate-id> <keys...>
   fi
   seed_backlog_scaffold "$outbox"
   if [ "${#to_move[@]}" -gt 0 ]; then
-    if ! mv_out=$(tasks-axi mv "${to_move[@]}" --file "$MAIN_BACKLOG" --to "$outbox" --backend markdown 2>&1); then
+    if ! mv_out=$(umask 077; tasks-axi mv "${to_move[@]}" --file "$MAIN_BACKLOG" --to "$outbox" --backend markdown 2>&1); then
       [ -z "$mv_out" ] || printf '%s\n' "$mv_out" >&2
       echo "error: atomic outbox staging failed; nothing new was handed off" >&2
       return 1
@@ -1063,7 +1063,7 @@ receiver_wake_mark_prepared "$ID" "$REQUESTED_BATCH" || {
 mkdir -p "$SUB_HOME/data"
 SUB_CREATED=0
 if [ ! -f "$SUB_BACKLOG" ]; then
-  printf '## In flight\n\n## Queued\n\n## Done\n' >"$SUB_BACKLOG"
+  (umask 077; printf '## In flight\n\n## Queued\n\n## Done\n' >"$SUB_BACKLOG")
   SUB_CREATED=1
 fi
 
@@ -1072,7 +1072,7 @@ fi
 # together and, on any failure, neither backlog's content changes - the only
 # cleanup is a scaffold we just created. tasks-axi writes both its success and
 # error output to stdout, so capture it and surface it only on failure.
-if ! MV_OUT=$(tasks-axi mv "${TO_MOVE[@]}" --file "$MAIN_BACKLOG" --to "$SUB_BACKLOG" --backend markdown 2>&1); then
+if ! MV_OUT=$(umask 077; tasks-axi mv "${TO_MOVE[@]}" --file "$MAIN_BACKLOG" --to "$SUB_BACKLOG" --backend markdown 2>&1); then
   if [ "$SUB_CREATED" -eq 1 ]; then
     rm -f "$SUB_BACKLOG"
   fi
