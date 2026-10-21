@@ -1137,6 +1137,15 @@ do_relaunch() {
       ;;
   esac
 
+  # >>> fork launch-policy hook HK2 (fork/README; the only fork edit in this file)
+  if [ -e "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/fork-policies" ]; then
+    FM_LP_PHASE=relaunch-preflight FM_LP_TASK=$ID FM_LP_KIND=$KIND \
+      FM_LP_PROJECT=$(fm_meta_get "$META" project) FM_LP_HARNESS=$TARGET_HARNESS FM_LP_MODEL=$TARGET_MODEL \
+      FM_LP_EFFORT=$TARGET_EFFORT FM_LP_HOME=$FM_HOME FM_LP_STATE=$STATE FM_LP_DATA=$DATA \
+      FM_LP_CONFIG=${FM_CONFIG_OVERRIDE:-$FM_HOME/config} \
+      "$FM_ROOT/fork/bin/fm-launch-policy" || die "fork launch policy refused relaunch of $ID; the running agent was not stopped"
+  fi
+  # <<< fork launch-policy hook HK2
   if [ -n "$NOTE" ]; then
     note_line="note_file=$NOTE_FILE"
   else

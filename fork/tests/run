@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# fork/tests/run - the Firstmate fork's own test suite.
+#
+# Runs the hook wiring check and every fork/tests/*.test.sh, each in its own
+# process, and exits non-zero if anything fails. It deliberately does not use
+# upstream's bin/fm-test-run.sh: fork tests live outside tests/, so upstream's
+# selector, lane composition, and coverage guard never see them, and this
+# runner never runs upstream suites. See fork/README "Testing ownership".
+#
+# Usage: fork/tests/run [<test-file>...]
+set -u
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$DIR/../.." && pwd)"
+failed=0
+total=0
+started=$(date +%s)
+
+run_one() {  # <label> <command...>
+  local label=$1 out rc
+  shift
+  total=$((total + 1))
+  out=$("$@" 2>&1); rc=$?
+  printf '%s\n' "$out" | grep -E '^(ok|not ok|FAIL)' | sed 's/^/  /'
+  if [ "$rc" -eq 0 ]; then
+    printf 'PASS %s\n' "$label"
+  else
+    printf 'FAIL %s (exit %s)\n' "$label" "$rc"
+    printf '%s\n' "$out" | grep -vE '^(ok|not ok|FAIL)' | tail -20 | sed 's/^/  | /'
+    failed=$((failed + 1))
+  fi
+}
+
+run_one "hook wiring check" "$ROOT/fork/bin/fm-fork-hook-check"
+if [ "$#" -gt 0 ]; then files=("$@"); else files=("$DIR"/*.test.sh); fi
+for f in "${files[@]}"; do
+  run_one "${f#"$ROOT"/}" bash "$f"
+done
+
+printf 'fork suite: %s of %s passed in %ss\n' "$((total - failed))" "$total" "$(( $(date +%s) - started ))"
+[ "$failed" -eq 0 ]

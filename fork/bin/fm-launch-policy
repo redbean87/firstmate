@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# fm-launch-policy - the Firstmate fork's single launch-policy entry point.
+#
+# Called only by the two allowlisted hook blocks (fork/hooks/*.block):
+#   HK1 bin/fm-spawn.sh, after every upstream launch refusal and before any
+#       endpoint, worktree, or task record exists (fresh spawn and --relaunch);
+#   HK2 bin/fm-control.sh relaunch, before the running agent is stopped.
+# Both blocks call this script only when the home has config/fork-policies, so
+# a home without that file keeps upstream behaviour exactly.
+#
+# Contract (environment, set by the hook blocks):
+#   FM_LP_PHASE    spawn | relaunch | relaunch-preflight
+#   FM_LP_TASK     task id            FM_LP_KIND     ship | scout | secondmate
+#   FM_LP_PROJECT  project directory  FM_LP_HARNESS  harness name (may be empty)
+#   FM_LP_MODEL    model, "default", or empty
+#   FM_LP_EFFORT   effort, "default", or empty
+#   FM_LP_RAW_LAUNCH  the raw launch command, only for a raw launch
+#   FM_LP_HOME, FM_LP_STATE, FM_LP_DATA, FM_LP_CONFIG  the home's directories
+# Exit 0 allows the launch. Every other outcome refuses it: 1 for a policy
+# refusal, 2 for unusable configuration or input. The hook blocks treat any
+# non-zero exit (including a missing or unexecutable script) as a refusal.
+#
+# Policies, enabled by name in config/fork-policies (one per line, # comments):
+#   consult-gate  ship/scout launches need a stored ChatGPT stage prompt
+#                 (data/<id>/chatgpt-loop.json) or a local recorded waiver
+#                 (data/<id>/fork-consult-waiver.json, origin "local"); a
+#                 relaunch also accepts delivery proof
+#                 (data/<id>/fork-consult-delivered.json). A waiver of any
+#                 other origin, Discord included, refuses.
+#   project-pin   config/fork-project-pins.json:
+#                 {"projects": {"<project dir name>": {"harness": "...", "model": "..."}}}
+#                 A pinned project refuses a different harness or model and any
+#                 raw launch.
+#   resource      config/fork-resources.json:
+#                 {"<name>": {"capacity": N, "match": {"model_prefix": "..."}}}
+#                 A launch whose model matches refuses while N other tasks on a
+#                 matching model have a live agent, read through upstream's own
+#                 fm_backend_agent_alive. Secondmates are not exempt.
+# Unknown policy names, unreadable or malformed files, and an empty policy list
+# all refuse.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORK_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+refuse() { printf 'error: fork launch policy refused %s: %s\n' "${FM_LP_TASK:-<unknown task>}" "$*" >&2; exit 1; }
+unusable() { printf 'error: fork launch policy cannot evaluate %s: %s\n' "${FM_LP_TASK:-<unknown task>}" "$*" >&2; exit 2; }
+
+command -v jq >/dev/null 2>&1 || unusable "jq is required"
+
+for var in FM_LP_PHASE FM_LP_TASK FM_LP_KIND FM_LP_HOME FM_LP_STATE FM_LP_DATA FM_LP_CONFIG; do
+  [ -n "${!var:-}" ] || unusable "hook contract value $var is empty"
+done
+case "$FM_LP_PHASE" in spawn|relaunch|relaunch-preflight) ;; *) unusable "unknown phase '$FM_LP_PHASE'" ;; esac
+case "$FM_LP_KIND" in ship|scout|secondmate) ;; *) unusable "unknown task kind '$FM_LP_KIND'" ;; esac
+case "$FM_LP_TASK" in .*|*[!A-Za-z0-9._-]*) unusable "task id is not a firstmate task id" ;; esac
+
+CONFIG=$FM_LP_CONFIG
+POLICY_FILE="$CONFIG/fork-policies"
+[ -f "$POLICY_FILE" ] && [ -r "$POLICY_FILE" ] || unusable "config/fork-policies is not a readable file"
+POLICIES=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$POLICY_FILE" | grep -v '^$') || true
+[ -n "$POLICIES" ] || unusable "config/fork-policies enables no policy; delete the file to disable fork policy"
+while IFS= read -r policy; do
+  case "$policy" in consult-gate|project-pin|resource) ;; *) unusable "config/fork-policies names unknown policy '$policy'" ;; esac
+done <<EOF
+$POLICIES
+EOF
+enabled() { printf '%s\n' "$POLICIES" | grep -Fxq "$1"; }
+
+# Test seam: record the received contract values, one file per phase.
+if [ -n "${FM_FORK_POLICY_TRACE:-}" ]; then env | grep '^FM_LP_' | sort > "$FM_FORK_POLICY_TRACE.$FM_LP_PHASE"; fi
+
+# The model the launch will run: an explicit --model, else the raw launch's own.
+effective_model() {
+  local model=${FM_LP_MODEL:-} raw=${FM_LP_RAW_LAUNCH:-} prev='' word
+  [ "$model" = default ] && model=
+  if [ -z "$model" ] && [ -n "$raw" ]; then
+    for word in $raw; do
+      case "$prev" in --model) model=$word; break ;; esac
+      case "$word" in --model=*) model=${word#--model=}; break ;; esac
+      prev=$word
+    done
+  fi
+  printf '%s' "$model"
+}
+MODEL=$(effective_model)
+
+json_ok() { jq -e "$2" "$1" >/dev/null 2>&1; }
+
+policy_consult_gate() {
+  local dir="$FM_LP_DATA/$FM_LP_TASK" waiver loop delivered
+  [ "$FM_LP_KIND" = secondmate ] && return 0
+  waiver="$dir/fork-consult-waiver.json"
+  loop="$dir/chatgpt-loop.json"
+  delivered="$dir/fork-consult-delivered.json"
+  if [ -e "$waiver" ]; then
+    json_ok "$waiver" 'type == "object"' || unusable "consultation waiver $waiver is not a JSON object"
+    json_ok "$waiver" '.origin == "local"' || refuse "its consultation waiver did not originate locally; only a local waiver counts (a Discord-origin waiver never does)"
+    json_ok "$waiver" '(.reason | type) == "string" and (.reason | test("\\S")) and (.reason | test("\n") | not)' \
+      || refuse "its local consultation waiver needs a one-line reason"
+    return 0
+  fi
+  if [ "$FM_LP_PHASE" != spawn ] && [ -e "$delivered" ]; then
+    json_ok "$delivered" 'type == "object" and ((.stage // "") | IN("audit", "plan"))' \
+      || unusable "consultation delivery proof $delivered is malformed"
+    return 0
+  fi
+  [ -e "$loop" ] || refuse "no stored ChatGPT prompt for this task (data/$FM_LP_TASK/chatgpt-loop.json) and no local waiver"
+  json_ok "$loop" 'type == "object"' || unusable "consultation record $loop is not a JSON object"
+  # shellcheck disable=SC2016 # jq program, not shell expansion
+  json_ok "$loop" '(.phase as $p | {"audit-dispatch": "audit_prompt", "audit-worker": "audit_prompt", "plan-dispatch": "plan", "plan-worker": "plan", "complete": "plan"}[$p]) as $f | $f != null and ((.[$f] // "") | type == "string" and test("\\S"))' \
+    || refuse "its ChatGPT record holds no prompt for the stage its phase puts in play"
+}
+
+policy_project_pin() {
+  local pins="$CONFIG/fork-project-pins.json" name pin want_harness want_model
+  [ "$FM_LP_KIND" = secondmate ] && return 0
+  [ -e "$pins" ] || return 0
+  json_ok "$pins" 'type == "object" and ((.projects // {}) | type == "object") and ([.projects[]? | type == "object" and ((.harness // "") | type == "string") and ((.model // "") | type == "string")] | all)' \
+    || unusable "config/fork-project-pins.json is malformed"
+  name=$(basename "${FM_LP_PROJECT:-}")
+  pin=$(jq -c --arg n "$name" '.projects[$n] // empty' "$pins")
+  [ -n "$pin" ] || return 0
+  [ -z "${FM_LP_RAW_LAUNCH:-}" ] || refuse "project $name is pinned, and a raw launch command cannot be checked against its pin"
+  want_harness=$(jq -r '.harness // ""' <<<"$pin")
+  want_model=$(jq -r '.model // ""' <<<"$pin")
+  [ -z "$want_harness" ] || [ "${FM_LP_HARNESS:-}" = "$want_harness" ] \
+    || refuse "project $name is pinned to harness $want_harness, not '${FM_LP_HARNESS:-}'"
+  [ -z "$want_model" ] || [ "$MODEL" = "$want_model" ] \
+    || refuse "project $name is pinned to model $want_model, not '${MODEL:-default}'"
+}
+
+policy_resource() {
+  local res="$CONFIG/fork-resources.json" rows name capacity prefix held meta holder holder_model state
+  [ -e "$res" ] || return 0
+  json_ok "$res" 'type == "object" and ([.[] | type == "object" and (.capacity | type == "number" and . >= 1 and . == floor) and ((.match.model_prefix // "") | type == "string" and length > 0)] | all)' \
+    || unusable "config/fork-resources.json is malformed"
+  if [ -z "$MODEL" ] && [ -n "${FM_LP_RAW_LAUNCH:-}" ]; then
+    refuse "a raw launch command must name its --model so machine resource limits can be checked"
+  fi
+  [ -n "$MODEL" ] || return 0
+  rows=$(jq -r 'to_entries[] | [.key, (.value.capacity | tostring), .value.match.model_prefix] | @tsv' "$res")
+  # shellcheck source=bin/fm-backend.sh
+  . "$FORK_ROOT/bin/fm-backend.sh" || unusable "upstream bin/fm-backend.sh could not be loaded"
+  while IFS=$'\t' read -r name capacity prefix; do
+    [ -n "$name" ] || continue
+    case "$MODEL" in "$prefix"*) ;; *) continue ;; esac
+    held=0
+    for meta in "$FM_LP_STATE"/*.meta; do
+      [ -f "$meta" ] || continue
+      holder=$(basename "$meta" .meta)
+      [ "$holder" != "$FM_LP_TASK" ] || continue
+      holder_model=$(fm_meta_get "$meta" model)
+      case "$holder_model" in "$prefix"*) ;; *) continue ;; esac
+      state=$(fm_backend_agent_alive "$(fm_backend_of_meta "$meta")" "$(fm_backend_target_of_meta "$meta")")
+      [ "$state" = alive ] && held=$((held + 1))
+    done
+    [ "$held" -lt "$capacity" ] \
+      || refuse "machine resource $name is at capacity ($held of $capacity live) for model $MODEL; dispatch again after a holder finishes"
+  done <<EOF
+$rows
+EOF
+}
+
+enabled consult-gate && policy_consult_gate
+enabled project-pin && policy_project_pin
+enabled resource && policy_resource
+exit 0

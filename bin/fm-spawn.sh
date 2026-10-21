@@ -3555,6 +3555,15 @@ if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then
     exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
   fi
 fi
+# >>> fork launch-policy hook HK1 (fork/README; the only fork edit in this file)
+if [ -e "$CONFIG/fork-policies" ]; then
+  FM_LP_PHASE=$([ "$RELAUNCH" -eq 1 ] && echo relaunch || echo spawn) FM_LP_TASK=$ID FM_LP_KIND=$KIND \
+    FM_LP_PROJECT=$PROJ_ABS FM_LP_HARNESS=$HARNESS FM_LP_MODEL=$MODEL FM_LP_EFFORT=$EFFORT \
+    FM_LP_RAW_LAUNCH=$([ "$RAW_LAUNCH" -eq 1 ] && printf %s "$LAUNCH") FM_LP_HOME=$FM_HOME \
+    FM_LP_STATE=$STATE FM_LP_DATA=$DATA FM_LP_CONFIG=$CONFIG \
+    "$FM_ROOT/fork/bin/fm-launch-policy" || exit 1
+fi
+# <<< fork launch-policy hook HK1
 [ -f "$BRIEF" ] || {
   echo "error: task $ID has no brief at inaccessible data path $BRIEF" >&2
   exit 1

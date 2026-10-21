@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# fm-fork-hook-check - prove the fork's two upstream integration points are
+# present, unmodified, and at their lifecycle positions, and (with --base) that
+# no other upstream-owned file differs from upstream.
+#
+# Usage: fm-fork-hook-check [--root <repo>] [--base <upstream-ref>]
+#
+# Checks:
+#   - HK1 appears exactly once in bin/fm-spawn.sh, byte-identical to
+#     fork/hooks/hk1-spawn.block, after the backlog-close refusal and directly
+#     before the first endpoint step (`W="fm-$ID"`); every upstream variable it
+#     reads is assigned earlier in the file.
+#   - HK2 appears exactly once in bin/fm-control.sh, byte-identical to
+#     fork/hooks/hk2-control.block, inside do_relaunch() after
+#     resolve_relaunch_profile and before safe_checkpoint and do_exit; the
+#     upstream names it reads exist in that file.
+#   - No upstream-owned bin/ file other than these two references the fork.
+#   - --base: `git diff <ref>` outside fork/ and the fork CI workflow touches
+#     only those two files, and only by adding exactly the two blocks.
+# Prints one `ok:` or `FAIL:` line per check; exits 1 if any check fails.
+set -u
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+BASE=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) ROOT=$(cd "${2:?--root needs a path}" && pwd); shift 2 ;;
+    --base) BASE=${2:?--base needs a ref}; shift 2 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "fm-fork-hook-check: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
+
+FAILED=0
+ok() { printf 'ok: %s\n' "$1"; }
+bad() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
+
+SPAWN="$ROOT/bin/fm-spawn.sh"
+CONTROL="$ROOT/bin/fm-control.sh"
+HK1="$ROOT/fork/hooks/hk1-spawn.block"
+HK2="$ROOT/fork/hooks/hk2-control.block"
+for f in "$SPAWN" "$CONTROL" "$HK1" "$HK2"; do
+  [ -f "$f" ] || { bad "missing file ${f#"$ROOT"/}"; exit 1; }
+done
+
+line_of() { grep -nxF -- "$2" "$1" | head -1 | cut -d: -f1; }
+count_of() { grep -cxF -- "$2" "$1"; }
+first_assignment() { grep -nE "^[[:space:]]*(local[[:space:]]+)?$2=" "$1" | head -1 | cut -d: -f1; }
+
+# find_block <file> <block> <label>: exactly one begin/end marker pair whose
+# enclosed text equals the canonical block. Sets BLOCK_BEGIN and BLOCK_END.
+find_block() {
+  local file=$1 block=$2 label=$3 begin_marker end_marker nb ne
+  BLOCK_BEGIN=
+  BLOCK_END=
+  begin_marker=$(head -1 "$block")
+  end_marker=$(tail -1 "$block")
+  nb=$(count_of "$file" "$begin_marker")
+  ne=$(count_of "$file" "$end_marker")
+  if [ "$nb" != 1 ] || [ "$ne" != 1 ]; then
+    bad "$label: expected exactly one hook block in ${file#"$ROOT"/} (found $nb begin and $ne end markers)"
+    return 1
+  fi
+  BLOCK_BEGIN=$(line_of "$file" "$begin_marker")
+  BLOCK_END=$(line_of "$file" "$end_marker")
+  if [ "$BLOCK_END" -le "$BLOCK_BEGIN" ] || ! sed -n "${BLOCK_BEGIN},${BLOCK_END}p" "$file" | cmp -s - "$block"; then
+    bad "$label: hook block in ${file#"$ROOT"/} differs from ${block#"$ROOT"/}"
+    return 1
+  fi
+  ok "$label: present once and identical to ${block#"$ROOT"/}"
+}
+
+# --- HK1: bin/fm-spawn.sh ----------------------------------------------------
+if find_block "$SPAWN" "$HK1" HK1; then
+  # Anchor: directly after upstream's project-capacity admission and before
+  # the brief checks, so a refusal leaves no launch brief, endpoint, worktree,
+  # or task record - the same no-side-effect point upstream's own capacity
+  # deferral uses.
+  capacity=$(grep -nE '^# Project capacity admission' "$SPAWN" | head -1 | cut -d: -f1)
+  # shellcheck disable=SC2016 # literal upstream source lines
+  brief_check=$(line_of "$SPAWN" '[ -f "$BRIEF" ] || {')
+  # shellcheck disable=SC2016 # literal upstream source line
+  render=$(grep -nF 'BRIEF="$DATA/$ID/launch-brief.md"' "$SPAWN" | head -1 | cut -d: -f1)
+  # shellcheck disable=SC2016 # literal upstream source line
+  endpoint=$(line_of "$SPAWN" 'W="fm-$ID"')
+  next=$(awk -v n="$BLOCK_END" 'NR > n && NF { print NR; exit }' "$SPAWN")
+  if [ -z "$capacity" ] || [ -z "$brief_check" ] || [ -z "$render" ] || [ -z "$endpoint" ]; then
+    bad "HK1: an upstream anchor is gone (capacity admission, brief check, launch-brief render, or W=\"fm-\$ID\"); re-anchor the block"
+  elif [ "$next" != "$brief_check" ] || [ "$BLOCK_BEGIN" -le "$capacity" ]; then
+    bad "HK1: block must sit after project capacity admission (line $capacity) and directly before the brief check (line $brief_check)"
+  elif [ "$BLOCK_END" -ge "$render" ] || [ "$BLOCK_END" -ge "$endpoint" ]; then
+    bad "HK1: block must come before the launch-brief render ($render) and the first endpoint step ($endpoint)"
+  else
+    ok "HK1: after capacity admission ($capacity), before the brief check ($brief_check), launch-brief render ($render) and first endpoint step ($endpoint)"
+  fi
+  missing=
+  for var in ID KIND PROJ_ABS HARNESS MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG FM_HOME FM_ROOT; do
+    at=$(first_assignment "$SPAWN" "$var")
+    if [ -z "$at" ] || [ "$at" -ge "$BLOCK_BEGIN" ]; then missing="$missing $var"; fi
+  done
+  if [ -n "$missing" ]; then
+    bad "HK1: upstream contract variables not assigned before the block:$missing"
+  else
+    ok "HK1: every upstream contract variable is assigned before the block"
+  fi
+  # The values the block reads must be final: nothing may reassign them
+  # between the block and the first endpoint step.
+  late=$(awk -v s="$BLOCK_END" -v e="$endpoint" 'NR > s && NR < e && /^[[:space:]]*(ID|KIND|PROJ_ABS|HARNESS|MODEL|EFFORT|RELAUNCH|RAW_LAUNCH|LAUNCH|STATE|DATA|CONFIG|FM_HOME|FM_ROOT)=/ { printf " %d", NR }' "$SPAWN")
+  if [ -n "$late" ]; then
+    bad "HK1: a contract variable is reassigned after the block, before launch (lines$late); the policy would judge a stale value"
+  else
+    ok "HK1: no contract variable is reassigned between the block and launch"
+  fi
+fi
+
+# --- HK2: bin/fm-control.sh relaunch ----------------------------------------
+if find_block "$CONTROL" "$HK2" HK2; then
+  fn_start=$(grep -nE '^do_relaunch\(\) \{' "$CONTROL" | head -1 | cut -d: -f1)
+  if [ -z "$fn_start" ]; then
+    bad "HK2: upstream function do_relaunch() not found; re-anchor the block"
+  else
+    fn_end=$(awk -v s="$fn_start" 'NR > s && /^}/ { print NR; exit }' "$CONTROL")
+    profile=$(awk -v s="$fn_start" -v e="$fn_end" 'NR > s && NR < e && /^[[:space:]]*resolve_relaunch_profile[[:space:]]*$/ { print NR; exit }' "$CONTROL")
+    checkpoint=$(awk -v s="$fn_start" -v e="$fn_end" 'NR > s && NR < e && /^[[:space:]]*safe_checkpoint[[:space:]]*$/ { print NR; exit }' "$CONTROL")
+    stop=$(awk -v s="$fn_start" -v e="$fn_end" 'NR > s && NR < e && /do_exit/ { print NR; exit }' "$CONTROL")
+    if [ "$BLOCK_BEGIN" -le "$fn_start" ] || [ -z "$fn_end" ] || [ "$BLOCK_END" -ge "$fn_end" ]; then
+      bad "HK2: block must sit inside do_relaunch() (lines $fn_start-$fn_end)"
+    elif [ -z "$profile" ] || [ "$profile" -ge "$BLOCK_BEGIN" ]; then
+      bad "HK2: block must follow resolve_relaunch_profile, which sets the relaunch target"
+    elif [ -z "$checkpoint" ] || [ -z "$stop" ] || [ "$BLOCK_END" -ge "$checkpoint" ] || [ "$BLOCK_END" -ge "$stop" ]; then
+      bad "HK2: block must come before safe_checkpoint and do_exit, so a refusal never stops the agent"
+    else
+      ok "HK2: inside do_relaunch(), after resolve_relaunch_profile, before safe_checkpoint ($checkpoint) and do_exit ($stop)"
+    fi
+  fi
+  missing=
+  for var in TARGET_HARNESS TARGET_MODEL TARGET_EFFORT META KIND STATE DATA FM_ROOT; do
+    [ -n "$(first_assignment "$CONTROL" "$var")" ] || missing="$missing $var"
+  done
+  grep -qE '^[[:space:]]*die\(\)' "$CONTROL" || missing="$missing die()"
+  grep -qE 'fm-backend\.sh' "$CONTROL" || missing="$missing fm_meta_get(bin/fm-backend.sh)"
+  if [ -n "$missing" ]; then
+    bad "HK2: upstream contract names not found in bin/fm-control.sh:$missing"
+  else
+    ok "HK2: every upstream contract name exists"
+  fi
+fi
+
+# --- no other fork reference in upstream-owned bin/ ---------------------------
+others=$(grep -lE 'fork/bin/|FM_LP_[A-Z]' "$ROOT"/bin/* 2>/dev/null | grep -vxF -e "$SPAWN" -e "$CONTROL" || true)
+if [ -n "$others" ]; then
+  bad "fork references outside the two hook files: $(printf '%s' "$others" | tr '\n' ' ')"
+else
+  ok "no fork reference in any other upstream bin/ file"
+fi
+
+# --- --base: nothing upstream-owned differs except the two blocks ------------
+if [ -n "$BASE" ]; then
+  if ! git -C "$ROOT" rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
+    bad "--base $BASE is not a commit in $ROOT"
+  else
+    changed=$(git -C "$ROOT" diff --name-only "$BASE" -- . ':(exclude)fork' ':(exclude).github/workflows/fork-ci.yml' | sort | tr '\n' ' ')
+    if [ "$changed" != "bin/fm-control.sh bin/fm-spawn.sh " ]; then
+      bad "--base $BASE: upstream-owned files differing: ${changed:-none} (expected exactly bin/fm-control.sh bin/fm-spawn.sh)"
+    else
+      extra=
+      for pair in "bin/fm-spawn.sh:$HK1" "bin/fm-control.sh:$HK2"; do
+        file=${pair%%:*}
+        block=${pair#*:}
+        diff_out=$(git -C "$ROOT" diff -U0 "$BASE" -- "$file")
+        deleted=$(printf '%s\n' "$diff_out" | grep -cE '^-([^-]|$)' || true)
+        added=$(printf '%s\n' "$diff_out" | grep -E '^\+' | grep -vE '^\+\+\+ ' | sed 's/^+//')
+        if [ "$deleted" != 0 ] || [ "$added" != "$(cat "$block")" ]; then extra="$extra $file"; fi
+      done
+      if [ -n "$extra" ]; then
+        bad "--base $BASE: these upstream files differ by more than their hook block:$extra"
+      else
+        ok "--base $BASE: upstream-owned files differ only by the two hook blocks"
+      fi
+    fi
+  fi
+fi
+
+exit "$FAILED"
