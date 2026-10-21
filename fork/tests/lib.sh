@@ -137,6 +137,99 @@ fork_holder() {
   esac
 }
 
+# Herdr liveness fixture. A fake `herdr` client answers the four read-only
+# calls upstream's recovery-grade Herdr classifier makes - `pane get`,
+# `agent get`, `pane process-info --pane`, and `status --json`, each with
+# `--session <s>` - from per-pane files under <fakedir>/herdr/<session>/<pane>
+# (':' in a pane id becomes '_'):
+#   pane    present | gone | garbage         (`pane get`)
+#   agent   none | <agent_status> | garbage  (`agent get`; none = agent_not_found)
+#   proc    ok | fail                        (`pane process-info`)
+#   fg      JSON array of foreground processes for process-info
+#   shell   the pane's shell pid (a real live process, so upstream's
+#           descendant walk over the real process table can find it)
+# and <fakedir>/herdr/<session>/server: running | stopped | garbage.
+# This exercises upstream's real classifier code; it is not a real Herdr.
+fork_herdr_fake() {  # <fakebin> <fakedir>
+  mkdir -p "$1" "$2/herdr"
+  cat > "$1/herdr" <<SH
+#!/usr/bin/env bash
+FAKE='$2/herdr'
+SH
+  cat >> "$1/herdr" <<'SH'
+session=
+prev=
+for a in "$@"; do [ "$prev" = --session ] && session=$a; prev=$a; done
+dir="$FAKE/$session"
+pane_dir() { printf '%s/%s' "$dir" "$(printf '%s' "$1" | tr ':' '_')"; }
+case "$1 ${2:-}" in
+  "status --json")
+    case "$(cat "$dir/server" 2>/dev/null)" in
+      running) echo '{"server":{"running":true}}' ;;
+      stopped) echo '{"server":{"running":false}}' ;;
+      *) echo 'not json' ;;
+    esac ;;
+  "pane get")
+    p=$(pane_dir "$3")
+    case "$(cat "$p/pane" 2>/dev/null)" in
+      present) printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "$3" ;;
+      gone) echo '{"error":{"code":"pane_not_found"}}' ;;
+      *) echo 'not json' ;;
+    esac ;;
+  "agent get")
+    p=$(pane_dir "$3")
+    case "$(cat "$p/agent" 2>/dev/null)" in
+      none) echo '{"error":{"code":"agent_not_found"}}' ;;
+      garbage|'') echo 'not json' ;;
+      *) printf '{"result":{"agent":{"agent_status":"%s"}}}\n' "$(cat "$p/agent")" ;;
+    esac ;;
+  "pane process-info")
+    pane=; prev=; for a in "$@"; do [ "$prev" = --pane ] && pane=$a; prev=$a; done
+    p=$(pane_dir "$pane")
+    [ "$(cat "$p/proc" 2>/dev/null)" = ok ] || exit 1
+    printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":%s,"foreground_processes":%s}}}\n' \
+      "$pane" "$(cat "$p/shell")" "$(cat "$p/fg")" ;;
+  *) exit 0 ;;
+esac
+SH
+  chmod +x "$1/herdr"
+}
+
+# fork_herdr_holder <home> <fakedir> <id> <model> <session> <pane> <state> <shell-pid>
+# Record a herdr-backed task whose pane reads as <state>:
+#   live         registered (idle) with a Pi process in the foreground
+#   live-other   registered (working) with a non-shell, non-agent foreground
+#   no-agent     pane exists, nothing registered, only a shell
+#   no-agent-pi  pane exists, nothing registered, but a Pi process is running
+#   stale-agent  registered (idle) but only a shell remains
+#   proc-fail    registered, but process-info fails
+#   gone         pane_not_found
+#   garbage      pane get returns an unparseable answer
+fork_herdr_holder() {
+  local home=$1 fakedir=$2 id=$3 model=$4 session=$5 pane=$6 state=$7 shell=$8 p
+  p="$fakedir/herdr/$session/$(printf '%s' "$pane" | tr ':' '_')"
+  mkdir -p "$p" "$home/state"
+  [ -e "$fakedir/herdr/$session/server" ] || printf 'running\n' > "$fakedir/herdr/$session/server"
+  printf '%s\n' "kind=ship" "harness=pi" "model=$model" "backend=herdr" "window=$session:$pane" > "$home/state/$id.meta"
+  printf '%s\n' "$shell" > "$p/shell"
+  printf 'ok\n' > "$p/proc"
+  printf 'present\n' > "$p/pane"
+  local shellfg pifg
+  shellfg="[{\"pid\":$shell,\"name\":\"zsh\",\"argv0\":\"zsh\"}]"
+  pifg="[{\"pid\":$shell,\"name\":\"node\",\"argv0\":\"pi\",\"argv\":[\"pi\",\"--model\",\"$model\"]}]"
+  case "$state" in
+    live) printf 'idle\n' > "$p/agent"; printf '%s\n' "$pifg" > "$p/fg" ;;
+    live-other) printf 'working\n' > "$p/agent"; printf '[{"pid":%s,"name":"vim","argv0":"vim"}]\n' "$shell" > "$p/fg" ;;
+    no-agent) printf 'none\n' > "$p/agent"; printf '%s\n' "$shellfg" > "$p/fg" ;;
+    no-agent-pi) printf 'none\n' > "$p/agent"; printf '%s\n' "$pifg" > "$p/fg" ;;
+    stale-agent) printf 'idle\n' > "$p/agent"; printf '%s\n' "$shellfg" > "$p/fg" ;;
+    proc-fail) printf 'idle\n' > "$p/agent"; printf 'fail\n' > "$p/proc"; printf '[]\n' > "$p/fg" ;;
+    gone) printf 'gone\n' > "$p/pane" ;;
+    garbage) printf 'garbage\n' > "$p/pane" ;;
+    *) fail "fork_herdr_holder: unknown state $state" ;;
+  esac
+}
+
 # fork_lift_relaunch_fixture: define upstream's relaunch-suite fixture
 # functions (tmux lifecycle stub, case builder, live ship task, control runner).
 fork_lift_relaunch_fixture() {

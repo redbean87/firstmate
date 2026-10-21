@@ -122,6 +122,88 @@ registry, or an unwritable reservation directory refuse the launch.
 Malformed JSON or schema in any of these files refuses the launch.
 
 
+Manual reservation recovery
+---------------------------
+
+Reservations normally need no attention: they expire on their own once their
+owner is confirmed gone and the grace has passed. Act only when a refusal keeps
+naming the same reservation. Never delete a reservation because it is old - a
+STALE label only says that something needs reconciling.
+
+1. Identify it. The refusal names the resource and each holder with a label.
+   The reservation file is
+     <root home>/state/fork-reservations/<resource>/<task>.<home hash>.json
+   and records task, home_state, owner_pid, owner_start, and created. The task
+   record, if any, is <home_state>/<task>.meta.
+
+2. Read the label.
+   "(launch in progress)"   The launching fm-spawn is still running. Wait. If
+                            it is hung, deal with that process through the
+                            normal path; never touch the reservation while it
+                            lives.
+   "(starting, Ns of 120s grace)"  The owner is gone and the agent is not yet
+                            visible. Wait out the grace; it expires by itself.
+   "(launch owner unconfirmed)"    ps could not confirm the owner. Check:
+                              LC_ALL=C ps -o lstart= -p <owner_pid>
+                            Exit 1 with no output: owner gone. Output equal to
+                            owner_start: still running - wait. Different output:
+                            the PID was reused - owner gone. If ps itself fails,
+                            fix that first; do not delete anything.
+   A holder named "(ambiguous)", "(unreadable)", "(unverified)", or
+   "(record unreadable)" is a task record, not a reservation: reconcile that
+   task through the normal upstream recovery (fm-crew-state.sh, fm-control.sh,
+   fm-teardown.sh). Deleting a reservation does not help and is not needed.
+
+3. Confirm the task's agent is gone. The task record must be absent, or its
+   endpoint must read dead or missing through upstream's own check:
+     FM_HOME=<home> bash -c '. bin/fm-backend.sh; m=<home_state>/<task>.meta;
+       fm_backend_agent_state "$(fm_backend_of_meta "$m")" "$(fm_backend_target_of_meta "$m")"'
+   and no harness process for that task may be running (ps). On Herdr, also
+   check the pane's processes directly: an unregistered pane reads dead even
+   while a Pi process runs in it (see Known limits).
+
+4. Remove only when the owner is confirmed gone (step 2) AND the agent is
+   confirmed gone (step 3). Remove exactly that one file, under the resource
+   lock so no admission is mid-count:
+     FM_HOME=<root home> STATE=<root home>/state bash -c '
+       . bin/fm-wake-lib.sh
+       lock=<root home>/state/.fork-resource-<resource>.lock
+       fm_lock_acquire_wait_max "$lock" 10 || { echo "resource busy; retry"; exit 1; }
+       rm -f -- "<reservation file>"
+       fm_lock_release "$lock"'
+
+5. A malformed or unreadable reservation refuses every launch on its resource,
+   which is the safe state. Fix permissions if that is the cause. Otherwise
+   take the task from the file name and apply steps 2-4; if the owner or agent
+   cannot be established, leave the file in place and investigate.
+
+6. Never remove the lock path by hand. Upstream reclaims a lock whose owner
+   died; a lock that stays busy belongs to a live process, named by the pid
+   file in the owner directory its symlink points to.
+
+
+Known limits
+------------
+
+- Startup grace is measured from when the reservation is written, so the
+  grace left after fm-spawn exits is 120s minus fm-spawn's own runtime. For pi,
+  codex, and claude workers fm-spawn does not wait for the agent: it sends the
+  launch, presses Enter, and exits (bin/fm-spawn.sh around the launch send).
+- tmux: liveness is read from the pane's processes, so a worker is visible as
+  soon as its harness process runs; the launch runs only a local brief-encode
+  step before it. The residual window is a launch line that stalls for most of
+  the grace before the harness starts.
+- Herdr: upstream reads a pane with nothing registered as dead without
+  checking its processes (bin/backends/herdr.sh fm_backend_herdr_agent_state;
+  characterised by fork/tests/fm-fork-resource-herdr.test.sh). A Pi that is
+  running but has not yet registered with Herdr is therefore invisible once
+  its reservation's grace has passed. How long a fresh Pi takes to register
+  has not been measured; upstream documents registration through Pi's
+  lifecycle hooks or Herdr's screen detection, with no timing.
+- Only this machine's homes are counted; remote homes and models launched by
+  hand outside fm-spawn are not.
+
+
 Testing ownership
 -----------------
 
