@@ -381,6 +381,90 @@ test_wake_queue_first_row_created_owner_only() {
   pass "wake queue: the first row and its sequence file are 600 and appends keep working"
 }
 
+# --- 9. per-harness spawn wiring records ----------------------------------------
+
+test_gemini_settings_created_owner_only() {
+  local case_dir home proj wt fakebin id out settings
+  case_dir="$TMP_ROOT/gemini-settings-case"
+  home="$case_dir/home"
+  proj="$case_dir/project"
+  wt="$case_dir/wt"
+  id=ev-owner-gem1
+  fakebin=$(make_spawn_fakebin "$case_dir/fake" gemini)
+  fm_test_spawn_home "$home" gemini
+  fm_git_worktree "$proj" "$wt" "wt-owner-gemini"
+  fm_test_spawn_brief "$home" "$id"
+  out=$(umask 022; GROK_HOME="$case_dir/grok-home" \
+    fm_test_run_spawn "$home" "$wt" "$fakebin" "$id" "$proj" --mode no-mistakes --yolo off 2>&1) \
+    || fail "gemini fixture spawn failed: $(printf '%s\n' "$out" | tail -n 5)"
+  settings="$home/state/$id.gemini-settings.json"
+  [ -f "$settings" ] || fail "a gemini spawn must write its hook settings"
+  [ "$(mode_of "$settings")" = 600 ] \
+    || fail "the gemini hook settings must be 600 under an open caller umask, got $(mode_of "$settings")"
+  grep -F '"BeforeAgent"' "$settings" >/dev/null \
+    || fail "the gemini hook settings must carry the real hook wiring"
+  pass "spawn: gemini hook settings are created 600 under an open caller umask"
+}
+
+# --- 10. open-decisions cursor ---------------------------------------------------
+
+test_open_decisions_cursor_created_owner_only() {
+  local state f cursor before
+  state="$TMP_ROOT/open-decisions-case/state"
+  mkdir -p "$state"
+  f="$state/ev-od1.status"
+  printf 'needs-decision [key=ev-od]: probe open decision\n' > "$f" \
+    || fail "could not stage the probe status file"
+  run_state_lib fm-classify-lib.sh "$state" status_open_decisions_incremental "$f" >/dev/null \
+    || fail "the open-decisions fold failed under umask 022"
+  cursor="$state/.ev-od1.open-decisions-cursor"
+  [ -f "$cursor" ] || fail "the fold must persist the open-decisions cursor"
+  [ "$(mode_of "$cursor")" = 600 ] \
+    || fail "the open-decisions cursor must be 600, got $(mode_of "$cursor")"
+  before=$(inode_of "$cursor")
+  # Consumer + real rewrite: appending a line makes the next fold rewrite the
+  # cursor through a fresh temp renamed over it, exactly the drift shape.
+  printf 'resolved [key=ev-od]: probe resolved\n' >> "$f" \
+    || fail "could not append to the probe status file"
+  run_state_lib fm-classify-lib.sh "$state" status_open_decisions_incremental "$f" >/dev/null \
+    || fail "the incremental fold failed under umask 022"
+  [ "$(inode_of "$cursor")" != "$before" ] \
+    || fail "the fold must really rewrite the cursor (inode unchanged: the rewrite path was not exercised)"
+  [ "$(mode_of "$cursor")" = 600 ] \
+    || fail "a cursor rewrite must stay 600, got $(mode_of "$cursor")"
+  grep -F 'version=' "$cursor" >/dev/null || fail "the cursor must stay readable by the owner"
+  pass "open decisions: the cursor is 600 on creation and after a real rewrite"
+}
+
+# --- 11. seeded home data files --------------------------------------------------
+
+test_home_seed_data_files_created_owner_only() {
+  local case_dir home sub out
+  case_dir="$TMP_ROOT/home-seed-case"
+  home="$case_dir/home"
+  sub="$case_dir/subhome"
+  mkdir -p "$home/projects" "$home/data" "$home/state"
+  fm_git_init_commit "$home/projects/alpha"
+  fm_git_add_origin "$home/projects/alpha" "$case_dir/alpha.git"
+  printf '%s\n' '- alpha [direct-PR] - alpha project (added 2026-06-22)' > "$home/data/projects.md" \
+    || fail "could not stage the parent project registry"
+  out=$(umask 022; FM_ROOT_OVERRIDE='' FM_HOME="$home" FM_SECONDMATE_CHARTER='owner-only seed charter' \
+    FM_SECONDMATE_SCOPE='owner-only seed scope' \
+    "$ROOT/bin/fm-home-seed.sh" design "$sub" alpha 2>&1) \
+    || fail "home seed failed under umask 022: $(printf '%s\n' "$out" | tail -n 5)"
+  [ "$(mode_of "$home/data/secondmates.md")" = 600 ] \
+    || fail "the parent secondmate registry must be 600, got $(mode_of "$home/data/secondmates.md")"
+  [ "$(mode_of "$sub/data/projects.md")" = 600 ] \
+    || fail "the seeded project registry must be 600, got $(mode_of "$sub/data/projects.md")"
+  [ "$(mode_of "$sub/data/charter.md")" = 600 ] \
+    || fail "the seeded charter copy must be 600, got $(mode_of "$sub/data/charter.md")"
+  grep -F 'alpha' "$sub/data/projects.md" >/dev/null \
+    || fail "the seeded project registry must stay readable by the owner"
+  grep -F 'owner-only seed charter' "$sub/data/charter.md" >/dev/null \
+    || fail "the seeded charter must stay readable by the owner"
+  pass "seed: the parent registry, seeded projects registry and charter copy are 600 under an open caller umask"
+}
+
 # --- run ------------------------------------------------------------------------
 
 if [ "$HAVE_TASKS_AXI" = 1 ]; then
@@ -393,5 +477,8 @@ test_inbox_dirs_and_records_created_owner_only
 test_status_markers_and_cursor_created_owner_only
 test_wake_queue_first_row_created_owner_only
 test_status_record_precreated_and_appends_preserve_mode
+test_gemini_settings_created_owner_only
+test_open_decisions_cursor_created_owner_only
+test_home_seed_data_files_created_owner_only
 test_watcher_creates_private_state_dir_and_files
 test_cycle_log_created_owner_only_after_real_cycle

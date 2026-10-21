@@ -718,12 +718,12 @@ sync_project_registry() {
   tmp="$sub_reg.tmp.$$"
   names=$(printf '%s\n' "$@" | awk '{ printf "%s%s", sep, $0; sep="\034" }')
   if [ -f "$sub_reg" ]; then
-    awk -v names="$names" "$REGISTRY_ROW_IS_AWK"'
+    (umask 077; awk -v names="$names" "$REGISTRY_ROW_IS_AWK"'
       BEGIN { k = split(names, a, "\034") }
       { for (i = 1; i <= k; i++) if (row_is(a[i])) next; print }
-    ' "$sub_reg" > "$tmp"
+    ' "$sub_reg" > "$tmp")
   else
-    : > "$tmp"
+    (umask 077; : > "$tmp")
   fi
   today=$(date +%F)
   for project in "$@"; do
@@ -766,9 +766,9 @@ write_registry() {
   today=$(date +%F)
   tmp="$REG.tmp.$$"
   if [ -f "$REG" ]; then
-    grep -vE "^- $id( |$)" "$REG" > "$tmp" || true
+    (umask 077; grep -vE "^- $id( |$)" "$REG" > "$tmp") || true
   else
-    : > "$tmp"
+    (umask 077; : > "$tmp")
   fi
   printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' "$id" "$summary" "$home" "$scope" "$projects_csv" "$today" >> "$tmp"
   mv "$tmp" "$REG"
@@ -986,7 +986,7 @@ seed_home() {
     fi
   done
 
-  cp "$SEED_PARENT_BRIEF" "$home/data/charter.md"
+  (umask 077; cp "$SEED_PARENT_BRIEF" "$home/data/charter.md")
 
   projects_csv=$(join_projects "$@")
   # Durable record of this home's route to its parent, written once here next

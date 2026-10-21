@@ -1346,7 +1346,7 @@ status_open_decisions_incremental() {  # <status-file> [<captured-end-offset>]
 
   if [ "$offset" -lt "$size" ]; then
     chunk_file="$cf.read.$$"
-    _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
+    (umask 077; _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file") 2>/dev/null \
       || { rm -f "$chunk_file"; printf '%s' "$trusted_open"; return 0; }
     chunk_size=$(LC_ALL=C wc -c < "$chunk_file" 2>/dev/null) \
       || { rm -f "$chunk_file"; printf '%s' "$trusted_open"; return 0; }
@@ -1371,12 +1371,15 @@ status_open_decisions_incremental() {  # <status-file> [<captured-end-offset>]
   fi
   if [ "$cursor_dirty" -eq 1 ]; then
     target_cursor="$cf.tmp.$$"
-    {
-      printf 'version=%s\n' "$fold_version"
-      printf 'offset=%s\n' "$offset"
-      printf 'ident=%s\n' "$cur_ident"
-      if [ -n "$open" ]; then printf '%s' "$open"; fi
-    } > "$target_cursor" || return 1
+    (
+      umask 077
+      {
+        printf 'version=%s\n' "$fold_version"
+        printf 'offset=%s\n' "$offset"
+        printf 'ident=%s\n' "$cur_ident"
+        if [ -n "$open" ]; then printf '%s' "$open"; fi
+      } > "$target_cursor"
+    ) || return 1
     mv -f "$target_cursor" "$cf" || return 1
   fi
   printf '%s' "$open"
@@ -1459,7 +1462,7 @@ status_snapshot_latest_event() {  # <status-file> <captured-endpoint> <captured-
   fi
   length=$((endpoint - start))
   scratch="$(_fm_status_span_scratch "$f").latest"
-  _fm_status_read_span "$f" "$start" "$length" > "$scratch" 2>/dev/null \
+  (umask 077; _fm_status_read_span "$f" "$start" "$length" > "$scratch") 2>/dev/null \
     || { rm -f "$scratch"; return 1; }
   if record=$(LC_ALL=C perl -e '
     my ($path, $start, $skip_first) = @ARGV;
@@ -1980,7 +1983,7 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>]
     size=$actual_size
   fi
   [ "$offset" -lt "$size" ] || return 0
-  _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
+  (umask 077; _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file") 2>/dev/null \
     || { rm -f "$chunk_file"; return 1; }
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
@@ -2383,7 +2386,7 @@ status_span_first_actionable_record() {  # <status-file> <start-offset> [record-
   fi
   scratch=$(_fm_status_span_scratch "$f") || return 2
   chunk_file="${scratch}.span"
-  _fm_status_read_span "$f" "$start" "$((size - start))" > "$chunk_file" 2>/dev/null \
+  (umask 077; _fm_status_read_span "$f" "$start" "$((size - start))" > "$chunk_file") 2>/dev/null \
     || { rm -f "$chunk_file"; return 2; }
   cur_ident=$(_fm_open_decisions_file_ident "$f") || {
     rm -f "$chunk_file"; return 2;
