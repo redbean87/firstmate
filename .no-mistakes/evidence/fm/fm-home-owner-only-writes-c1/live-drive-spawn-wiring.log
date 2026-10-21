@@ -1,0 +1,17 @@
+PASS  muse spawn succeeds under umask 022 (prior session logs: 0)
+PASS  muse session binding (prior session logs: 0) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/prior0/home/state/live-muse-prior0.muse-session mode=600)
+PASS  the muse binding records the task worktree
+PASS  pre-created status record (muse) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/prior0/home/state/live-muse-prior0.status mode=600)
+PASS  task record (muse) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/prior0/home/state/live-muse-prior0.meta mode=600)
+PASS  muse spawn succeeds under umask 022 (prior session logs: 1)
+PASS  muse session binding (prior session logs: 1) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/prior1/home/state/live-muse-prior1.muse-session mode=600)
+PASS  the muse binding records the task worktree
+PASS  pre-created status record (muse) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/prior1/home/state/live-muse-prior1.status mode=600)
+PASS  task record (muse) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/prior1/home/state/live-muse-prior1.meta mode=600)
+PASS  claude spawn succeeds under umask 022
+PASS  claude crewmate settings stay a worktree write at the caller umask (deliberate exclusion) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/claude/wt/.claude/settings.local.json mode=644)
+PASS  pre-created status record (claude) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/claude/home/state/live-claude-x1.status mode=600)
+PASS  task record (claude) (/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-spawn-wiring.rrIjKe/claude/home/state/live-claude-x1.meta mode=600)
+PASS  the claude crewmate settings still carry real hook wiring
+
+== overall: ALL-PASS

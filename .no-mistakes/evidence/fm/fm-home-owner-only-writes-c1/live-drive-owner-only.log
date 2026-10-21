@@ -1,0 +1,36 @@
+== worktree: /Users/cortezashley/.no-mistakes/worktrees/26772a06f146/01M5F5DNEARND6JCZWPTKYNMGH
+== head: bee44d55
+== caller umask: 0022
+
+PASS  backlog created under umask 022 (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/backlog-home/data/backlog.md mode=600)
+PASS  the done transition really rewrote data/backlog.md (new inode)
+PASS  backlog after a real rewrite under umask 000 (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/backlog-home/data/backlog.md mode=600)
+PASS  the owner still reads the rewritten row back
+PASS  the captain hold really rewrote data/backlog.md
+PASS  backlog after a documented captain hold (umask 022) (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/hold-home/data/backlog.md mode=600)
+PASS  the held row still reports held: yes
+PASS  the hold reason survives the rewrite
+PASS  parent data/secondmates.md after seed (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-parent/data/secondmates.md mode=600)
+PASS  seeded data/charter.md (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-child/data/charter.md mode=600)
+PASS  seeded data/projects.md (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-child/data/projects.md mode=600)
+PASS  seeded home data/ directory (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-child/data mode=700)
+PASS  seeded home state/ directory (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-child/state mode=700)
+PASS  seeded home config/ directory (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-child/config mode=700)
+PASS  seeded projects/ keeps the caller-umask mode (documented exclusion) (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-child/projects mode=755)
+PASS  the seeded charter is readable by the owner
+PASS  the documented handoff reported the staged move
+PASS  the handoff really rewrote the parent backlog
+PASS  parent backlog after a real handoff (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-parent/data/backlog.md mode=600)
+PASS  handed-off destination backlog (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-child/data/backlog.md mode=600)
+PASS  the destination owns the handed-off row
+PASS  the receive reported the delivered move
+PASS  the receive really rewrote the destination backlog
+PASS  destination backlog after a real receive (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-owner-live.jrsEbE/seed-child/data/backlog.md mode=600)
+PASS  the delivered row landed in the destination backlog
+PASS  the receive preserved the destination's existing rows
+PASS  the real watcher started against a lab home under umask 022
+PASS  watcher lock owner dir (symlink target) (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.arxdzq/state/.watch.lock mode=700)
+PASS  watcher beat (/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.arxdzq/state/.last-watcher-beat mode=600)
+PASS  watcher lock pid record is 600
+
+== overall: ALL-PASS

@@ -3,9 +3,9 @@ ok - without BASHPID a subshell cannot release or reclaim its parent lock and ow
 ok - bounded acquire hands ownership to the waiting caller after contention
 ok - presentation lock waits are bounded and retriable without weakening acknowledgement atomicity
 ok - malformed presentation locks report acquire failure instead of contention
-tests/wake-helpers.sh: line 319: 60896 Killed: 9                  PATH="$dir/fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' FM_SECONDMATE_WAKE_STALL_SECS=1 FM_SECONDMATE_LIVENESS_SECS=99999999 FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch-$leg.out" 2> "$dir/watch-$leg.err"
-tests/wake-helpers.sh: line 319: 61230 Killed: 9                  PATH="$dir/fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' FM_SECONDMATE_WAKE_STALL_SECS=1 FM_SECONDMATE_LIVENESS_SECS=99999999 FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch-$leg.out" 2> "$dir/watch-$leg.err"
-tests/wake-helpers.sh: line 319: 63120 Killed: 9                  PATH="$dir/fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' FM_SECONDMATE_WAKE_STALL_SECS=1 FM_SECONDMATE_LIVENESS_SECS=99999999 FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch-$leg.out" 2> "$dir/watch-$leg.err"
+tests/wake-helpers.sh: line 319:  4231 Killed: 9                  PATH="$dir/fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' FM_SECONDMATE_WAKE_STALL_SECS=1 FM_SECONDMATE_LIVENESS_SECS=99999999 FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch-$leg.out" 2> "$dir/watch-$leg.err"
+tests/wake-helpers.sh: line 319:  5929 Killed: 9                  PATH="$dir/fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' FM_SECONDMATE_WAKE_STALL_SECS=1 FM_SECONDMATE_LIVENESS_SECS=99999999 FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch-$leg.out" 2> "$dir/watch-$leg.err"
+tests/wake-helpers.sh: line 319: 14536 Killed: 9                  PATH="$dir/fakebin:$PATH" FM_FAKE_NOW_FILE="$dir/now" FM_HOME="$dir" FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$dir/state" FM_FAKE_TMUX_WINDOW='firstmate:fm-mate' FM_SECONDMATE_WAKE_STALL_SECS=1 FM_SECONDMATE_LIVENESS_SECS=99999999 FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$dir/watch-$leg.out" 2> "$dir/watch-$leg.err"
 ok - foreign secondmate queue alerts once per no-progress episode without age-only or cascade noise
 ok - declared external-wait pause rows do not feed secondmate wake-loop escalation
 ok - a reprovisioned queue generation starts a fresh no-progress interval
@@ -24,52 +24,51 @@ ok - an unreadable status still reads as unreported, with or without owned growt
 ok - a worker resolved in fold lag still wakes after this home's close
 ok - owned growth suppresses the wake without hiding the turn-ended annotation
 ok - historical annotations replay nothing already announced and keep everything new
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 4 --recovery-generation 96091.1792544903.yxBm79
 ok - concurrent append plus drain preserves durable records through acknowledgement
 ok - signal written while no watcher runs is caught on next run
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 17840.1792544918.o6fWmF
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 33668.1792585938.ylZ4b8
 ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ●  WATCHER DOWN - SUPERVISION IS OFF
-●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 2s ago).
-●  snapshot: model=extension reason=no-watcher lock=unheld pid=none(absent identity -) beacon=2s extension-ownership=not-proven
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 6s ago).
+●  snapshot: model=extension reason=no-watcher lock=unheld pid=none(absent identity -) beacon=7s extension-ownership=not-proven
 ●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
 ●  This is a supervision warning only; the guarded operation WILL still run.
-●  After draining queued wakes, repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.253szy/.pi/extensions/fm-primary-turnend-guard.ts -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.253szy/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●  After draining queued wakes, repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.w10Akl/.pi/extensions/fm-primary-turnend-guard.ts -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.w10Akl/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
 ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
 ok - stale wake is queued before suppressor state is advanced
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 19702.1792544920.iZLHF8
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 50306.1792585945.sAcJAt
 ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ●  WATCHER DOWN - SUPERVISION IS OFF
-●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 1s ago).
-●  snapshot: model=extension reason=no-watcher lock=unheld pid=none(absent identity -) beacon=2s extension-ownership=not-proven
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 5s ago).
+●  snapshot: model=extension reason=no-watcher lock=unheld pid=none(absent identity -) beacon=6s extension-ownership=not-proven
 ●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
 ●  This is a supervision warning only; the guarded operation WILL still run.
-●  After draining queued wakes, repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.253szy/.pi/extensions/fm-primary-turnend-guard.ts -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.253szy/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●  After draining queued wakes, repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.w10Akl/.pi/extensions/fm-primary-turnend-guard.ts -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.w10Akl/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
 ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
 ok - a not-provably-working stale wake is queued before its suppressor is advanced
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 22134.1792544924.3nxPjg
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 63127.1792585951.wH8WSu
 ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ●  WATCHER DOWN - SUPERVISION IS OFF
-●  1 registered custom check(s), but no live watcher process holds this home lock (last beat: 1s ago).
-●  snapshot: model=extension reason=no-watcher lock=unheld pid=none(absent identity -) beacon=2s extension-ownership=not-proven
+●  1 registered custom check(s), but no live watcher process holds this home lock (last beat: 3s ago).
+●  snapshot: model=extension reason=no-watcher lock=unheld pid=none(absent identity -) beacon=4s extension-ownership=not-proven
 ●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
 ●  This is a supervision warning only; the guarded operation WILL still run.
-●  After draining queued wakes, repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.253szy/.pi/extensions/fm-primary-turnend-guard.ts -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.253szy/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●  After draining queued wakes, repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.w10Akl/.pi/extensions/fm-primary-turnend-guard.ts -e /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-wake-tangle-root.w10Akl/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
 ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
 ok - registered custom check output is queued before cadence suppression
 ok - concurrent drains replay until one post-handling acknowledgement consumes records
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 4 --recovery-generation 29596.1792544927.R7DdOn
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 4 --recovery-generation 82532.1792585960.9dSQsn
 ok - drain collapses obvious duplicate heartbeat and signal records
 ok - drain asserts watcher liveness: warns on a lapse, stays silent for a live watcher with a fresh beacon
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 8 --recovery-generation 31124.1792544929.TnpD2M
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 8 --recovery-generation 93593.1792585966.Y7LZYk
 ok - structural signal enrichment is separate, deduped, home-local, and tier-zero for other wakes
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 13 --recovery-generation 32255.1792544930.dkZfOj
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 13 --recovery-generation 4550.1792585971.3nYDzq
 ok - every readable unread status line is annotated in full while invalid status files preserve their raw wakes
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 35124.1792544933.TqCOOW
-WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 35124.1792544933.TqCOOW
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 24469.1792585981.R9Qkxz
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 2 --recovery-generation 24469.1792585981.R9Qkxz
 ok - slow annotation releases the append lock and a deleted status file fails open
 ok - a branch-actor scoped ack never swallows an unacked main-owned row, and main's later drain sees exactly what remains
 ok - main drain and acknowledgement exclude an active branch grant
