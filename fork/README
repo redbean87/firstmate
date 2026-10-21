@@ -49,13 +49,39 @@ unexecutable policy script.
 Hook contract (environment the blocks pass; see the policy script header):
 FM_LP_PHASE, FM_LP_TASK, FM_LP_KIND, FM_LP_PROJECT, FM_LP_HARNESS, FM_LP_MODEL,
 FM_LP_EFFORT, FM_LP_RAW_LAUNCH, FM_LP_HOME, FM_LP_STATE, FM_LP_DATA,
-FM_LP_CONFIG, and from HK1 only FM_LP_OWNER_PID ($$, the launching fm-spawn). The blocks read these upstream names: in fm-spawn.sh ID KIND
-PROJ_ABS HARNESS MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG
-FM_HOME FM_ROOT; in fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT
-META KIND STATE DATA FM_HOME FM_ROOT, fm_meta_get, die. The resource policy
-also uses upstream's fm_meta_get, fm_backend_of_meta, fm_backend_target_of_meta,
-and fm_backend_agent_alive from bin/fm-backend.sh. fm-fork-hook-check and the
-contract tests fail when any of these move or disappear.
+FM_LP_CONFIG, and from HK1 only FM_LP_OWNER_PID ($$, the launching fm-spawn).
+The blocks read these upstream names: in fm-spawn.sh ID KIND PROJ_ABS HARNESS
+MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG FM_HOME FM_ROOT; in
+fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT META KIND STATE DATA
+FM_HOME FM_ROOT, fm_meta_get, die. fm-fork-hook-check verifies these hook
+inputs and the integration boundary (below).
+
+Upstream helper dependencies of the policy (resource policy only; the consult
+gate and pins use none). The policy sources bin/fm-wake-lib.sh,
+bin/fm-secondmate-registry-lib.sh, and bin/fm-backend.sh, and refuses the
+launch if any of them cannot be loaded. It then uses:
+  agent state       fm_backend_agent_state, fm_backend_of_meta,
+                    fm_backend_target_of_meta, fm_meta_get (bin/fm-backend.sh)
+  backend loading   fm_backend_source (bin/fm-backend.sh), which loads
+                    bin/backends/<name>.sh
+  locking           fm_lock_acquire_wait_max, fm_lock_release (bin/fm-wake-lib.sh)
+  root home         fm_firstmate_root_home (bin/fm-wake-lib.sh)
+  local homes       fm_local_firstmate_state_dirs (bin/fm-wake-lib.sh), which
+                    parses registries with secondmate_registry_parse_line
+                    (bin/fm-secondmate-registry-lib.sh)
+  Herdr processes   fm_backend_herdr_parse_target,
+                    fm_backend_herdr_pane_process_state (bin/backends/herdr.sh)
+What a missing or failing helper does - always toward refusal or holding:
+  - the locking, root-home, local-home, meta, and agent-state helpers above
+    are checked when the policy starts; a missing one refuses the launch;
+  - fm_backend_source failing makes upstream's fm_backend_agent_state answer
+    "unverified", and makes the Herdr re-check print nothing; both hold;
+  - a missing Herdr helper makes the Herdr re-check print nothing, which holds;
+  - a failing registry parse makes local-home enumeration fail, which refuses.
+fm-fork-hook-check --base does NOT verify these helpers: it covers the hook
+blocks, their positions and inputs, and the upstream-file boundary. Their
+availability is enforced at run time by the policy and exercised by
+fork/tests (resource, reservation, and Herdr suites) after every upstream sync.
 
 
 Policies and configuration
@@ -166,10 +192,25 @@ STALE label only says that something needs reconciling.
                             owner_start: still running - wait. Different output:
                             the PID was reused - owner gone. If ps itself fails,
                             fix that first; do not delete anything.
-   A holder named "(ambiguous)", "(unreadable)", "(unverified)", or
-   "(record unreadable)" is a task record, not a reservation: reconcile that
+   "STALE reservations need reconciliation (age never frees a place):
+    <task>(reserved Ns ago)"
+                            Added for any reservation that still holds and is
+                            older than 30 minutes; the same task also appears
+                            under one of the labels above, which decides what
+                            to do. STALE alone is never a reason to remove it.
+   A holder named "(ambiguous)", "(unreadable)", "(unverified)", "(no answer)",
+   or "(record unreadable)" is a task record, not a reservation: reconcile that
    task through the normal upstream recovery (fm-crew-state.sh, fm-control.sh,
    fm-teardown.sh). Deleting a reservation does not help and is not needed.
+   "(herdr pane has no registered agent but its processes read <verdict>)"
+                            Also a task record: a Herdr pane with no
+                            registration whose processes were not proven
+                            shell-only. <verdict> "agent" or "other": a
+                            process is still running there - stop or reconcile
+                            that task. "unreadable" or "unavailable": the
+                            pane's processes could not be read - restore that
+                            visibility (Herdr process-info, ps) and recheck
+                            with step 3. Deleting a reservation does not help.
 
 3. Confirm the task's agent is gone. The task record must be absent, or its
    endpoint must read dead or missing through upstream's own check:
@@ -221,6 +262,21 @@ Known limits
   `pane process-info` to name the pane's shell pid and foreground, and the
   window before the harness process starts (the brief-encode step) reads
   shell-only, as on tmux. It has not been run against a real Herdr.
+- A refusal by upstream after HK1 leaves the reservation in place. HK1 runs
+  before the brief checks, launch-brief render, endpoint, and task record, so
+  a launch admitted by the policy can still be refused by upstream afterwards
+  (an invalid brief, for example). The policy has already exited, so its
+  reservation stays; its owner (that fm-spawn) is then gone, and it expires
+  once 120s have passed since it was written - longer only if the owner cannot
+  be confirmed gone. Retrying the same task is not blocked by it (a task's own
+  reservation is replaced); a different task waits out the grace.
+- Relaunch failure window. HK2 checks capacity before the old agent is
+  stopped but does not reserve. Upstream then stops the old agent, whose place
+  frees, and only reserves again when the replacement reaches HK1 inside
+  fm-spawn --relaunch. If another launch takes the place in between (seconds),
+  HK1 refuses the replacement: capacity is never exceeded, but the task is left
+  stopped - upstream keeps its record, worktree, and progress note and reports
+  that the replacement did not launch - until a later relaunch succeeds.
 - Only this machine's homes are counted; remote homes and models launched by
   hand outside fm-spawn are not.
 
@@ -236,9 +292,12 @@ Fork CI tests the fork's code and its integration with upstream, not upstream:
                       coverage guard never see them.
   Hook wiring         fm-fork-hook-check verifies both blocks are present once,
                       identical to fork/hooks/*.block, and at their lifecycle
-                      positions, and that no other upstream bin/ file references
-                      the fork; with --base it verifies nothing else
-                      upstream-owned differs from upstream.
+                      positions, that the upstream names they read exist, and
+                      that no other upstream bin/ file references the fork;
+                      with --base it verifies nothing else upstream-owned
+                      differs from upstream. It does not check the policy's
+                      upstream helper dependencies (see "The two hook
+                      points"); the fork test suites exercise those.
   Behaviour           spawn and relaunch tests drive the REAL upstream scripts
                       through upstream's shared test libraries (tests/lib.sh,
                       tests/fixtures.sh); the relaunch tests also lift four
