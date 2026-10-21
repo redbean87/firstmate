@@ -83,11 +83,16 @@ A pinned project refuses another harness or model, and any raw launch command.
 resource - config/fork-resources.json:
   {"strata": {"capacity": 1, "match": {"model_prefix": "strata-local/"}}}
 A launch whose model matches is refused while <capacity> other tasks on a
-matching model have a live agent, across every project; secondmates are not
-exempt. Liveness is upstream's fm_backend_agent_alive; only "alive" holds a
-place, so an exited agent, a vanished endpoint, or an unreadable liveness read
-does not (the same semantics as the fork's previous single-slot gate). A raw
-launch is judged by its own --model and refused if it names none.
+matching model hold a place, across every project; secondmates are not
+exempt. Liveness is upstream's recovery-grade fm_backend_agent_state: only a
+holder proven "dead" (endpoint without an agent) or "missing" (endpoint gone)
+frees its place. "alive", "ambiguous", "unreadable", "unverified", any other
+answer, and an unreadable holder record all hold one - a liveness read that
+fails refuses the launch rather than risk a second run on a single-slot
+machine. This is stricter than the fork's previous single-slot gate, which
+counted only "alive". A stuck holder is cleared by reconciling or cleaning up
+that task, never by the policy guessing. A raw launch is judged by its own
+--model and refused if it names none.
 
 Malformed JSON or schema in any of these files refuses the launch.
 

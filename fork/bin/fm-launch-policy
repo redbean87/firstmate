@@ -34,8 +34,11 @@
 #   resource      config/fork-resources.json:
 #                 {"<name>": {"capacity": N, "match": {"model_prefix": "..."}}}
 #                 A launch whose model matches refuses while N other tasks on a
-#                 matching model have a live agent, read through upstream's own
-#                 fm_backend_agent_alive. Secondmates are not exempt.
+#                 matching model hold a place. Upstream's own
+#                 fm_backend_agent_state decides: only a holder proven dead or
+#                 missing frees its place; alive, ambiguous, unreadable, and
+#                 unverified all hold one (fail closed). Secondmates are not
+#                 exempt.
 # Unknown policy names, unreadable or malformed files, and an empty policy list
 # all refuse.
 set -u
@@ -130,8 +133,16 @@ policy_project_pin() {
     || refuse "project $name is pinned to model $want_model, not '${MODEL:-default}'"
 }
 
+# Resource holders are classified with upstream's recovery-grade
+# fm_backend_agent_state (bin/fm-backend.sh), not its three-state alive view:
+# only `dead` and `missing` - an endpoint confidently without an agent, or
+# authoritatively gone - free a place. `alive`, `ambiguous`, `unreadable`,
+# `unverified`, and any unexpected answer all hold one, so a liveness read that
+# fails or cannot attribute the process refuses the launch instead of risking a
+# second run on a physically single-slot machine. A holder record that cannot
+# be read also holds a place.
 policy_resource() {
-  local res="$CONFIG/fork-resources.json" rows name capacity prefix held meta holder holder_model state
+  local res="$CONFIG/fork-resources.json" rows name capacity prefix held unverified meta holder holder_model state
   [ -e "$res" ] || return 0
   json_ok "$res" 'type == "object" and ([.[] | type == "object" and (.capacity | type == "number" and . >= 1 and . == floor) and ((.match.model_prefix // "") | type == "string" and length > 0)] | all)' \
     || unusable "config/fork-resources.json is malformed"
@@ -140,23 +151,45 @@ policy_resource() {
   fi
   [ -n "$MODEL" ] || return 0
   rows=$(jq -r 'to_entries[] | [.key, (.value.capacity | tostring), .value.match.model_prefix] | @tsv' "$res")
+  [ -d "$FM_LP_STATE" ] && [ -r "$FM_LP_STATE" ] && [ -x "$FM_LP_STATE" ] \
+    || unusable "the home's state directory cannot be read to count resource holders"
   # shellcheck source=bin/fm-backend.sh
   . "$FORK_ROOT/bin/fm-backend.sh" || unusable "upstream bin/fm-backend.sh could not be loaded"
+  for fn in fm_meta_get fm_backend_of_meta fm_backend_target_of_meta fm_backend_agent_state; do
+    declare -F "$fn" >/dev/null || unusable "upstream liveness helper $fn is missing from bin/fm-backend.sh"
+  done
   while IFS=$'\t' read -r name capacity prefix; do
     [ -n "$name" ] || continue
     case "$MODEL" in "$prefix"*) ;; *) continue ;; esac
     held=0
+    unverified=
     for meta in "$FM_LP_STATE"/*.meta; do
-      [ -f "$meta" ] || continue
+      [ -e "$meta" ] || continue
       holder=$(basename "$meta" .meta)
       [ "$holder" != "$FM_LP_TASK" ] || continue
+      if ! [ -f "$meta" ] || ! [ -r "$meta" ]; then
+        held=$((held + 1))
+        unverified="$unverified $holder(record unreadable)"
+        continue
+      fi
       holder_model=$(fm_meta_get "$meta" model)
       case "$holder_model" in "$prefix"*) ;; *) continue ;; esac
-      state=$(fm_backend_agent_alive "$(fm_backend_of_meta "$meta")" "$(fm_backend_target_of_meta "$meta")")
-      [ "$state" = alive ] && held=$((held + 1))
+      state=$(fm_backend_agent_state "$(fm_backend_of_meta "$meta")" "$(fm_backend_target_of_meta "$meta")" 2>/dev/null) || state=unreadable
+      case "$state" in
+        dead|missing) ;;
+        alive) held=$((held + 1)) ;;
+        *)
+          held=$((held + 1))
+          unverified="$unverified $holder(${state:-no answer})"
+          ;;
+      esac
     done
-    [ "$held" -lt "$capacity" ] \
-      || refuse "machine resource $name is at capacity ($held of $capacity live) for model $MODEL; dispatch again after a holder finishes"
+    if [ "$held" -ge "$capacity" ]; then
+      if [ -n "$unverified" ]; then
+        refuse "machine resource $name is at capacity ($held of $capacity held) for model $MODEL; liveness could not be confirmed for:$unverified - a holder counts until its agent is proven gone (reconcile or clean up that task first)"
+      fi
+      refuse "machine resource $name is at capacity ($held of $capacity live) for model $MODEL; dispatch again after a holder finishes"
+    fi
   done <<EOF
 $rows
 EOF
