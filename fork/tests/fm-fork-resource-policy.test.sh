@@ -34,7 +34,7 @@ policy() {
     FM_LP_PHASE=spawn FM_LP_TASK="$1" FM_LP_KIND="$2" FM_LP_PROJECT="$CASE/project" \
     FM_LP_HARNESS=pi FM_LP_MODEL="$3" FM_LP_EFFORT=default FM_LP_RAW_LAUNCH="${4-}" \
     FM_LP_HOME="$HOME_DIR" FM_LP_STATE="$HOME_DIR/state" FM_LP_DATA="$HOME_DIR/data" \
-    FM_LP_CONFIG="$HOME_DIR/config" "$POLICY" 2>&1
+    FM_LP_CONFIG="$HOME_DIR/config" FM_LP_OWNER_PID="${OWNER_PID:-$$}" "$POLICY" 2>&1
 }
 
 upstream_state() {  # <id> -> upstream fm_backend_agent_state for that holder

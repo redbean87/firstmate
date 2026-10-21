@@ -183,7 +183,7 @@ test_unexecutable_policy_script_refuses() {
 }
 
 test_hook_passes_contract_values() {
-  local out trace
+  local out trace owner
   new_spawn_case contract t-contract
   fork_policies "$HOME_DIR" consult-gate
   fork_loop_record "$HOME_DIR" t-contract plan-dispatch plan "Do it."
@@ -200,8 +200,12 @@ test_hook_passes_contract_values() {
   assert_grep "FM_LP_CONFIG=$HOME_DIR/config" "$trace" "HK1 must pass the home's config directory"
   assert_grep "FM_LP_STATE=$HOME_DIR/state" "$trace" "HK1 must pass the home's state directory"
   if grep -q '^FM_LP_RAW_LAUNCH=.' "$trace"; then fail "HK1 must not pass a raw launch for a named harness"; fi
+  owner=$(sed -n 's/^FM_LP_OWNER_PID=//p' "$trace")
+  [ -n "$owner" ] || fail "HK1 must pass FM_LP_OWNER_PID"
+  assert_equals "$(sed -n 's/^POLICY_PARENT_PID=//p' "$trace")" "$owner" "FM_LP_OWNER_PID must be the fm-spawn process that runs the policy"
+  if LC_ALL=C ps -p "$owner" >/dev/null 2>&1; then fail "the recorded owner must be the fm-spawn that has now exited, not a long-lived process"; fi
   assert_grep "project=" "$HOME_DIR/state/t-contract.meta" "upstream must record project= in the task record (HK2 reads it)"
-  pass "contract: HK1 passes the resolved task, kind, phase, harness, model, effort, project and home paths"
+  pass "contract: HK1 passes the resolved task, kind, phase, harness, model, effort, project, home paths, and its own process as owner"
 }
 
 fork_run_tests

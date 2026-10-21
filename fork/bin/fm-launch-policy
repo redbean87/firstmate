@@ -2,8 +2,8 @@
 # fm-launch-policy - the Firstmate fork's single launch-policy entry point.
 #
 # Called only by the two allowlisted hook blocks (fork/hooks/*.block):
-#   HK1 bin/fm-spawn.sh, after every upstream launch refusal and before any
-#       endpoint, worktree, or task record exists (fresh spawn and --relaunch);
+#   HK1 bin/fm-spawn.sh, after project capacity admission and before the brief
+#       render, endpoint, worktree, or task record (fresh spawn and --relaunch);
 #   HK2 bin/fm-control.sh relaunch, before the running agent is stopped.
 # Both blocks call this script only when the home has config/fork-policies, so
 # a home without that file keeps upstream behaviour exactly.
@@ -16,6 +16,8 @@
 #   FM_LP_EFFORT   effort, "default", or empty
 #   FM_LP_RAW_LAUNCH  the raw launch command, only for a raw launch
 #   FM_LP_HOME, FM_LP_STATE, FM_LP_DATA, FM_LP_CONFIG  the home's directories
+#   FM_LP_OWNER_PID  the launching fm-spawn's process id (HK1 only); owner of
+#                    any resource reservation this launch writes
 # Exit 0 allows the launch. Every other outcome refuses it: 1 for a policy
 # refusal, 2 for unusable configuration or input. The hook blocks treat any
 # non-zero exit (including a missing or unexecutable script) as a refusal.
@@ -34,11 +36,10 @@
 #   resource      config/fork-resources.json:
 #                 {"<name>": {"capacity": N, "match": {"model_prefix": "..."}}}
 #                 A launch whose model matches refuses while N other tasks on a
-#                 matching model hold a place. Upstream's own
-#                 fm_backend_agent_state decides: only a holder proven dead or
-#                 missing frees its place; alive, ambiguous, unreadable, and
-#                 unverified all hold one (fail closed). Secondmates are not
-#                 exempt.
+#                 matching model hold a place, across every local home; it is
+#                 otherwise admitted and reserves its place under a machine-wide
+#                 lock. See "resource policy" below for holders, reservations,
+#                 and expiry. Secondmates are not exempt.
 # Unknown policy names, unreadable or malformed files, and an empty policy list
 # all refuse.
 set -u
@@ -71,7 +72,9 @@ EOF
 enabled() { printf '%s\n' "$POLICIES" | grep -Fxq "$1"; }
 
 # Test seam: record the received contract values, one file per phase.
-if [ -n "${FM_FORK_POLICY_TRACE:-}" ]; then env | grep '^FM_LP_' | sort > "$FM_FORK_POLICY_TRACE.$FM_LP_PHASE"; fi
+if [ -n "${FM_FORK_POLICY_TRACE:-}" ]; then
+  { env | grep '^FM_LP_'; printf 'POLICY_PARENT_PID=%s\n' "$PPID"; } | sort > "$FM_FORK_POLICY_TRACE.$FM_LP_PHASE"
+fi
 
 # The model the launch will run: an explicit --model, else the raw launch's own.
 effective_model() {
@@ -133,65 +136,229 @@ policy_project_pin() {
     || refuse "project $name is pinned to model $want_model, not '${MODEL:-default}'"
 }
 
-# Resource holders are classified with upstream's recovery-grade
-# fm_backend_agent_state (bin/fm-backend.sh), not its three-state alive view:
-# only `dead` and `missing` - an endpoint confidently without an agent, or
-# authoritatively gone - free a place. `alive`, `ambiguous`, `unreadable`,
-# `unverified`, and any unexpected answer all hold one, so a liveness read that
-# fails or cannot attribute the process refuses the launch instead of risking a
-# second run on a physically single-slot machine. A holder record that cannot
-# be read also holds a place.
+# --- resource policy ---------------------------------------------------------
+#
+# Holders. A task holds a place on a resource when its model matches and either
+#   - its endpoint does not read as dead or missing through upstream's
+#     recovery-grade fm_backend_agent_state (alive, ambiguous, unreadable,
+#     unverified, any other answer, or an unreadable record all hold), or
+#   - it has a valid reservation (below).
+# Records are counted across every local Firstmate home on this machine
+# (upstream fm_local_firstmate_state_dirs), so secondmate homes count too.
+#
+# Reservations close the window between this check and the moment the new
+# task's record and agent exist. Under a machine-wide lock per resource
+# (<root home>/state/.fork-resource-<name>.lock, upstream's lock primitive),
+# the policy counts holders and, when a place is free, atomically writes
+# <root home>/state/fork-reservations/<name>/<task>.<home hash>.json naming the
+# launching fm-spawn (FM_LP_OWNER_PID from HK1) by PID and process start time.
+# A reservation stops counting only when its owner is confirmed gone - no such
+# process, or the PID now belongs to a process with a different start time
+# (PID reuse) - AND the startup grace has passed; it is then deleted under the
+# lock. An owner that cannot be confirmed either way keeps the reservation
+# valid. Age alone never frees a place: a reservation older than the stale
+# threshold is only named in refusals for reconciliation. Upstream publishes a
+# task's record before its agent is launched, so any running agent is also
+# counted through its record whatever happens to its reservation.
+FORK_RESOURCE_GRACE=120          # seconds a reservation outlives a confirmed-gone owner
+FORK_RESOURCE_STALE_NOTICE=1800  # reservations older than this are reported as stale
+FORK_RESOURCE_LOCK_WAIT=10       # seconds to wait for a resource's admission lock
+
+RESOURCE_LOCK_HELD=
+RESOURCE_WRITTEN=()
+
+# shellcheck disable=SC2329 # invoked through the EXIT trap
+resource_exit() {
+  local rc=$? f
+  if [ -n "$RESOURCE_LOCK_HELD" ]; then
+    fm_lock_release "$RESOURCE_LOCK_HELD" || true
+    RESOURCE_LOCK_HELD=
+  fi
+  # A refused launch must not leave its own reservations holding places.
+  if [ "$rc" -ne 0 ]; then
+    for f in "${RESOURCE_WRITTEN[@]}"; do
+      rm -f -- "$f"
+    done
+  fi
+  exit "$rc"
+}
+
+canonical_dir() { (CDPATH='' cd -- "$1" 2>/dev/null && pwd -P); }
+
+process_start() {  # <pid>: the process start time as ps reports it (trimmed)
+  local out
+  out=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null) || return $?
+  out=${out#"${out%%[![:space:]]*}"}
+  printf '%s' "${out%"${out##*[![:space:]]}"}"
+}
+
+owner_state() {  # <pid> <recorded start> -> alive | gone | uncertain
+  local pid=$1 want=$2 now rc
+  case "$pid" in ''|*[!0-9]*|0) printf uncertain; return 0 ;; esac
+  now=$(process_start "$pid"); rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$now" ]; then
+    if [ "$now" = "$want" ]; then printf alive; else printf gone; fi
+  elif [ "$rc" -eq 1 ] && [ -z "$now" ]; then
+    printf gone
+  else
+    printf uncertain
+  fi
+}
+
+# resource_admit <name> <capacity> <prefix>: count holders under the resource
+# lock, refuse at capacity, otherwise reserve (except in relaunch-preflight).
+resource_admit() {
+  local name=$1 capacity=$2 prefix=$3 lock dir now held=0 live=0 unconfirmed='' starting='' stale=''
+  local s meta id key model state f row task home pid start created age ostate file tmp
+  local -A counted=()
+  lock="$ROOT_HOME/state/.fork-resource-$name.lock"
+  dir="$ROOT_HOME/state/fork-reservations/$name"
+  fm_lock_acquire_wait_max "$lock" "$FORK_RESOURCE_LOCK_WAIT" \
+    || refuse "machine resource $name is busy: another launch held its admission lock for ${FORK_RESOURCE_LOCK_WAIT}s; dispatch again shortly"
+  RESOURCE_LOCK_HELD=$lock
+  mkdir -p -- "$dir" 2>/dev/null && [ -d "$dir" ] && [ -w "$dir" ] && [ -r "$dir" ] \
+    || unusable "reservation directory $dir cannot be written"
+
+  for s in "${LOCAL_STATES[@]}"; do
+    for meta in "$s"/*.meta; do
+      [ -e "$meta" ] || [ -L "$meta" ] || continue
+      id=$(basename "$meta" .meta)
+      [ "$s" = "$OWN_STATE" ] && [ "$id" = "$FM_LP_TASK" ] && continue
+      key="$s|$id"
+      if ! [ -f "$meta" ] || ! [ -r "$meta" ]; then
+        held=$((held + 1)); counted[$key]=1
+        unconfirmed="$unconfirmed $id(record unreadable)"
+        continue
+      fi
+      model=$(fm_meta_get "$meta" model)
+      case "$model" in "$prefix"*) ;; *) continue ;; esac
+      state=$(fm_backend_agent_state "$(fm_backend_of_meta "$meta")" "$(fm_backend_target_of_meta "$meta")" 2>/dev/null) || state=unreadable
+      case "$state" in
+        dead|missing) ;;
+        alive) held=$((held + 1)); live=$((live + 1)); counted[$key]=1 ;;
+        *) held=$((held + 1)); counted[$key]=1; unconfirmed="$unconfirmed $id(${state:-no answer})" ;;
+      esac
+    done
+  done
+
+  now=$(date +%s)
+  for f in "$dir"/*.json; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    [ -f "$f" ] && [ -r "$f" ] || unusable "reservation $f cannot be read"
+    row=$(jq -er 'select(type == "object" and .v == 1 and (.task | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
+        and (.home_state | type == "string" and startswith("/")) and (.owner_pid | type == "number" and . > 0 and . == floor)
+        and (.owner_start | type == "string" and length > 0) and (.created | type == "number" and . > 0 and . == floor))
+      | [.task, .home_state, (.owner_pid | tostring), .owner_start, (.created | tostring)] | @tsv' "$f" 2>/dev/null) \
+      || unusable "reservation $f is malformed"
+    IFS=$'\t' read -r task home pid start created <<<"$row"
+    [ "$home" = "$OWN_STATE" ] && [ "$task" = "$FM_LP_TASK" ] && continue
+    age=$((now - created))
+    ostate=$(owner_state "$pid" "$start")
+    if [ "$ostate" = gone ] && [ "$age" -ge "$FORK_RESOURCE_GRACE" ]; then
+      rm -f -- "$f" || unusable "expired reservation $f could not be removed"
+      continue
+    fi
+    key="$home|$task"
+    [ -z "${counted[$key]:-}" ] || continue
+    held=$((held + 1)); counted[$key]=1
+    case "$ostate" in
+      alive) starting="$starting $task(launch in progress)" ;;
+      gone) starting="$starting $task(starting, ${age}s of ${FORK_RESOURCE_GRACE}s grace)" ;;
+      *) starting="$starting $task(launch owner unconfirmed)" ;;
+    esac
+    [ "$age" -lt "$FORK_RESOURCE_STALE_NOTICE" ] || stale="$stale $task(reserved ${age}s ago)"
+  done
+
+  if [ "$held" -ge "$capacity" ]; then
+    local detail=
+    [ -z "$unconfirmed" ] || detail="$detail; liveness could not be confirmed for:$unconfirmed - a holder counts until its agent is proven gone (reconcile or clean up that task first)"
+    [ -z "$starting" ] || detail="$detail; reserved by launches not yet confirmed running:$starting"
+    [ -z "$stale" ] || detail="$detail; STALE reservations need reconciliation (age never frees a place):$stale"
+    if [ -z "$detail" ]; then
+      refuse "machine resource $name is at capacity ($held of $capacity live) for model $MODEL; dispatch again after a holder finishes"
+    fi
+    refuse "machine resource $name is at capacity ($held of $capacity held) for model $MODEL$detail"
+  fi
+
+  if [ "$FM_LP_PHASE" != relaunch-preflight ]; then
+    file="$dir/$FM_LP_TASK.$OWN_HASH.json"
+    tmp="$dir/.$FM_LP_TASK.$OWN_HASH.$$.tmp"
+    if ! jq -n --arg task "$FM_LP_TASK" --arg home "$OWN_STATE" --arg resource "$name" --arg model "$MODEL" \
+        --arg phase "$FM_LP_PHASE" --arg start "$OWNER_START" --argjson pid "$FM_LP_OWNER_PID" --argjson created "$now" \
+        '{v: 1, task: $task, home_state: $home, resource: $resource, model: $model, phase: $phase,
+          owner_pid: $pid, owner_start: $start, created: $created}' > "$tmp" 2>/dev/null ||
+      ! mv -f -- "$tmp" "$file" 2>/dev/null; then
+      rm -f -- "$tmp"
+      unusable "reservation for resource $name could not be written"
+    fi
+    RESOURCE_WRITTEN+=("$file")
+  fi
+  fm_lock_release "$lock" || true
+  RESOURCE_LOCK_HELD=
+}
+
 policy_resource() {
-  local res="$CONFIG/fork-resources.json" rows name capacity prefix held unverified meta holder holder_model state
+  local res="$CONFIG/fork-resources.json" rows matching='' name capacity prefix s c known existing fn
   [ -e "$res" ] || return 0
-  json_ok "$res" 'type == "object" and ([.[] | type == "object" and (.capacity | type == "number" and . >= 1 and . == floor) and ((.match.model_prefix // "") | type == "string" and length > 0)] | all)' \
+  json_ok "$res" 'type == "object" and (keys | all(test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))) and ([.[] | type == "object" and (.capacity | type == "number" and . >= 1 and . == floor) and ((.match.model_prefix // "") | type == "string" and length > 0)] | all)' \
     || unusable "config/fork-resources.json is malformed"
   if [ -z "$MODEL" ] && [ -n "${FM_LP_RAW_LAUNCH:-}" ]; then
     refuse "a raw launch command must name its --model so machine resource limits can be checked"
   fi
   [ -n "$MODEL" ] || return 0
   rows=$(jq -r 'to_entries[] | [.key, (.value.capacity | tostring), .value.match.model_prefix] | @tsv' "$res")
-  [ -d "$FM_LP_STATE" ] && [ -r "$FM_LP_STATE" ] && [ -x "$FM_LP_STATE" ] \
-    || unusable "the home's state directory cannot be read to count resource holders"
-  # shellcheck source=bin/fm-backend.sh
-  . "$FORK_ROOT/bin/fm-backend.sh" || unusable "upstream bin/fm-backend.sh could not be loaded"
-  for fn in fm_meta_get fm_backend_of_meta fm_backend_target_of_meta fm_backend_agent_state; do
-    declare -F "$fn" >/dev/null || unusable "upstream liveness helper $fn is missing from bin/fm-backend.sh"
-  done
   while IFS=$'\t' read -r name capacity prefix; do
     [ -n "$name" ] || continue
-    case "$MODEL" in "$prefix"*) ;; *) continue ;; esac
-    held=0
-    unverified=
-    for meta in "$FM_LP_STATE"/*.meta; do
-      [ -e "$meta" ] || continue
-      holder=$(basename "$meta" .meta)
-      [ "$holder" != "$FM_LP_TASK" ] || continue
-      if ! [ -f "$meta" ] || ! [ -r "$meta" ]; then
-        held=$((held + 1))
-        unverified="$unverified $holder(record unreadable)"
-        continue
-      fi
-      holder_model=$(fm_meta_get "$meta" model)
-      case "$holder_model" in "$prefix"*) ;; *) continue ;; esac
-      state=$(fm_backend_agent_state "$(fm_backend_of_meta "$meta")" "$(fm_backend_target_of_meta "$meta")" 2>/dev/null) || state=unreadable
-      case "$state" in
-        dead|missing) ;;
-        alive) held=$((held + 1)) ;;
-        *)
-          held=$((held + 1))
-          unverified="$unverified $holder(${state:-no answer})"
-          ;;
-      esac
-    done
-    if [ "$held" -ge "$capacity" ]; then
-      if [ -n "$unverified" ]; then
-        refuse "machine resource $name is at capacity ($held of $capacity held) for model $MODEL; liveness could not be confirmed for:$unverified - a holder counts until its agent is proven gone (reconcile or clean up that task first)"
-      fi
-      refuse "machine resource $name is at capacity ($held of $capacity live) for model $MODEL; dispatch again after a holder finishes"
-    fi
+    case "$MODEL" in "$prefix"*) matching="$matching$name"$'\t'"$capacity"$'\t'"$prefix"$'\n' ;; esac
   done <<EOF
 $rows
+EOF
+  [ -n "$matching" ] || return 0
+
+  if [ "$FM_LP_PHASE" != relaunch-preflight ]; then
+    case "${FM_LP_OWNER_PID:-}" in
+      ''|*[!0-9]*|0) unusable "hook contract value FM_LP_OWNER_PID (the launching fm-spawn) is missing or not a process id" ;;
+    esac
+    OWNER_START=$(process_start "$FM_LP_OWNER_PID") && [ -n "$OWNER_START" ] \
+      || unusable "the launching process $FM_LP_OWNER_PID cannot be identified (no start time)"
+  fi
+
+  [ -d "$FM_LP_STATE" ] && [ -r "$FM_LP_STATE" ] && [ -x "$FM_LP_STATE" ] \
+    || unusable "the home's state directory cannot be read to count resource holders"
+  export FM_HOME=$FM_LP_HOME STATE=$FM_LP_STATE
+  # shellcheck source=bin/fm-wake-lib.sh
+  . "$FORK_ROOT/bin/fm-wake-lib.sh" || unusable "upstream bin/fm-wake-lib.sh could not be loaded"
+  # shellcheck source=bin/fm-secondmate-registry-lib.sh
+  . "$FORK_ROOT/bin/fm-secondmate-registry-lib.sh" || unusable "upstream bin/fm-secondmate-registry-lib.sh could not be loaded"
+  # shellcheck source=bin/fm-backend.sh
+  . "$FORK_ROOT/bin/fm-backend.sh" || unusable "upstream bin/fm-backend.sh could not be loaded"
+  for fn in fm_lock_acquire_wait_max fm_lock_release fm_firstmate_root_home fm_local_firstmate_state_dirs \
+    fm_meta_get fm_backend_of_meta fm_backend_target_of_meta fm_backend_agent_state; do
+    declare -F "$fn" >/dev/null || unusable "upstream helper $fn is missing"
+  done
+
+  OWN_STATE=$(canonical_dir "$FM_LP_STATE") || unusable "the home's state directory cannot be resolved"
+  OWN_HASH=$(printf '%s' "$OWN_STATE" | cksum | cut -d' ' -f1)
+  ROOT_HOME=$(fm_firstmate_root_home "$FM_LP_HOME") \
+    || unusable "cannot resolve the root Firstmate home that anchors machine resource locks"
+  [ -d "$ROOT_HOME/state" ] && [ -w "$ROOT_HOME/state" ] \
+    || unusable "the root Firstmate home's state directory $ROOT_HOME/state cannot be written"
+  fm_local_firstmate_state_dirs "$OWN_STATE" \
+    || unusable "cannot enumerate this machine's Firstmate homes to count resource holders (${FM_LOCAL_FIRSTMATE_ERROR:-unknown error})"
+  LOCAL_STATES=()
+  for s in "${FM_LOCAL_FIRSTMATE_STATES[@]}"; do
+    c=$(canonical_dir "$s") && [ -r "$c" ] && [ -x "$c" ] || unusable "local Firstmate state directory $s cannot be read"
+    known=0
+    for existing in "${LOCAL_STATES[@]}"; do [ "$existing" != "$c" ] || known=1; done
+    [ "$known" = 1 ] || LOCAL_STATES+=("$c")
+  done
+
+  trap resource_exit EXIT
+  while IFS=$'\t' read -r name capacity prefix; do
+    [ -n "$name" ] || continue
+    resource_admit "$name" "$capacity" "$prefix"
+  done <<EOF
+$matching
 EOF
 }
 

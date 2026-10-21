@@ -85,4 +85,90 @@ test_exited_holder_allows_real_spawn() {
   pass "e2e: a real spawn proceeds once the previous holder's agent is proven gone"
 }
 
+# --- reservations through the real fm-spawn ----------------------------------
+
+# second_project <name>: another project and worktree in the same case home;
+# sets PROJ2 WT2.
+second_project() {
+  PROJ2="$CASE/project-$1"
+  WT2="$CASE/wt-$1"
+  fm_git_worktree "$PROJ2" "$WT2" "wt2-$1"
+  fm_test_spawn_brief "$HOME_DIR" "$2"
+}
+
+spawn_in() {  # <id> <project> <worktree>
+  FM_FAKE_LAUNCH_LOG="$CASE/launch-$1.log" fm_test_run_spawn "$HOME_DIR" "$3" "$FAKEBIN" \
+    "$1" "$2" --mode no-mistakes --yolo off --model "$MODEL_A"
+}
+
+# move_endpoint_to_holders <id> <comm>: model <id>'s recorded endpoint as a
+# window in the liveness fixture's holder session whose foreground is <comm>
+# (pi = agent running, zsh = only a shell, agent not started). Upstream's spawn
+# stub keeps serving the spawn's own session untouched.
+move_endpoint_to_holders() {
+  local meta="$HOME_DIR/state/$1.meta"
+  sed "s/^window=.*/window=$FORK_HOLDER_SESSION:fm-$1/" "$meta" > "$meta.new" && mv "$meta.new" "$meta"
+  printf '%s\n' "fm-$1" > "$FAKE/windows"
+  printf '%s\n' "$2" > "$FAKE/comm.fm-$1"
+  printf '%s\n' 43001 > "$FAKE/pid.fm-$1"
+}
+
+reservation_of() {  # <id> -> reservation file for <id>
+  find "$(cd "$HOME_DIR/state" && pwd -P)/fork-reservations/strata" -name "$1.*.json" 2>/dev/null | head -1
+}
+
+test_second_launch_refused_while_first_is_starting() {
+  local out rc f
+  new_e2e_case starting t-first
+  second_project starting t-second
+  out=$(spawn_on_resource t-first)
+  [ -f "$HOME_DIR/state/t-first.meta" ] || fail "the first launch must succeed: $out"
+  f=$(reservation_of t-first)
+  [ -n "$f" ] || fail "the first launch must leave a reservation"
+  if LC_ALL=C ps -p "$(jq -r .owner_pid "$f")" >/dev/null 2>&1; then
+    fail "the reservation owner must be the fm-spawn that has now exited"
+  fi
+  # The first endpoint exists but its agent has not started: only a shell runs
+  # there, so its record reads dead and only the reservation holds the place.
+  move_endpoint_to_holders t-first zsh
+  out=$(spawn_in t-second "$PROJ2" "$WT2"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a second launch while the first agent is still starting must be refused: $out"
+  assert_absent "$HOME_DIR/state/t-second.meta" "the refused second launch wrote a task record"
+  assert_contains "$out" "t-first(starting" "the refusal must name the first launch as still starting"
+  pass "e2e: a second real launch is refused while the first launch's agent is still starting (reservation grace)"
+}
+
+test_second_launch_refused_while_first_is_running() {
+  local out rc f
+  new_e2e_case running t-first
+  second_project running t-second
+  out=$(spawn_on_resource t-first)
+  [ -f "$HOME_DIR/state/t-first.meta" ] || fail "the first launch must succeed: $out"
+  f=$(reservation_of t-first)
+  jq '.created -= 3600' "$f" > "$f.new" && mv "$f.new" "$f"
+  # The first agent is now running in its recorded endpoint.
+  move_endpoint_to_holders t-first pi
+  out=$(spawn_in t-second "$PROJ2" "$WT2"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a second launch while the first agent runs must be refused even after its reservation expired: $out"
+  assert_contains "$out" "(1 of 1 live)" "the running first task must hold the place through its record"
+  printf 'zsh\n' > "$FAKE/comm.fm-t-first"
+  out=$(spawn_in t-second "$PROJ2" "$WT2")
+  [ -f "$HOME_DIR/state/t-second.meta" ] || fail "once the first agent is proven gone the second launch must proceed: $out"
+  pass "e2e: a second real launch is refused while the first runs, and admitted once it is proven gone"
+}
+
+test_simultaneous_real_launches_admit_one() {
+  local admitted=0 id
+  new_e2e_case simultaneous t-a
+  second_project simultaneous t-b
+  spawn_on_resource t-a > "$CASE/a.out" 2>&1 &
+  local pa=$!
+  spawn_in t-b "$PROJ2" "$WT2" > "$CASE/b.out" 2>&1 &
+  local pb=$!
+  wait "$pa"; wait "$pb"
+  for id in t-a t-b; do [ ! -f "$HOME_DIR/state/$id.meta" ] || admitted=$((admitted + 1)); done
+  assert_equals 1 "$admitted" "exactly one of two simultaneous real launches in different projects may start (a: $(tail -1 "$CASE/a.out"); b: $(tail -1 "$CASE/b.out"))"
+  pass "e2e: two simultaneous real launches in different projects on one single-slot resource admit exactly one"
+}
+
 fork_run_tests

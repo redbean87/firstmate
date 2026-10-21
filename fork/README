@@ -49,7 +49,7 @@ unexecutable policy script.
 Hook contract (environment the blocks pass; see the policy script header):
 FM_LP_PHASE, FM_LP_TASK, FM_LP_KIND, FM_LP_PROJECT, FM_LP_HARNESS, FM_LP_MODEL,
 FM_LP_EFFORT, FM_LP_RAW_LAUNCH, FM_LP_HOME, FM_LP_STATE, FM_LP_DATA,
-FM_LP_CONFIG. The blocks read these upstream names: in fm-spawn.sh ID KIND
+FM_LP_CONFIG, and from HK1 only FM_LP_OWNER_PID ($$, the launching fm-spawn). The blocks read these upstream names: in fm-spawn.sh ID KIND
 PROJ_ABS HARNESS MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG
 FM_HOME FM_ROOT; in fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT
 META KIND STATE DATA FM_HOME FM_ROOT, fm_meta_get, die. The resource policy
@@ -82,17 +82,42 @@ A pinned project refuses another harness or model, and any raw launch command.
 
 resource - config/fork-resources.json:
   {"strata": {"capacity": 1, "match": {"model_prefix": "strata-local/"}}}
-A launch whose model matches is refused while <capacity> other tasks on a
-matching model hold a place, across every project; secondmates are not
-exempt. Liveness is upstream's recovery-grade fm_backend_agent_state: only a
-holder proven "dead" (endpoint without an agent) or "missing" (endpoint gone)
-frees its place. "alive", "ambiguous", "unreadable", "unverified", any other
-answer, and an unreadable holder record all hold one - a liveness read that
-fails refuses the launch rather than risk a second run on a single-slot
-machine. This is stricter than the fork's previous single-slot gate, which
-counted only "alive". A stuck holder is cleared by reconciling or cleaning up
-that task, never by the policy guessing. A raw launch is judged by its own
---model and refused if it names none.
+Resource names match ^[A-Za-z0-9][A-Za-z0-9._-]*$. A launch whose model
+matches is refused while <capacity> other tasks on a matching model hold a
+place, across every project and every local Firstmate home on this machine
+(secondmate homes included); secondmates are not exempt. A raw launch is
+judged by its own --model and refused if it names none.
+
+A task holds a place when either:
+  - its record's endpoint does not read "dead" or "missing" through upstream's
+    recovery-grade fm_backend_agent_state ("alive", "ambiguous", "unreadable",
+    "unverified", any other answer, or an unreadable record all hold), or
+  - it has a valid reservation.
+
+Reservations. Admission runs under a machine-wide lock per resource,
+<root home>/state/.fork-resource-<name>.lock, taken with upstream's lock
+primitive (bounded wait of 10s, then refuse). Under it the policy counts
+holders and, when a place is free, atomically writes
+<root home>/state/fork-reservations/<name>/<task>.<home hash>.json naming the
+launching fm-spawn (FM_LP_OWNER_PID from HK1) by PID and process start time.
+The relaunch preflight (HK2) checks without reserving; a relaunch reserves in
+HK1. A refused launch removes any reservation it wrote in that run.
+
+Expiry. A reservation stops counting only when its owner is confirmed gone -
+ps reports no such process, or the PID now has a different start time (PID
+reuse) - AND 120s of startup grace have passed since it was written; it is
+then deleted under the lock. An owner that cannot be confirmed either way keeps
+the reservation. Age alone never frees a place: a reservation older than 30
+minutes is only named in refusals as STALE for reconciliation. Upstream
+publishes a task's record before launching its agent, so a running agent always
+counts through its record, whatever happens to its reservation.
+
+Recovery needs no manual lock removal: a lock whose owner died is reclaimed by
+upstream's stale-owner recovery, and reservations expire as above. A task whose
+liveness stays unreadable or ambiguous, or a reservation whose owner cannot be
+confirmed, keeps holding until that task is reconciled or cleaned up.
+Malformed or unreadable reservations, an unresolvable root home or local home
+registry, or an unwritable reservation directory refuse the launch.
 
 Malformed JSON or schema in any of these files refuses the launch.
 

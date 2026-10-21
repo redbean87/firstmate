@@ -57,6 +57,7 @@ FORK_HOLDER_SESSION=fmholders
 
 # fork_liveness_fakes <fakebin> <fakedir>: install the fake tmux/ps. If
 # <fakebin>/tmux already exists it is kept as tmux.upstream for delegation.
+# <fakedir>/ps-fail.<pid> makes that process's start-time read fail.
 fork_liveness_fakes() {
   local fakebin=$1 fakedir=$2
   mkdir -p "$fakebin" "$fakedir"
@@ -85,9 +86,10 @@ case "$target" in
             *pane_current_command*) cat "$FAKE/comm.$win" 2>/dev/null || echo zsh; exit 0 ;;
           esac
         done
-        exit 0 ;;
+        ;;
     esac
-    exit 0 ;;
+    # Anything but a liveness probe on that session goes to the upstream stub.
+    ;;
 esac
 if [ -x "$0.upstream" ]; then exec "$0.upstream" "$@"; fi
 exit 0
@@ -97,6 +99,8 @@ SH
 FAKE='$fakedir'
 SH
   cat >> "$fakebin/ps" <<'SH'
+# A process whose start-time read must fail (an unconfirmable owner).
+if [ "${1:-} ${2:-}" = "-o lstart=" ] && [ -f "$FAKE/ps-fail.${4:-}" ]; then exit 2; fi
 case "${1:-} ${2:-}" in
   "-t fk-"*)
     win=${2#fk-}
