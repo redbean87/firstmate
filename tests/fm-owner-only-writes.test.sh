@@ -205,7 +205,7 @@ test_watcher_creates_private_state_dir_and_files() {
 # --- 4. watcher cycle-exit ledger ---------------------------------------------
 
 test_cycle_log_created_owner_only_after_real_cycle() {
-  local dir state fakebin armout armpid watcher i old
+  local dir state fakebin armpid watcher i old
   dir=$(make_case cycle-log-owner)
   state="$dir/state"
   fakebin="$dir/fakebin"

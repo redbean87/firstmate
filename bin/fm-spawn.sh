@@ -5384,7 +5384,12 @@ EOF
     MUSE_SESSIONS_ROOT="${MUSE_DATA_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}}/muse/sessions"
     MUSE_BINDING_ID="$$.$RANDOM.$(date +%s)"
     rm -f "$STATE/$ID.muse-session-current"
-    (umask 077
+    # A private umask in this shell rather than a subshell: under `set -e` a
+    # subshell would turn the while-loop's aggregate status (1 when the last
+    # read body test is false) into an errexit, while the bare group it wraps
+    # does not, so wrapping here must not change that.
+    old_umask=$(umask)
+    umask 077
     {
       printf 'sessions_root=%s\n' "$MUSE_SESSIONS_ROOT"
       printf 'workspace_root=%s\n' "$WT"
@@ -5395,7 +5400,7 @@ EOF
 $(fm_busy_muse_matching_logs "$MUSE_SESSIONS_ROOT" "$WT" || true)
 EOF
     } >"$STATE/$ID.muse-session"
-    )
+    umask "$old_umask"
     ;;
   cursor*)
     # Cursor's turn lifecycle is neither a hook nor a launch flag: it writes
