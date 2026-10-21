@@ -163,6 +163,14 @@
 # deleted stops itself instead of running on as an orphan. That check is scoped
 # to this process alone and never signals another watcher.
 set -u
+# Owner-only creation for the watcher process family: this script's whole write
+# surface is $STATE markers/logs and temp files, and the check children it
+# launches inherit this umask, so one line here makes every watcher-created file
+# and directory - .stale/.paused/.count/.hash/.seen markers, beats, lock
+# records, wake rows - private regardless of whichever guard/extension/session
+# armed it. Deliberately process-local: it does not touch the captain's shell or
+# any worktree write.
+umask 077
 
 SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd "${d:-/}" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"

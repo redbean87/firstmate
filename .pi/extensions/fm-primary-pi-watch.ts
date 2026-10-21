@@ -401,7 +401,7 @@ function lockOwnership(): LockOwnership {
 
 function publishGenerationOwner(generation: SessionGeneration, phase: "active" | "handoff"): void {
   if (lockOwnership() === "other") return;
-  mkdirSync(state, { recursive: true });
+  mkdirSync(state, { recursive: true, mode: 0o700 });
   const temporary = `${marker}.tmp-${process.pid}-${generation.id}`;
   writeFileSync(
     temporary,
@@ -478,7 +478,7 @@ function nodeErrorCode(error: unknown): string {
 function appendExtensionLog(detail: string): void {
   if (extensionLogMaxLines <= 0) return;
   try {
-    mkdirSync(state, { recursive: true });
+    mkdirSync(state, { recursive: true, mode: 0o700 });
     const cleaned = detail.replace(/[\r\n\t]+/g, " ").slice(0, 512);
     const line = `${new Date().toISOString()} pid=${process.pid} ${cleaned}`;
     let previous = "";
@@ -542,7 +542,7 @@ function validateReplacementHandoff(value: unknown): PendingActionableClose[] {
 
 function writeReplacementHandoff(pending: PendingActionableClose[]): void {
   replacementHandoff = [...pending];
-  mkdirSync(handoffDir, { recursive: true });
+  mkdirSync(handoffDir, { recursive: true, mode: 0o700 });
   const temporary = `${actionableHandoff}.tmp-${process.pid}-${++nextHandoffId}`;
   const handoff: ReplacementActionableHandoff = { version: 2, pending };
   try {

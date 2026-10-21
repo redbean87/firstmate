@@ -137,6 +137,12 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Owner-only creation: this script's whole write surface is the task's
+# data/<id> directory and the brief file it writes there, so one private umask
+# here makes both born 700/600 regardless of the firstmate session's shell
+# umask. Deliberately script-local: no project, worktree or config write exists
+# here to widen it.
+umask 077
 
 usage() {
   awk '

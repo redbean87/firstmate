@@ -56,7 +56,7 @@ function lockOwnership(): LockOwnership {
 
 function markLoaded(): void {
   if (!existsSync(state) || lockOwnership() === "other") return;
-  writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`);
+  writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`, { mode: 0o600 });
 }
 
 // Pi's session_start reasons are startup | reload | new | resume | fork, and a

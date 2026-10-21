@@ -1346,7 +1346,7 @@ status_open_decisions_incremental() {  # <status-file> [<captured-end-offset>]
 
   if [ "$offset" -lt "$size" ]; then
     chunk_file="$cf.read.$$"
-    _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
+    (umask 077; _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file") 2>/dev/null \
       || { rm -f "$chunk_file"; printf '%s' "$trusted_open"; return 0; }
     chunk_size=$(LC_ALL=C wc -c < "$chunk_file" 2>/dev/null) \
       || { rm -f "$chunk_file"; printf '%s' "$trusted_open"; return 0; }
@@ -1371,12 +1371,15 @@ status_open_decisions_incremental() {  # <status-file> [<captured-end-offset>]
   fi
   if [ "$cursor_dirty" -eq 1 ]; then
     target_cursor="$cf.tmp.$$"
-    {
-      printf 'version=%s\n' "$fold_version"
-      printf 'offset=%s\n' "$offset"
-      printf 'ident=%s\n' "$cur_ident"
-      if [ -n "$open" ]; then printf '%s' "$open"; fi
-    } > "$target_cursor" || return 1
+    (
+      umask 077
+      {
+        printf 'version=%s\n' "$fold_version"
+        printf 'offset=%s\n' "$offset"
+        printf 'ident=%s\n' "$cur_ident"
+        if [ -n "$open" ]; then printf '%s' "$open"; fi
+      } > "$target_cursor"
+    ) || return 1
     mv -f "$target_cursor" "$cf" || return 1
   fi
   printf '%s' "$open"
@@ -1459,7 +1462,7 @@ status_snapshot_latest_event() {  # <status-file> <captured-endpoint> <captured-
   fi
   length=$((endpoint - start))
   scratch="$(_fm_status_span_scratch "$f").latest"
-  _fm_status_read_span "$f" "$start" "$length" > "$scratch" 2>/dev/null \
+  (umask 077; _fm_status_read_span "$f" "$start" "$length" > "$scratch") 2>/dev/null \
     || { rm -f "$scratch"; return 1; }
   if record=$(LC_ALL=C perl -e '
     my ($path, $start, $skip_first) = @ARGV;
@@ -1692,7 +1695,7 @@ status_presentation_marker_report() {
   if raw=$(cat "$marker" 2>/dev/null) && status_presentation_marker_parse "$raw"; then
     classified=$STATUS_PRESENTATION_CLASSIFIED
   fi
-  printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker"
+  (umask 077; printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker")
 }
 
 status_presentation_marker_commit() {
@@ -1702,7 +1705,7 @@ status_presentation_marker_commit() {
   [ -n "$ident" ] && [ "$ident" = "$current" ] || return 1
   reported=$(status_observed_signature "$file" "$endpoint" "$ident") || return 1
   classified="${endpoint}@${ident}"
-  printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker"
+  (umask 077; printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker")
 }
 
 status_retire_presentation_task() {  # <state> <task-id>
@@ -1755,7 +1758,7 @@ EOF
       rc=1
     elif ! data=$(LC_ALL=C command cat "$manifest" 2>/dev/null); then
       rc=1
-    elif ! : > "$tmp"; then
+    elif ! (umask 077; : > "$tmp"); then
       rc=1
     else
       while IFS=$(printf '\t') read -r row_task ident offset backstop extra; do
@@ -1820,7 +1823,7 @@ EOF
 status_commit_presentation_snapshot() {  # <state> <snapshot>
   local state=$1 snapshot=$2 task endpoint ident f cur_ident size tmp backstop acknowledged_task acknowledged_endpoint
   tmp="$state/.status-presentation-cursor.tmp.$$"
-  : > "$tmp" || return 1
+  (umask 077; : > "$tmp") || return 1
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     case "$endpoint" in ''|*[!0-9]*) rm -f "$tmp"; return 1 ;; esac
@@ -1980,7 +1983,7 @@ status_new_lines_since_cursor() {  # <status-file> [<captured-end-offset>]
     size=$actual_size
   fi
   [ "$offset" -lt "$size" ] || return 0
-  _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file" 2>/dev/null \
+  (umask 077; _fm_status_read_span "$f" "$offset" "$((size - offset))" > "$chunk_file") 2>/dev/null \
     || { rm -f "$chunk_file"; return 1; }
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
@@ -2285,7 +2288,7 @@ EOF
     body="${body}${start}"$'\t'"${end}"$'\n'
   fi
   tmp="$path.tmp.$$"
-  printf 'v1\nident=%s\n%s' "$ident" "$body" > "$tmp" || { rm -f "$tmp"; return 1; }
+  (umask 077; printf 'v1\nident=%s\n%s' "$ident" "$body" > "$tmp") || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$path" || { rm -f "$tmp"; return 1; }
 }
 
@@ -2383,7 +2386,7 @@ status_span_first_actionable_record() {  # <status-file> <start-offset> [record-
   fi
   scratch=$(_fm_status_span_scratch "$f") || return 2
   chunk_file="${scratch}.span"
-  _fm_status_read_span "$f" "$start" "$((size - start))" > "$chunk_file" 2>/dev/null \
+  (umask 077; _fm_status_read_span "$f" "$start" "$((size - start))" > "$chunk_file") 2>/dev/null \
     || { rm -f "$chunk_file"; return 2; }
   cur_ident=$(_fm_open_decisions_file_ident "$f") || {
     rm -f "$chunk_file"; return 2;

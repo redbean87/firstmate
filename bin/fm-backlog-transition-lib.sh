@@ -341,9 +341,17 @@ fm_tasks_axi_timeout_expired() {  # <status>
 
 fm_tasks_axi() {
   local bound=${FM_TASKS_AXI_TIMEOUT:-}
+  # Owner-only backlog creation (bin/fm-tasks-axi.sh carries the same umask at
+  # its dispatch): tasks-axi rewrites data/backlog.md under the caller's umask,
+  # so every transition (dispatch/close/retain) must run private or the next
+  # mutation reverts the file to 644. Both paths exec (replacing this shell or
+  # the caller's subshell), and every current call site already runs inside
+  # `(...)`/`$(...)`, so the private umask cannot leak into a caller.
   if [ -z "$bound" ]; then
+    umask 077
     exec tasks-axi "$@"
   fi
+  umask 077
   fm_exec_timed "$bound" "$bound" tasks-axi "$@"
 }
 

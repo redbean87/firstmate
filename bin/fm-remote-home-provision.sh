@@ -65,7 +65,7 @@ release_provision_lock() {
 restore_owned_file() { # <relative-path>
   local rel=$1 dest="$FM_HOME/$1" backup="$TMP/before/$1"
   if [ -f "$backup.present" ]; then
-    mkdir -p "$(dirname "$dest")" || return 1
+    (umask 077; mkdir -p "$(dirname "$dest")") || return 1
     cp -p -- "$backup" "$dest.tmp.rollback.$$" || return 1
     mv -f -- "$dest.tmp.rollback.$$" "$dest"
   else
@@ -206,14 +206,27 @@ for operational_dir in data state config projects; do
     [ -d "$operational_path" ] && [ ! -L "$operational_path" ] \
       || die "remote home has unsafe operational directory: $operational_dir"
   else
-    mkdir "$operational_path" || die "cannot create remote operational directory: $operational_dir"
+    case "$operational_dir" in
+    projects)
+      # projects/ is deliberately outside the owner-only convention and keeps
+      # the caller's umask-derived mode, holding ordinary project clones rather
+      # than Firstmate-managed records.
+      mkdir "$operational_path" || die "cannot create remote operational directory: $operational_dir"
+      ;;
+    *)
+      # data/state/config of a fresh remote home must be owner-only at birth,
+      # matching this home's 700 boundary (fm-home-seed.sh carries the same
+      # convention for local homes).
+      (umask 077; mkdir "$operational_path") || die "cannot create remote operational directory: $operational_dir"
+      ;;
+    esac
   fi
 done
 if [ -e "$FM_HOME/data/backlog.md" ] || [ -L "$FM_HOME/data/backlog.md" ]; then
   [ -f "$FM_HOME/data/backlog.md" ] && [ ! -L "$FM_HOME/data/backlog.md" ] \
     || die "remote backlog is not a safe regular file"
 else
-  printf '## In flight\n\n## Queued\n\n## Done\n' > "$FM_HOME/data/backlog.md"
+  (umask 077; printf '## In flight\n\n## Queued\n\n## Done\n' > "$FM_HOME/data/backlog.md")
   CREATED_BACKLOG=1
 fi
 
@@ -267,6 +280,7 @@ cp "$TMP/charter" "$FM_HOME/data/charter.md.tmp.$$"
 chmod 600 "$FM_HOME/data/charter.md.tmp.$$"
 mv -f -- "$FM_HOME/data/charter.md.tmp.$$" "$FM_HOME/data/charter.md"
 cp "$PROJECT_REG" "$FM_HOME/data/projects.md.tmp.$$"
+chmod 600 "$FM_HOME/data/projects.md.tmp.$$"
 mv -f -- "$FM_HOME/data/projects.md.tmp.$$" "$FM_HOME/data/projects.md"
 {
   printf 'schema=fm-secondmate-parent.v1\n'

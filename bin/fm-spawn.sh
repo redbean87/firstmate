@@ -3050,14 +3050,14 @@ claude_add_dirs_flag() {  # <kind> <state-dir> <data-dir> <code-root> <task-id>
   state_real=$(cd "$state_dir" && pwd -P) || return 1
   case "$kind" in
   secondmate)
-    mkdir -p "$state_real/$id.inbox/handled" || return 1
+    (umask 077; mkdir -p "$state_real/$id.inbox/handled") || return 1
     dirs=("$state_real/$id.inbox")
     ;;
   *)
     data_real=$(cd "$data_dir" && pwd -P) || return 1
     root_real=$(cd "$code_root" && pwd -P) || return 1
     [ -d "$root_real/.agents/skills" ] || return 1
-    mkdir -p "$state_real/operational-inbox" "$state_real/$id.inbox/handled" "$data_real/$id" || return 1
+    (umask 077; mkdir -p "$state_real/operational-inbox" "$state_real/$id.inbox/handled" "$data_real/$id") || return 1
     dirs=("$state_real/operational-inbox" "$state_real/$id.inbox" "$data_real/$id" "$root_real/.agents/skills")
     ;;
   esac
@@ -4917,6 +4917,23 @@ mkdir -p "$TASK_TMP/gotmp"
 mkdir -p "$STATE"
 STATE_REAL=$(cd "$STATE" && pwd -P)
 TURNEND="$STATE_REAL/$ID.turn-ended"
+# Owner-only status record: pre-create the append-only event log under a private
+# umask. Appends never change an existing file's mode, so creation is the only
+# lever - whoever appends first today (worker echo under the tmux server's umask,
+# a hook, this script's failure paths) decides the mode, and pre-creation makes
+# every later append from any process preserve 600. Idempotent on relaunch.
+# A fresh record is also adopted through fm_wake_status_mark_current so the
+# watcher's status-signal scan does not read spawn-time creation itself as an
+# unseen status change: a fresh spawn must publish no wake rows (pinned by
+# tests/fm-busy-adapter-wiring.test.sh and tests/fm-wake-queue.test.sh), and the
+# worker's first real line falls outside the marked snapshot and signals
+# normally. A relaunch keeps the existing file and markers untouched so no
+# unhandled pre-relaunch line is masked.
+if [ ! -e "$STATE/$ID.status" ]; then
+  (umask 077; : >> "$STATE/$ID.status")
+  fm_wake_status_mark_current "$STATE" "$STATE/$ID.status" 2>/dev/null \
+    || echo "warning: could not mark the fresh status record as seen; the watcher may publish one status signal for $ID" >&2
+fi
 exclude_path() {
   local rel=$1 EXCL
   # git rev-parse --git-path is relative to the repository, not to this
@@ -5074,7 +5091,7 @@ BUSY_GEN=
       if [ "$KEEP_AI_TRAILERS" != 1 ]; then
         session_keys='"feedbackDrafts":"off","attribution":{"commit":"","pr":"","sessionUrl":false},'
       fi
-      printf '{%s%s}\n' "$session_keys" "$hooks_json" >"$STATE_REAL/$ID.claude-settings.json"
+      (umask 077; printf '{%s%s}\n' "$session_keys" "$hooks_json" >"$STATE_REAL/$ID.claude-settings.json")
     else
       mkdir -p "$WT/.claude"
       printf '{%s}\n' "$hooks_json" >"$WT/.claude/settings.local.json"
@@ -5115,9 +5132,12 @@ BUSY_GEN=
       g_before=$(json_escape "$busy_cmd_prefix busy $busy_suffix --event before-agent >/dev/null 2>&1 || true; printf '{}'")
       g_after=$(json_escape "touch $(shell_quote "$TURNEND"); $busy_cmd_prefix idle $busy_suffix --event after-agent >/dev/null 2>&1 || true; printf '{}'")
       g_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end >/dev/null 2>&1 || true; printf '{}'")
-      cat >"$STATE_REAL/$ID.gemini-settings.json" <<EOF
+      (
+        umask 077
+        cat >"$STATE_REAL/$ID.gemini-settings.json" <<EOF
 {"hooks":{"BeforeAgent":[{"hooks":[{"type":"command","command":"$g_before"}]}],"AfterAgent":[{"hooks":[{"type":"command","command":"$g_after"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$g_sessionend"}]}]}}
 EOF
+      )
     fi
     ;;
   opencode*)
@@ -5180,7 +5200,9 @@ EOF
     # Written OUTSIDE the worktree: pi's project-trust gate fires on any extension
     # loaded from inside the project (verified live), but an explicit -e path
     # elsewhere loads without a dialog. Lives in state/, cleaned by teardown.
-    cat >"$STATE/$ID.pi-ext.ts" <<EOF
+    (
+      umask 077
+      cat >"$STATE/$ID.pi-ext.ts" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
 // Semantic state: "agent_start" -> busy when a low-level agent run begins;
@@ -5239,13 +5261,16 @@ export default function (pi: any) {
   });
 }
 EOF
+    )
     ;;
   omp)
     # Written OUTSIDE the worktree like Pi's, but for a different reason: omp
     # has no trust gate, yet its cwd-only extension auto-discovery would load a
     # worktree-resident copy a SECOND time next to the explicit -e (verified,
     # omp 18.1.11). Lives in state/, cleaned by teardown.
-    cat >"$STATE/$ID.omp-ext.ts" <<EOF
+    (
+      umask 077
+      cat >"$STATE/$ID.omp-ext.ts" <<EOF
 // Firstmate semantic busy-state events + turn-end notification for omp (Oh My
 // Pi); written by fm-spawn under the contract owned by bin/fm-busy-lib.sh.
 // Semantic state: "agent_start" -> busy when a low-level agent run begins;
@@ -5277,6 +5302,7 @@ export default function (pi: any) {
   pi.on("turn_end", () => { if (notifyTurnEnd) execFile("touch", ["$TURNEND"]); });
 }
 EOF
+    )
     ;;
   codex*)
     # Semantic busy-state source negotiation (bin/fm-busy-lib.sh owns the
@@ -5314,7 +5340,7 @@ EOF
     auth_file=$(mktemp "$GROK_AUTH_DIR/fm.XXXXXXXXXXXX")
     umask "$old_umask"
     printf '%s\n' "$TURNEND" >"$auth_file"
-    printf '%s\n' "${auth_file##*/}" >"$STATE/$ID.grok-turnend-token"
+    (umask 077; printf '%s\n' "${auth_file##*/}" >"$STATE/$ID.grok-turnend-token")
     sq_grok_auth_dir=$(shell_quote "$GROK_AUTH_DIR")
     cat >"$GROK_HOOKS_DIR/fm-turn-end.sh" <<EOF
 #!/usr/bin/env bash
@@ -5358,6 +5384,12 @@ EOF
     MUSE_SESSIONS_ROOT="${MUSE_DATA_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}}/muse/sessions"
     MUSE_BINDING_ID="$$.$RANDOM.$(date +%s)"
     rm -f "$STATE/$ID.muse-session-current"
+    # A private umask in this shell rather than a subshell: under `set -e` a
+    # subshell would turn the while-loop's aggregate status (1 when the last
+    # read body test is false) into an errexit, while the bare group it wraps
+    # does not, so wrapping here must not change that.
+    old_umask=$(umask)
+    umask 077
     {
       printf 'sessions_root=%s\n' "$MUSE_SESSIONS_ROOT"
       printf 'workspace_root=%s\n' "$WT"
@@ -5368,6 +5400,7 @@ EOF
 $(fm_busy_muse_matching_logs "$MUSE_SESSIONS_ROOT" "$WT" || true)
 EOF
     } >"$STATE/$ID.muse-session"
+    umask "$old_umask"
     ;;
   cursor*)
     # Cursor's turn lifecycle is neither a hook nor a launch flag: it writes
@@ -5381,6 +5414,7 @@ EOF
     # conversation instead of its predecessor's. The classifier then accepts
     # only one remaining conversation and never guesses between incarnations.
     CURSOR_PROJECTS_ROOT="${CURSOR_PROJECTS_ROOT_OVERRIDE:-$HOME/.cursor/projects}"
+    (umask 077
     {
       printf 'projects_root=%s\n' "$CURSOR_PROJECTS_ROOT"
       printf 'workspace_root=%s\n' "$WT"
@@ -5391,6 +5425,7 @@ EOF
         done
       fi
     } >"$STATE/$ID.cursor-session"
+    )
     ;;
   kimi*)
     # Parent turn-end token only. Kimi is not armed, and a secondmate must
@@ -5406,7 +5441,7 @@ EOF
     auth_file=$(mktemp "$KIMI_AUTH_DIR/fm.XXXXXXXXXXXX")
     umask "$old_umask"
     printf '%s\n' "$TURNEND" >"$auth_file"
-    printf '%s\n' "${auth_file##*/}" >"$STATE/$ID.kimi-turnend-token"
+    (umask 077; printf '%s\n' "${auth_file##*/}" >"$STATE/$ID.kimi-turnend-token")
     printf 'token=%s\n' "${auth_file##*/}" >"$WT/.fm-kimi-turnend"
     exclude_path '.fm-kimi-turnend'
     fi
@@ -5499,6 +5534,7 @@ preserve_relaunch_meta() {
     !($1 in owned)
   ' "$RELAUNCH_META"
 }
+(umask 077
 {
   echo "window=$META_WINDOW"
   echo "endpoint_task_id=$ID"
@@ -5556,7 +5592,7 @@ preserve_relaunch_meta() {
   if [ "$SPAWN_CONTROL_PARENT" = 1 ] && [ -n "${FM_CONTROL_RELAUNCH_TX:-}" ]; then
     echo "control_relaunch_tx=$FM_CONTROL_RELAUNCH_TX"
   fi
-} >"$SPAWN_META_PATH" || {
+} >"$SPAWN_META_PATH") || {
   echo "error: task record for $ID could not be prepared at $SPAWN_META_PATH" >&2
   exit 1
 }

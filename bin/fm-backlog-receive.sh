@@ -80,7 +80,7 @@ remove_dead_stale_lock() { # <lock-path>
 
 run_move() { # <keys...>
   # Pin the markdown backend so a .tasks.toml in the caller's directory cannot redirect the move.
-  tasks-axi mv "$@" --file "$DELIVERED" --to "$DEST" --backend markdown
+  (umask 077; tasks-axi mv "$@" --file "$DELIVERED" --to "$DEST" --backend markdown)
 }
 
 [ "$#" -eq 4 ] || usage
@@ -147,10 +147,10 @@ for key in "${KEYS[@]}"; do
   [ "$section" = '## Queued' ] || die "delivered outbox contains non-Queued item $key under $section"
 done
 
-mkdir -p "$FM_HOME/data"
+(umask 077; mkdir -p "$FM_HOME/data")
 DEST_CREATED=0
 if [ ! -f "$DEST" ]; then
-  printf '## In flight\n\n## Queued\n\n## Done\n' > "$DEST"
+  (umask 077; printf '## In flight\n\n## Queued\n\n## Done\n' > "$DEST")
   DEST_CREATED=1
 fi
 TO_MOVE=()

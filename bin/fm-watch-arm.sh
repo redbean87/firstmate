@@ -96,6 +96,12 @@
 # home is disposable and permitted; ordinary tests use the sandbox bypass
 # exported by tests/lib.sh.
 set -u
+# Owner-only creation for the arm process and the watcher it spawns: this
+# script's own writes (cycle-exit log append and rotation temps, the
+# child-output temp, the delivery-lock records) and every write of its watcher
+# child inherit this umask, so the watcher family stays private whichever guard,
+# extension or session armed it.
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bin/fm-gate-refuse-lib.sh

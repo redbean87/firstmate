@@ -718,12 +718,12 @@ sync_project_registry() {
   tmp="$sub_reg.tmp.$$"
   names=$(printf '%s\n' "$@" | awk '{ printf "%s%s", sep, $0; sep="\034" }')
   if [ -f "$sub_reg" ]; then
-    awk -v names="$names" "$REGISTRY_ROW_IS_AWK"'
+    (umask 077; awk -v names="$names" "$REGISTRY_ROW_IS_AWK"'
       BEGIN { k = split(names, a, "\034") }
       { for (i = 1; i <= k; i++) if (row_is(a[i])) next; print }
-    ' "$sub_reg" > "$tmp"
+    ' "$sub_reg" > "$tmp")
   else
-    : > "$tmp"
+    (umask 077; : > "$tmp")
   fi
   today=$(date +%F)
   for project in "$@"; do
@@ -760,15 +760,15 @@ initialize_no_mistakes_project() {
 
 write_registry() {
   local id=$1 home=$2 projects_csv=$3 brief=$4 scope summary tmp today
-  mkdir -p "$DATA"
+  (umask 077; mkdir -p "$DATA")
   scope=$(registry_scope_for_brief "$brief")
   summary=$(registry_summary_for_brief "$brief")
   today=$(date +%F)
   tmp="$REG.tmp.$$"
   if [ -f "$REG" ]; then
-    grep -vE "^- $id( |$)" "$REG" > "$tmp" || true
+    (umask 077; grep -vE "^- $id( |$)" "$REG" > "$tmp") || true
   else
-    : > "$tmp"
+    (umask 077; : > "$tmp")
   fi
   printf -- '- %s - %s (home: %s; scope: %s; projects: %s; added %s)\n' "$id" "$summary" "$home" "$scope" "$projects_csv" "$today" >> "$tmp"
   mv "$tmp" "$REG"
@@ -862,7 +862,7 @@ seed_home() {
     [ $# -gt 0 ] || { echo "error: secondmate needs at least one project, or --no-projects for a project-less home" >&2; return 1; }
   fi
 
-  mkdir -p "$STATE" || return 1
+  (umask 077; mkdir -p "$STATE") || return 1
   SEED_REGISTRY_LOCK=$(secondmate_registry_lock_path "$STATE")
   fm_lock_acquire_wait "$SEED_REGISTRY_LOCK" || return 1
   SEED_REGISTRY_LOCK_HELD=1
@@ -920,7 +920,12 @@ seed_home() {
       refuse_projectful_projectless_charter "$id" "$SEED_PARENT_BRIEF" || return 1
     fi
   fi
-  mkdir -p "$DATA" "$home/data" "$home/state" "$home/config" "$home/projects"
+  # data/state/config of a new home are born owner-only (700), matching the
+  # owner-only boundary of the live home; projects/ is deliberately outside
+  # that convention and keeps the caller's umask-derived mode, because it holds
+  # ordinary project clones rather than Firstmate-managed records.
+  (umask 077; mkdir -p "$DATA" "$home/data" "$home/state" "$home/config")
+  mkdir -p "$home/projects"
   if [ -f "$home/data/projects.md" ]; then
     SEED_SUB_REG_EXISTED=1
     cp "$home/data/projects.md" "$SEED_BACKUP_DIR/sub-projects.md"
@@ -982,7 +987,7 @@ seed_home() {
     fi
   done
 
-  cp "$SEED_PARENT_BRIEF" "$home/data/charter.md"
+  (umask 077; cp "$SEED_PARENT_BRIEF" "$home/data/charter.md")
 
   projects_csv=$(join_projects "$@")
   # Durable record of this home's route to its parent, written once here next
