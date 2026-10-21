@@ -208,7 +208,9 @@ for operational_dir in data state config projects; do
   else
     case "$operational_dir" in
     projects)
-      # projects/ keeps its ordinary 755 mode: excluded scope (perm report 7).
+      # projects/ is deliberately outside the owner-only convention and keeps
+      # the caller's umask-derived mode, holding ordinary project clones rather
+      # than Firstmate-managed records.
       mkdir "$operational_path" || die "cannot create remote operational directory: $operational_dir"
       ;;
     *)

@@ -17,7 +17,8 @@ FM_LOCK_STALE_AFTER="${FM_LOCK_STALE_AFTER:-2}"
 # the platform (Git Bash/MSYS) that already pays the highest fork price.
 _FM_UNAME=$(uname 2>/dev/null || echo unknown)
 # Source-time defensive ensure: private so a missing state/ is born 700 rather
-# than 755 (the creator-of-record paths are covered in fm-home-seed.sh too).
+# than 755 (the creator-of-record paths in fm-home-seed.sh, fm-lock.sh, and
+# fm-watch.sh carry the same convention).
 (umask 077; mkdir -p "$STATE")
 
 # Most wake-library consumers need only queue and lock primitives, including

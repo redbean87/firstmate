@@ -46,9 +46,11 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
-# Owner-only creation: like bin/fm-brief.sh, this script's write surface is the
-# task's data/<id> directory (promoted ship instructions), so one private umask
-# makes that directory and its files born 700/600 under any caller's umask.
+# Owner-only creation: this script's own writes are one task's data/<id> files
+# (promoted ship instructions and brief) and its state/<id>.meta task record,
+# so one private umask keeps them born 700/600 under any caller's umask; the
+# backlog transition it drives execs tasks-axi, which carries its own private
+# umask (bin/fm-tasks-axi.sh).
 umask 077
 
 # shellcheck source=bin/fm-dod-lib.sh

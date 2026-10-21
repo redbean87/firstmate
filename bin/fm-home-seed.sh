@@ -921,8 +921,9 @@ seed_home() {
     fi
   fi
   # data/state/config of a new home are born owner-only (700), matching the
-  # swept live home; projects/ keeps its ordinary 755 mode - excluded scope
-  # per the permission report, section 7.
+  # owner-only boundary of the live home; projects/ is deliberately outside
+  # that convention and keeps the caller's umask-derived mode, because it holds
+  # ordinary project clones rather than Firstmate-managed records.
   (umask 077; mkdir -p "$DATA" "$home/data" "$home/state" "$home/config")
   mkdir -p "$home/projects"
   if [ -f "$home/data/projects.md" ]; then
