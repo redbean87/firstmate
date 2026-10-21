@@ -1,0 +1,23 @@
+=== drive root: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-owner-only-drive.3gnaIL  caller umask: 0022
+--- spawn-created status record: 600  /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-live-owner-only-drive.3gnaIL/status/home/state/ev-live-status1.status
+--- sibling spawn records: meta=600 pi-ext=600
+--- after worker-shell append under umask 0022: 600
+--- after pi-extension (node appendFileSync) append: 600
+--- after session-shaped append under umask 0022: 600
+--- owner consumer read (tail -1 and matching worker line):
+resolved [key=ev-live]: session-shell append
+worker line readable: yes
+--- wake rows after a fresh spawn (must be none from spawn-time creation):
+(no wake queue: fresh spawn published no wake row)
+lockdir=755 ownerdir=700 pid=600 role=600
+consumer-cycle-reacquired=ok pid=18752
+--- caller umask after the drive: 0022
+
+=== focused lock-record drive  caller umask: 0022
+lock-entry symlink_target=700
+ownerdir=700 pid=600 role=600
+consumer-cycle-reacquired=ok pid=18839
+--- real target dir mode: 
+--- entry type: 
+--- lock removed after release: yes
+--- caller umask after the drive: 0022

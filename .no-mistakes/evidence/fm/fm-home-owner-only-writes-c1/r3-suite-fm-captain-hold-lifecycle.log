@@ -1,0 +1,7 @@
+ok - marked hold reasons round-trip through public reads, fleet, startup, and return without changing other fields
+not ok - the failure did not reach the origin write
+
+real	1m24.296s
+user	0m23.916s
+sys	0m11.527s
+EXIT=1

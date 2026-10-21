@@ -1,0 +1,18 @@
+ok - backlog: create and a real rewrite under an open umask both land at 600, and the owner still reads the row
+ok - captain hold: the backlog stays 600 and keeps its reason under caller umasks 000, 0022 and 077
+ok - handoff: the main backlog stays 600 with the row moved into a 600 destination (wake rc=1)
+ok - receive: the destination backlog stays 600 and the delivered row lands for the owner
+ok - lock: owner dir 700 with 600 pid and role records, and the lock still cycles
+ok - inbox: dirs 700 and records 600 for the steer path and the busy ladder
+ok - markers: seen marker and presentation cursor are 600 through create and rewrite
+ok - wake queue: the first row and its sequence file are 600 and appends keep working
+ok - status: spawn pre-creates at 600 and worker/hook/session appends all preserve it (hook-shape)
+ok - spawn: gemini hook settings are created 600 under an open caller umask
+ok - open decisions: the cursor is 600 on creation and after a real rewrite
+ok - seed: the parent registry, seeded projects registry and charter copy are 600 under an open caller umask
+ok - watcher: a fresh state directory is born 700 and its first files and lock records are 600
+ok - cycle log: a real arm cycle creates the watcher ledger at 600
+
+real	0m37.611s
+user	0m11.277s
+sys	0m16.864s

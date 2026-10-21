@@ -1,0 +1,76 @@
+=== drive root: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-r2-live-drive.KHXv0b
+=== starting caller umask: 0022
+
+--- A. backlog create through the shipped wrapper under umask 0022
+ok: added ev-r2-bl1 -> Queued
+task:
+backlog after wrapper create: mode=600 inode=75032655
+
+--- A2. RAW tasks-axi mutation under umask 0022 (the pre-fix reproduction)
+ok: added ev-r2-bl2 -> Queued
+RAW mutation result: mode=644 inode_before=75032655 inode_after=75032994
+
+--- A3. shipped-wrapper rewrite (done) under umask 0022 on the same file
+ok: done ev-r2-bl1 -> Done
+help[1]:
+WRAPPER rewrite result: mode=600 inode_before=75032994 inode_after=75033355
+owner read-back:
+  id: ev-r2-bl1
+  title: round-2 backlog probe
+  state: done
+  blocked: no
+
+--- B1. fm-captain-hold.sh hold under caller umasks 000 / 0022 / 077
+umask=000 hold: mode=600 inode_before=75033409 inode_after=75033545 leak_check_umask_after=0022
+  consumer read-back: held: yes with reason preserved
+umask=0022 hold: mode=600 inode_before=75033553 inode_after=75033565 leak_check_umask_after=0022
+  consumer read-back: held: yes with reason preserved
+umask=077 hold: mode=600 inode_before=75033576 inode_after=75033584 leak_check_umask_after=0022
+  consumer read-back: held: yes with reason preserved
+
+--- B2. fm-backlog-handoff.sh under umask 0022
+handed off 1 item(s) to ev-r2-smh: ev-r2-ho1
+  into /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-r2-live-drive.KHXv0b/handoff/child/data/backlog.md
+error: handed off work to secondmate ev-r2-smh, but no live receiver endpoint is recorded; the destination backlog is durable and the receiver was not woken
+handoff: main mode=600 inode_before=75036966 inode_after=75036981 dest mode=600 leak_check_umask_after=0022
+  consumer read-back: the row now lives in the 600 destination backlog
+
+--- B3. fm-backlog-receive.sh under umask 0022
+received: ev-r2-smr moved=1 already=0
+receive: destination mode=600 inode_before=75040370 inode_after=75040379 leak_check_umask_after=0022
+  consumer read-back: delivered row landed and the pre-existing row survived
+
+--- C. status record: real fixture spawn under umask 0022, then three writer shapes
+spawn pre-created status: mode=600
+after worker-shell append (umask 0022): 600
+after pi-extension node appendFileSync: 600
+after session-shaped append (umask 0022): 600
+consumer read-back (tail -1 + worker line):
+resolved [key=ev-r2]: session-shape append
+worker line readable: yes
+sibling spawn records: meta=600 pi-ext=600
+
+--- D. real fm-watch-arm.sh cycle with a MISSING state dir under umask 0022
+watcher-created state dir: mode=700
+stat: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-r2-live-drive.KHXv0b/watch/state/.last-watcher-beat: stat: No such file or directory
+watcher beat: mode=
+stat: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-r2-live-drive.KHXv0b/watch/state/.watch.lock/fm-home: stat: No such file or directory
+watch-lock pid record: mode=600 ownerdir=700 fm-home=
+cycle-exit ledger: mode=600
+arm_pid=68647	watcher_pid=68681	origin=started	started_at=1792546760	ended_at=1792546761	exit_code=143	signal=TERM	reason=signal-exit	beacon_age=999999	lock_before=pid:none|identity:none	lock_after=pid:68681|identity:none	successor=none
+
+--- E. lock record inside a newly created lock directory (real fm-wake-lib API)
+lock-link=755 ownerdir=700 pid=600 role=600
+consumer-cycle: reacquired pid=69396
+
+--- F. executable files keep their owner execute bit after the change
+fm-tasks-axi.sh: 755
+fm-watch.sh: 755
+fm-captain-hold.sh: 755
+fm-spawn.sh: 755
+--- caller umask after every drive (must still be 0022): 0022
+
+=== SUMMARY
+raw tasks-axi mutation mode (pre-fix reproduction): 644
+wrapper mutation mode: 600
+drive root removed by caller: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-r2-live-drive.KHXv0b

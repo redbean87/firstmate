@@ -1,0 +1,73 @@
+=== lab home: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.c0r8Tb ===
+--- caller umask: 0022
+--- 1. create a backlog entry through the shipped wrapper under caller umask 0022
+ok: added ev-live-bl1 -> Queued
+task:
+  id: ev-live-bl1
+  title: Live owner-only backlog probe
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: task
+  repo: "-"
+  priority: "-"
+  created: 2026-10-20
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+help[2]:
+  - Run `tasks-axi start ev-live-bl1` to move it to in flight
+  - Run `tasks-axi block ev-live-bl1 --by <other>` to record a dependency
+mode=600 inode=74929668
+
+--- 2. raw tasks-axi mutation (the pre-fix reproduction) under umask 0022 on that 600 file
+ok: added ev-live-bl2 -> Queued
+task:
+  id: ev-live-bl2
+  title: raw mutation probe
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: task
+  repo: "-"
+  priority: "-"
+  created: 2026-10-20
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+help[2]:
+  - Run `tasks-axi start ev-live-bl2 --backend=markdown --file=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.c0r8Tb/data/backlog.md` to move it to in flight
+  - Run `tasks-axi block ev-live-bl2 --by <other> --backend=markdown --file=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.c0r8Tb/data/backlog.md` to record a dependency
+mode=644 inode=74929670
+
+--- 3. restore owner-only, then a shipped-wrapper rewrite (done) under umask 0022
+ok: done ev-live-bl1 -> Done
+help[1]:
+  - Run `tasks-axi ready` to dispatch work unblocked by this
+before_inode=74929670 after_inode=74929672 mode=600
+
+--- 4. owner read-back
+task:
+  id: ev-live-bl1
+  title: Live owner-only backlog probe
+  state: done
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+
+--- 5. caller umask after all drives (must still be 0022)
+0022
+--- 6. data/ dir mode
+drwxr-xr-x@ /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.c0r8Tb/data
+LAB=/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.c0r8Tb

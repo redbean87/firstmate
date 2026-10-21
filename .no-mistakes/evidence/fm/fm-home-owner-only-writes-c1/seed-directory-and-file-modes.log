@@ -1,0 +1,25 @@
+=== parent root: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot  caller umask: 0022
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+scaffolded: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/parent/data/design/brief.md (secondmate charter)
+home=/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.KVYdot/child
+
+--- observed modes after a real seed under caller umask 0022
+700  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/child/data
+700  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/child/state
+700  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/child/config
+755  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/child/projects
+600  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/child/data/charter.md
+600  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/child/data/projects.md
+600  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/parent/data/secondmates.md
+
+--- owner consumer read-back of the seeded records
+You are a persistent second mate managed by the main firstmate. Work on your own; do not wait for a human.
+/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/child/data/projects.md:1
+/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.KVYdot/parent/data/secondmates.md:1
+
+--- caller umask after the drive: 0022

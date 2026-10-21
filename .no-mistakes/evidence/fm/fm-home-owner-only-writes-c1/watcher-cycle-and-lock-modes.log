@@ -1,0 +1,20 @@
+=== lab home: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.3KfOCa  caller umask: 0022
+--- state dir removed; starting the real watcher under the ambient umask
+watcher pid=14741 lock_pid=14741
+--- modes of what the watcher created from a missing state dir
+700  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.3KfOCa/state
+600  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.3KfOCa/state/.last-watcher-beat
+700  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.3KfOCa/state/.watch.lock
+600  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.3KfOCa/state/.watch.lock/pid
+600  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.3KfOCa/state/.watch.lock/fm-home
+--- owner consumer read of the beat record: 
+
+--- a real arm cycle against a fresh home (writes the cycle-exit ledger)
+arm_pid=15234 watcher_pid=15260
+--- cycle-exit ledger
+600  /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.3KfOCa/state/.watch-cycle-exits.log
+arm_pid=15234	watcher_pid=15260	origin=started	started_at=1792544705	ended_at=1792544705	exit_code=143	signal=TERM	reason=signal-exit	beacon_age=999999	lock_before=pid:none|identity:none	lock_after=pid:15260|identity:none	successor=none
+--- state dir mode after the arm cycle: 700
+--- caller umask after the drives: 0022
+--- arm output tail
+watcher: FAILED - watcher cycle exited 143 without an actionable reason
