@@ -11,6 +11,10 @@
 #   registered + agent or other process    -> alive       (holds)
 #   any failed read, server running        -> unreadable  (holds)
 #   any failed read, server stopped        -> missing     (frees)
+# The policy then re-checks every Herdr `dead` through upstream's
+# fm_backend_herdr_pane_process_state: only its exact `shell` verdict (positive
+# proof of a shell-only pane) frees the place; agent, other, unreadable, empty,
+# or unexpected output holds it.
 set -u
 # shellcheck source=fork/tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -52,6 +56,12 @@ upstream_state() {  # upstream fm_backend_agent_state for holder h1
   PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=1 bash -c \
     '. "$1/bin/fm-backend.sh"; m="$2"; fm_backend_agent_state "$(fm_backend_of_meta "$m")" "$(fm_backend_target_of_meta "$m")"' \
     _ "$ROOT" "$HOME_DIR/state/h1.meta"
+}
+
+upstream_process_state() {  # upstream fm_backend_herdr_pane_process_state for holder h1's pane
+  PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_BACKEND_HERDR_IDLE_SHELL_PROOF_POLLS=1 bash -c \
+    '. "$1/bin/fm-backend.sh"; fm_backend_source herdr; fm_backend_herdr_pane_process_state "$2" "$3"' \
+    _ "$ROOT" "$SESSION" "$PANE"
 }
 
 expect_holder() {  # <herdr-state> <upstream-state> <policy-exit> <label>
@@ -108,16 +118,111 @@ test_reservation_covers_unregistered_startup_within_grace() {
   pass "herdr: the reservation holds an unregistered starting pane only for the 120s grace"
 }
 
-# Residual-risk evidence, not desired behaviour: upstream classifies an
-# unregistered pane as dead without reading its processes, so a Pi that is
-# running but has not registered with Herdr is invisible to the policy once
-# its reservation's grace has passed. See fork/README "Known limits".
-test_characterize_unregistered_running_pi_reads_dead() {
+# --- the unregistered-pane re-check (upstream process-state contract) --------
+
+# expect_unregistered <fixture-state> <process-verdict> <policy-exit> <label>:
+# upstream reads the pane `dead` (no registered agent); the policy's verdict
+# follows upstream's process view of that pane.
+expect_unregistered() {
+  local out rc
+  new_case "$1"
+  holder "$1"
+  assert_equals dead "$(upstream_state)" "upstream must read an unregistered pane ($1) as dead"
+  assert_equals "$2" "$(upstream_process_state)" "upstream process view for $1"
+  out=$(policy t-new); rc=$?
+  expect_code "$3" "$rc" "policy verdict for an unregistered Herdr pane ($1): $out"
+  if [ "$3" -ne 0 ]; then
+    assert_contains "$out" "h1(herdr pane has no registered agent but its processes read $2)" "the refusal must name the process verdict"
+  fi
+  stop_owners
+  pass "herdr re-check: $4"
+}
+
+test_unregistered_running_pi_holds() { expect_unregistered no-agent-pi agent 1 "an unregistered pane with a running Pi holds (closes the startup race)"; }
+test_unregistered_shell_only_frees() { expect_unregistered no-agent shell 0 "an unregistered pane proven shell-only frees"; }
+test_unregistered_other_process_holds() { expect_unregistered no-agent-other other 1 "an unregistered pane running a non-shell process holds"; }
+test_unregistered_process_info_failure_holds() { expect_unregistered no-agent-procfail unreadable 1 "an unregistered pane whose process-info fails holds"; }
+test_unregistered_malformed_process_info_holds() { expect_unregistered no-agent-malformed unreadable 1 "an unregistered pane whose process-info is malformed holds"; }
+
+test_stale_registration_proven_shell_still_frees() {
+  local out rc
+  new_case stale-recheck
+  holder stale-agent
+  assert_equals shell "$(upstream_process_state)" "a stale registration's pane is shell-only"
+  out=$(policy t-new); rc=$?
+  expect_code 0 "$rc" "the re-check must not change a stale registration proven shell-only: $out"
+  stop_owners
+  pass "herdr re-check: a stale registration over a proven shell-only pane still frees"
+}
+
+test_harness_descendant_of_pane_shell_holds() {
+  local out rc shell child
+  new_case descendant
+  # The pane shell's foreground shows only a shell, but a harness still runs
+  # beneath it in the real process table (backgrounded or suspended).
+  bash -c '(exec -a pi sleep 600) & wait' >/dev/null 2>&1 &
+  shell=$!
+  OWNERS+=("$shell")
+  child=''
+  for _ in $(seq 1 50); do child=$(pgrep -P "$shell" 2>/dev/null | head -1); [ -n "$child" ] && break; sleep 0.05; done
+  [ -n "$child" ] || fail "could not start the descendant harness fixture"
+  OWNERS+=("$child")
+  fork_herdr_holder "$HOME_DIR" "$FAKE" h1 "$MODEL_A" "$SESSION" "$PANE" no-agent "$shell"
+  assert_equals agent "$(upstream_process_state)" "upstream must find a harness descending from the pane shell"
+  out=$(policy t-new); rc=$?
+  expect_code 1 "$rc" "a harness beneath the pane shell must hold the place: $out"
+  stop_owners
+  pass "herdr re-check: a harness running beneath an idle-looking pane shell holds (real process table)"
+}
+
+test_shell_pid_missing_from_process_table_holds() {
+  local out rc gone
+  new_case shellgone
+  sleep 0 & gone=$!; wait "$gone" 2>/dev/null
+  fork_herdr_holder "$HOME_DIR" "$FAKE" h1 "$MODEL_A" "$SESSION" "$PANE" no-agent "$gone"
+  assert_equals unreadable "$(upstream_process_state)" "a pane shell absent from the process table is unreadable"
+  out=$(policy t-new); rc=$?
+  expect_code 1 "$rc" "an unverifiable pane shell must hold the place: $out"
+  stop_owners
+  pass "herdr re-check: a pane shell that is not in the process table holds"
+}
+
+test_process_check_unavailable_holds() {
+  local out rc
+  new_case nops
+  holder no-agent
+  assert_equals unreadable "$(FM_HERDR_PS_BIN=/nonexistent/ps upstream_process_state)" "an unavailable process table read is unreadable"
+  out=$(FM_HERDR_PS_BIN=/nonexistent/ps policy t-new); rc=$?
+  expect_code 1 "$rc" "an unavailable process check must hold the place: $out"
+  stop_owners
+  pass "herdr re-check: an unavailable process check holds"
+}
+
+test_reservation_past_grace_with_unregistered_pi_holds() {
+  local out rc gone
+  new_case startup-pi
+  holder no-agent-pi
+  sleep 0 & gone=$!; wait "$gone" 2>/dev/null
+  mkdir -p "$RES"
+  jq -n --arg home "$(cd "$HOME_DIR/state" && pwd -P)" --argjson pid "$gone" --argjson created "$(( $(date +%s) - 600 ))" \
+    '{v: 1, task: "h1", home_state: $home, resource: "strata", model: "strata-local/qwen-test", phase: "spawn",
+      owner_pid: $pid, owner_start: "Wed Jan  1 00:00:00 2025", created: $created}' > "$RES/h1.test.json"
+  out=$(policy t-new); rc=$?
+  expect_code 1 "$rc" "past the grace, a running but unregistered Pi must still hold the place: $out"
+  assert_contains "$out" "processes read agent" "the hold must come from the process re-check"
+  [ ! -e "$RES/h1.test.json" ] || fail "the expired reservation itself must still be cleaned up"
+  stop_owners
+  pass "herdr re-check: after the grace expires, a running unregistered Pi still holds through its process view"
+}
+
+# Upstream evidence the re-check depends on: upstream itself still reads an
+# unregistered pane as dead even with a Pi process in it.
+test_characterize_upstream_unregistered_running_pi_reads_dead() {
   new_case unregistered-pi
   holder no-agent-pi
   assert_equals dead "$(upstream_state)" "upstream reads an unregistered pane as dead even with a Pi process in it"
   stop_owners
-  pass "herdr (characterization): an unregistered pane reads dead even while a Pi process runs in it"
+  pass "herdr (characterization): upstream reads an unregistered pane dead even while a Pi process runs in it"
 }
 
 fork_run_tests

@@ -92,7 +92,24 @@ A task holds a place when either:
   - its record's endpoint does not read "dead" or "missing" through upstream's
     recovery-grade fm_backend_agent_state ("alive", "ambiguous", "unreadable",
     "unverified", any other answer, or an unreadable record all hold), or
+  - it is on Herdr, reads "dead", and its pane is not proven shell-only (below), or
   - it has a valid reservation.
+
+Herdr re-check. Upstream reads a Herdr pane with no registered agent as "dead"
+without looking at its processes, so a Pi that is running but has not yet
+registered reads like an empty pane. For every Herdr holder that reads "dead",
+the policy therefore asks upstream's fm_backend_herdr_pane_process_state
+(bin/backends/herdr.sh) for the pane's process view. Only its exact "shell"
+verdict - every foreground process is a recognized shell AND no harness
+descends from the pane shell in the real process table - frees the place.
+"agent" (a harness in the foreground or beneath the shell), "other" (any
+non-shell foreground, after upstream's bounded resample), "unreadable"
+(process-info failed or was malformed, the shell pid is not in the process
+table, or ps is unavailable), and empty or unexpected output (the backend or
+helper could not run) all hold it. This blocks conservatively: a pane left with
+a stray non-shell process, or whose processes cannot be read, holds the
+resource until that task is reconciled. "missing" (pane gone, or the server
+positively stopped) still frees without a process check.
 
 Reservations. Admission runs under a machine-wide lock per resource,
 <root home>/state/.fork-resource-<name>.lock, taken with upstream's lock
@@ -158,9 +175,12 @@ STALE label only says that something needs reconciling.
    endpoint must read dead or missing through upstream's own check:
      FM_HOME=<home> bash -c '. bin/fm-backend.sh; m=<home_state>/<task>.meta;
        fm_backend_agent_state "$(fm_backend_of_meta "$m")" "$(fm_backend_target_of_meta "$m")"'
-   and no harness process for that task may be running (ps). On Herdr, also
-   check the pane's processes directly: an unregistered pane reads dead even
-   while a Pi process runs in it (see Known limits).
+   and no harness process for that task may be running (ps). On Herdr a
+   "dead" pane must also be proven shell-only:
+     FM_HOME=<home> bash -c '. bin/fm-backend.sh; fm_backend_source herdr;
+       fm_backend_herdr_parse_target "<window>";
+       fm_backend_herdr_pane_process_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE"'
+   must print exactly "shell"; anything else means a process may still run.
 
 4. Remove only when the owner is confirmed gone (step 2) AND the agent is
    confirmed gone (step 3). Remove exactly that one file, under the resource
@@ -194,12 +214,13 @@ Known limits
   step before it. The residual window is a launch line that stalls for most of
   the grace before the harness starts.
 - Herdr: upstream reads a pane with nothing registered as dead without
-  checking its processes (bin/backends/herdr.sh fm_backend_herdr_agent_state;
-  characterised by fork/tests/fm-fork-resource-herdr.test.sh). A Pi that is
-  running but has not yet registered with Herdr is therefore invisible once
-  its reservation's grace has passed. How long a fresh Pi takes to register
-  has not been measured; upstream documents registration through Pi's
-  lifecycle hooks or Herdr's screen detection, with no timing.
+  checking its processes (characterised by
+  fork/tests/fm-fork-resource-herdr.test.sh). The policy closes that gap with
+  the Herdr re-check above, so a running but unregistered Pi keeps holding
+  after its reservation's grace. What remains: the re-check trusts Herdr's
+  `pane process-info` to name the pane's shell pid and foreground, and the
+  window before the harness process starts (the brief-encode step) reads
+  shell-only, as on tmux. It has not been run against a real Herdr.
 - Only this machine's homes are counted; remote homes and models launched by
   hand outside fm-spawn are not.
 

@@ -144,7 +144,7 @@ fork_holder() {
 # (':' in a pane id becomes '_'):
 #   pane    present | gone | garbage         (`pane get`)
 #   agent   none | <agent_status> | garbage  (`agent get`; none = agent_not_found)
-#   proc    ok | fail                        (`pane process-info`)
+#   proc    ok | fail | malformed            (`pane process-info`)
 #   fg      JSON array of foreground processes for process-info
 #   shell   the pane's shell pid (a real live process, so upstream's
 #           descendant walk over the real process table can find it)
@@ -186,7 +186,11 @@ case "$1 ${2:-}" in
   "pane process-info")
     pane=; prev=; for a in "$@"; do [ "$prev" = --pane ] && pane=$a; prev=$a; done
     p=$(pane_dir "$pane")
-    [ "$(cat "$p/proc" 2>/dev/null)" = ok ] || exit 1
+    case "$(cat "$p/proc" 2>/dev/null)" in
+      ok) ;;
+      malformed) echo '{"result":{"type":"pane_process_info","process_info":'; exit 0 ;;
+      *) exit 1 ;;
+    esac
     printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"%s","shell_pid":%s,"foreground_processes":%s}}}\n' \
       "$pane" "$(cat "$p/shell")" "$(cat "$p/fg")" ;;
   *) exit 0 ;;
@@ -201,6 +205,9 @@ SH
 #   live-other   registered (working) with a non-shell, non-agent foreground
 #   no-agent     pane exists, nothing registered, only a shell
 #   no-agent-pi  pane exists, nothing registered, but a Pi process is running
+#   no-agent-other      nothing registered, a non-shell non-agent foreground
+#   no-agent-procfail   nothing registered, process-info fails
+#   no-agent-malformed  nothing registered, process-info answers malformed JSON
 #   stale-agent  registered (idle) but only a shell remains
 #   proc-fail    registered, but process-info fails
 #   gone         pane_not_found
@@ -222,6 +229,9 @@ fork_herdr_holder() {
     live-other) printf 'working\n' > "$p/agent"; printf '[{"pid":%s,"name":"vim","argv0":"vim"}]\n' "$shell" > "$p/fg" ;;
     no-agent) printf 'none\n' > "$p/agent"; printf '%s\n' "$shellfg" > "$p/fg" ;;
     no-agent-pi) printf 'none\n' > "$p/agent"; printf '%s\n' "$pifg" > "$p/fg" ;;
+    no-agent-other) printf 'none\n' > "$p/agent"; printf '[{"pid":%s,"name":"vim","argv0":"vim"}]\n' "$shell" > "$p/fg" ;;
+    no-agent-procfail) printf 'none\n' > "$p/agent"; printf 'fail\n' > "$p/proc"; printf '[]\n' > "$p/fg" ;;
+    no-agent-malformed) printf 'none\n' > "$p/agent"; printf 'malformed\n' > "$p/proc"; printf '[]\n' > "$p/fg" ;;
     stale-agent) printf 'idle\n' > "$p/agent"; printf '%s\n' "$shellfg" > "$p/fg" ;;
     proc-fail) printf 'idle\n' > "$p/agent"; printf 'fail\n' > "$p/proc"; printf '[]\n' > "$p/fg" ;;
     gone) printf 'gone\n' > "$p/pane" ;;

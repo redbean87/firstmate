@@ -142,6 +142,8 @@ policy_project_pin() {
 #   - its endpoint does not read as dead or missing through upstream's
 #     recovery-grade fm_backend_agent_state (alive, ambiguous, unreadable,
 #     unverified, any other answer, or an unreadable record all hold), or
+#   - it is on Herdr, reads dead, and upstream's process view of its pane is
+#     not exactly `shell` (herdr_process_state below), or
 #   - it has a valid reservation (below).
 # Records are counted across every local Firstmate home on this machine
 # (upstream fm_local_firstmate_state_dirs), so secondmate homes count too.
@@ -205,11 +207,35 @@ owner_state() {  # <pid> <recorded start> -> alive | gone | uncertain
   fi
 }
 
+# herdr_process_state <target>: upstream's process-level view of a Herdr pane
+# (bin/backends/herdr.sh fm_backend_herdr_pane_process_state), printed only
+# when it is exactly one of agent|shell|other|unreadable; anything else -
+# a backend that will not load, an unparseable target, a missing helper, a
+# failed call, or unexpected output - prints nothing.
+#
+# Why: upstream's recovery-grade fm_backend_herdr_agent_state reads a pane
+# with NO registered agent as `dead` without looking at its processes, so a Pi
+# that is running but has not yet registered with Herdr reads exactly like an
+# empty pane. The process view is the same proof upstream already demands
+# before trusting a registration: `shell` means every foreground process is a
+# recognized shell AND no harness descends from the pane shell in the real
+# process table. Only that positive proof lets a Herdr `dead` free a place.
+herdr_process_state() {
+  local out
+  out=$(
+    fm_backend_source herdr >/dev/null 2>&1 || exit 1
+    declare -F fm_backend_herdr_parse_target fm_backend_herdr_pane_process_state >/dev/null || exit 1
+    fm_backend_herdr_parse_target "$1" || exit 1
+    fm_backend_herdr_pane_process_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" 2>/dev/null
+  ) || return 0
+  case "$out" in agent|shell|other|unreadable) printf '%s' "$out" ;; esac
+}
+
 # resource_admit <name> <capacity> <prefix>: count holders under the resource
 # lock, refuse at capacity, otherwise reserve (except in relaunch-preflight).
 resource_admit() {
   local name=$1 capacity=$2 prefix=$3 lock dir now held=0 live=0 unconfirmed='' starting='' stale=''
-  local s meta id key model state f row task home pid start created age ostate file tmp
+  local s meta id key model state backend target pstate f row task home pid start created age ostate file tmp
   local -A counted=()
   lock="$ROOT_HOME/state/.fork-resource-$name.lock"
   dir="$ROOT_HOME/state/fork-reservations/$name"
@@ -232,7 +258,17 @@ resource_admit() {
       fi
       model=$(fm_meta_get "$meta" model)
       case "$model" in "$prefix"*) ;; *) continue ;; esac
-      state=$(fm_backend_agent_state "$(fm_backend_of_meta "$meta")" "$(fm_backend_target_of_meta "$meta")" 2>/dev/null) || state=unreadable
+      backend=$(fm_backend_of_meta "$meta")
+      target=$(fm_backend_target_of_meta "$meta")
+      state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || state=unreadable
+      if [ "$state" = dead ] && [ "$backend" = herdr ]; then
+        pstate=$(herdr_process_state "$target")
+        if [ "$pstate" != shell ]; then
+          held=$((held + 1)); counted[$key]=1
+          unconfirmed="$unconfirmed $id(herdr pane has no registered agent but its processes read ${pstate:-unavailable})"
+          continue
+        fi
+      fi
       case "$state" in
         dead|missing) ;;
         alive) held=$((held + 1)); live=$((live + 1)); counted[$key]=1 ;;
