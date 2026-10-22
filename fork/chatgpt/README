@@ -1,0 +1,120 @@
+Firstmate fork: ChatGPT consultation channel
+============================================
+
+Ported from the fork's earlier core-edit implementation (origin/main
+bin/fm-chatgpt-*.sh) into the fork layer without behaviour changes except
+those listed under "Differences from the core-edit version". Like fork/README,
+this file is plain text with no extension so upstream's documentation-audience
+check does not require it in an upstream-owned inventory.
+
+Firstmate asks ChatGPT to write a worker audit prompt and an execution plan,
+and hands each one to an ordinary worker. ChatGPT is reached through the
+already-installed codex-chatgpt-web bridge on loopback; this is a
+consultation channel, not a Pi provider, and never executes local tools.
+
+
+Files
+-----
+
+  fm-chatgpt-bridge-lib.sh  bridge URL resolution (loopback only), model slug,
+                            Codex turn stamping, bounded health probe.
+  fm-chatgpt-consult.sh     one self-contained Responses turn per call; prints
+                            the answer, or fails with the bridge's diagnostic.
+  fm-chatgpt-loop.sh        per-task state machine, prompt building, worker
+                            dispatch and handoff, bridge start/stop.
+  audit-brief-template      injected verbatim into audit-stage instructions;
+                            the single owner of the generated audit prompt's
+                            shape. A missing template refuses the consult.
+
+Each script's header owns its exact rules; fm-chatgpt-loop.sh --help lists the
+commands. Tests: fork/tests/fm-fork-chatgpt-*.test.sh.
+
+
+Running a loop
+--------------
+
+  L=<task id>
+  fork/chatgpt/fm-chatgpt-loop.sh init --task $L --objective-file F [--context-file F]
+  fork/chatgpt/fm-chatgpt-loop.sh consult --stage audit --task $L
+  fork/chatgpt/fm-chatgpt-loop.sh dispatch --stage audit --task $L -- $L <project> --mode M --yolo Y
+  fork/chatgpt/fm-chatgpt-loop.sh record-findings --task $L       (after the audit worker reports)
+  fork/chatgpt/fm-chatgpt-loop.sh consult --stage plan --task $L
+  fork/chatgpt/fm-chatgpt-loop.sh dispatch --stage plan --task $L -- $L <project> --mode M --yolo Y
+  fork/chatgpt/fm-chatgpt-loop.sh record-result --task $L --file F
+
+State lives in data/<L>/chatgpt-loop.json. The arguments after -- are
+fm-spawn.sh arguments and must start with the worker's plain task id. Run
+with FM_HOME set to the home the worker belongs to.
+
+
+Bridge
+------
+
+CHATGPT_WEB_BRIDGE_URL overrides the default http://127.0.0.1:17841/v1;
+non-loopback values are refused. Installation and authentication stay
+external. "fm-chatgpt-loop.sh bridge start|stop" operates only the daemon
+under ~/tools/codex-chatgpt-web and never a process it did not start.
+config/chatgpt-consultation (gitignored) is created on a consult attempt and
+marks the home as using the channel, so a dead bridge reads "unreachable"
+rather than "unconfigured".
+
+Health check, at intake whenever the task's preferred flow is this channel:
+
+  bash -c '. fork/chatgpt/fm-chatgpt-bridge-lib.sh && fm_chatgpt_bridge_health'
+
+  healthy        a bounded test turn completed; consult.
+  unconfigured   nothing listening, home never used the channel.
+  unreachable    nothing listening, home uses the channel.
+  unhealthy      listening, but the test turn failed.
+  misconfigured  CHATGPT_WEB_BRIDGE_URL was refused.
+
+When the preferred flow cannot run (unreachable, unhealthy, misconfigured),
+report it to the captain - what is wrong, and whether to start the bridge or
+proceed without consultation under a recorded local waiver - instead of
+quietly dispatching without it.
+
+
+Consult gate
+------------
+
+The fork's consult-gate policy (fork/bin/fm-launch-policy, enabled by
+config/fork-policies) is separate from this channel and judges every ship or
+scout launch by data/<launched id>/ only. With it enabled:
+
+  - Fresh dispatch. The worker passes only through its OWN
+    data/<id>/chatgpt-loop.json, so the worker task id must be the loop's
+    task id L, dispatched while the loop is at the stage's dispatch phase.
+    A worker with any other id is refused at spawn; the loop records the
+    spawn failure and stays at <stage>-dispatch. Distinct worker ids need a
+    gate change (deferred; see docs/M2.txt V11).
+  - The plan stage under the gate also needs worker id L, so the audit
+    worker L must be finished and cleaned up before the plan dispatch. How
+    fm-spawn treats a second fresh launch of a still-recorded task id is not
+    covered by the fork tests.
+  - Relaunch. After fm-send confirms the handoff, dispatch writes
+    data/<worker>/fork-consult-delivered.json as {"stage": "audit"|"plan"},
+    the relaunch delivery proof the policy accepts. A new dispatch removes any
+    earlier proof before spawning, a failed spawn or handoff writes none, and
+    next-round removes the finished round's proof. Nothing is written to the
+    worker's upstream state/<id>.meta.
+  - A launch that must proceed without consultation needs a local waiver,
+    data/<id>/fork-consult-waiver.json (see fork/README).
+
+With the gate disabled the loop works exactly as above with any worker id;
+the proof file is still written but nothing requires it.
+
+
+Differences from the core-edit version
+--------------------------------------
+
+  - Delivery proof is data/<worker>/fork-consult-delivered.json, not a
+    consult_delivered= line in state/<worker>.meta.
+  - The spawn no longer carries FM_CHATGPT_LOOP_DISPATCH_TASK; only the old
+    core gate read it, and the fork gate does not.
+  - Not ported: the core consult gate (bin/fm-consult-gate-lib.sh) and
+    fm-spawn --consult-waived; the CHATGPT_BRIDGE startup health line
+    (a bin/fm-bootstrap.sh / bin/fm-startup-network.sh edit); the
+    chatgpt-consultation and audit-brief agent skills, which would need
+    upstream-owned .agents/skills/ paths. Run the health check above by hand;
+    a fork-owned startup line could later use an existing extension point
+    (a registered check, bin/fm-check-register.sh) without core edits.
