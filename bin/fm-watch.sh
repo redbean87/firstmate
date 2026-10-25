@@ -71,6 +71,14 @@
 #                          the run step cannot show; that deferral still
 #                          re-surfaces once per PAUSE_RESURFACE_SECS, and a pane
 #                          that writes nothing keeps the unchanged schedule.
+#                          Where config/wedge-defer-validating arms it, a
+#                          pane whose crew's attributed no-mistakes run is
+#                          running or fixing is not a wedge candidate: the
+#                          worker is idle behind its own drive call, so it is
+#                          deferred to the same long recheck cadence
+#                          (wedge_defer_validating), while a parked, terminal,
+#                          ci-monitoring, absent or unreadable run, or a home
+#                          without that flag, escalates unchanged.
 #                          A pane whose recorded endpoint holds no agent at all is
 #                          not a wedge and is reported ONCE instead of escalating
 #                          on that cadence forever (wedge_dead_record); only the
@@ -99,6 +107,10 @@
 #                          agent, for human inspection only - never an automatic
 #                          interrupt, signal, or restart of the worker or its
 #                          tool process.
+#                          At escalation time a T3 Code thread whose shared
+#                          classification still reads running resets the timer
+#                          while its latest turn boundary is under
+#                          BUSY_TURN_MAX_SECS old (wedge_defer_t3code_running).
 #   stale: <window> (unread firstmate instruction: ...)
 #   stale: <window> (steering-inbox ladder bookkeeping unwritable: ...)
 #   stale: <window> (steering-inbox busy bookkeeping unwritable: ...)
@@ -410,7 +422,7 @@ PAUSE_RESURFACE_SECS=${FM_PAUSE_RESURFACE_SECS:-$FM_PAUSE_RESURFACE_SECS_DEFAULT
 # connect/subscribe failure) before the push fast-path is disabled for the rest
 # of this watcher process and the loop reverts to pure polling (report section
 # 5c trigger 3: proven-unreliable-at-runtime). A watcher restart re-probes
-# capability, so a transient herdr hiccup self-heals on the next cycle chain.
+# capability, so a transient backend hiccup self-heals on the next cycle chain.
 EVENT_CAP_FAIL_MAX=${FM_EVENT_CAP_FAIL_MAX:-3}
 # Per-process memo for the push-capability probe (fm_backend_events_capable runs
 # a ~220KB `herdr api schema` read, too heavy to repeat every poll). Keyed by
@@ -446,9 +458,8 @@ hash_pane() {
   if command -v md5 >/dev/null 2>&1; then md5 -q; else md5sum | cut -d' ' -f1; fi
 }
 
-# window_is_busy: 0 (busy) iff the task's harness is PROVABLY working, through
-# the semantic busy-state contract (bin/fm-busy-lib.sh). Only an exact busy
-# verdict returns 0: idle, unknown, and dead all return 1, so a converted
+# window_is_busy: 0 when the semantic busy-state contract (bin/fm-busy-lib.sh)
+# reports busy. Idle, unknown, and dead return 1, so a converted
 # adapter whose semantic state is missing, malformed, stale, or unverified is
 # treated as not-provably-working and surfaces rather than being absorbed.
 # <tail40> is the same bounded capture already read for hashing and is passed
@@ -465,7 +476,10 @@ window_is_busy() {  # <window> <tail40>
     verdict=$(fm_busy_classify "$(window_backend "$w")" "$w" "$(window_harness "$w")" \
       "${task:-unknown}" "$STATE" "$tail40")
   fi
-  [ "${verdict%% *}" = busy ]
+  case "$verdict" in
+    busy\ *) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 window_kind() {
@@ -512,7 +526,8 @@ window_label() {
 # `_` so a window name is usable as a filename suffix. Every per-window file the
 # watcher keeps is named by it (.hash-, .count-, .stale-, .stale-since-,
 # .wedge-escalations-, .wedge-permanent-, .wedge-terminal-queued-,
-# .wedge-rollback-failed-, .paused-*, .writing-*, .waiting-*), and live homes
+# .wedge-rollback-failed-, .paused-*, .writing-*, .validating-*,
+# .waiting-*), and live homes
 # hold those markers on disk under the current format, so the format lives here
 # alone: a second copy is how a future change to it silently orphans a window's
 # markers instead of clearing them. The helpers below take the derived key
@@ -536,6 +551,19 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
     exit 1
   fi
   wake "$reason"
+}
+
+# inbox_steer_busy: the steering-inbox delivery guard. Every backend keeps the
+# recorded task's busy verdict (window_is_busy). T3 Code alone also treats its
+# native uncertainty as busy (fm_busy_is_busy), so a doorbell waits for proven
+# idle; pane staleness elsewhere still needs busy proof.
+inbox_steer_busy() {  # <window> <backend> <task> <tail40>
+  local w=$1 backend=$2 task=$3 tail40=$4
+  if [ "$backend" = t3code ]; then
+    fm_busy_is_busy t3code "$w" "$(window_harness "$w")" "$task" "$STATE" "$tail40"
+  else
+    window_is_busy "$w" "$tail40"
+  fi
 }
 
 # Steering-inbox loss detection, one cheap check per recorded window per poll.
@@ -575,7 +603,7 @@ inbox_steer_check() {  # <window> <task>
   esac
   watcher_capture "$backend" "$w" 40 "$(window_label "$w")" || WATCHER_CAPTURE=
   tail40=$WATCHER_CAPTURE
-  if window_is_busy "$w" "$tail40"; then
+  if inbox_steer_busy "$w" "$backend" "$task" "$tail40"; then
     [ "$verb" != retry ] || return 0
     if ! count=$(fm_task_inbox_record_busy "$STATE" "$task" "$rec"); then
       [ -f "$rec" ] || return 0
@@ -1165,7 +1193,7 @@ secondmate_liveness_tick() {
 
 # Consecutive wedge-escalation count for a window past FM_WEDGE_DEMAND_INSPECT_COUNT
 # (default 3): a pane that keeps re-wedging on the SAME stale hash - each
-# escalation gets absorbed again as "still validating" one poll later, since the
+# escalation gets absorbed again as "still working" one poll later, since the
 # hash never changes - can otherwise repeat forever with no signal that this is
 # no longer a one-off. At the threshold, wedge_timer_check appends a
 # "demand-deep-inspection" marker to the wake payload so the wake reason itself
@@ -1386,8 +1414,8 @@ _wedge_cap_terminal_append() {
   return "$_status"
 }
 
-# _wedge_cap_rollback: reset the per-window wedge state after a cap-marker
-# write failure so the next poll re-accumulates from escalation 1 instead of
+# _wedge_cap_rollback: reset the per-window wedge state after a failed
+# cap-state write so the next poll re-accumulates from escalation 1 instead of
 # inheriting the saturated counter and an expired stale timer that would
 # amplify a single write failure into a wake-queue flood. On rollback
 # failure a transient `.wedge-rollback-failed-<key>` sentinel is written so
@@ -1422,8 +1450,8 @@ _wedge_cap_rollback() {
 # once past PAUSE_RESURFACE_SECS the pane wakes once per window rather than every
 # poll. An optional <scope> binds that cadence to its current declaration; callers
 # without a scoped declaration keep the timestamp body. Shared by the
-# declared-pause absorb and the worktree-write deferral so the two cadences cannot
-# drift apart; each caller owns its own marker and reason.
+# declared-pause absorb and the wedge deferrals so their cadences cannot drift
+# apart; each caller owns its own marker and reason.
 # Returns without waking while either the absorb or the throttle is inside the
 # window; wake() itself exits the cycle, exactly as it does inline. An optional
 # <min-age> replaces the cadence as the absorb-age gate for one call (0 lets a
@@ -1721,14 +1749,44 @@ EOF
   return 0
 }
 
-# Drop a window's write-deferral chain wherever its stale bookkeeping resets, so
-# the bounded re-surface cadence is measured from the CURRENT quiet stretch and a
-# long-finished one cannot make the next deferral resurface immediately. The
-# guard-deferral run (wedge_defer_guard) ends at the same resets, so its cap
-# counts only consecutive guard deferrals of one unbroken quiet stretch.
+# Drop a window's write- and validating-deferral chains wherever its stale
+# bookkeeping resets, so the bounded re-surface cadence is measured from the
+# CURRENT quiet stretch and a long-finished one cannot make the next deferral
+# resurface immediately. The guard-deferral run (wedge_defer_guard) ends at the
+# same resets, so its cap counts only consecutive guard deferrals of one
+# unbroken quiet stretch.
 clear_write_tracking() {  # <window-key>
   local key=$1
-  rm -f "$STATE/.writing-since-$key" "$STATE/.writing-resurfaced-$key" "$STATE/.guard-deferrals-$key"
+  rm -f "$STATE/.writing-since-$key" "$STATE/.writing-resurfaced-$key" "$STATE/.guard-deferrals-$key" \
+    "$STATE/.validating-since-$key" "$STATE/.validating-resurfaced-$key"
+}
+
+# Defer ONE wedge escalation for a pane whose crew's attributed no-mistakes run is
+# running or fixing (crew_run_is_validating in fm-classify-lib.sh). The worker is
+# correctly idle behind its own drive call while the pipeline executes the round,
+# so the quiet pane is positive liveness rather than a wedge candidate; a parked,
+# terminal, absent or unreadable run keeps the unchanged schedule.
+# Deliberately the same DEFERRAL shape as wedge_defer_writing rather than a
+# cancellation: the idle timer restarts, and a .validating-since-<key> marker
+# holding the run id ages the chain, so a run record that keeps saying running
+# with nothing executing it still re-surfaces once every PAUSE_RESURFACE_SECS
+# through resurface_absorbed. A different run id starts a new chain.
+# The escalation counter is left alone, as the other deferrals leave it.
+# OFF unless the home creates config/wedge-defer-validating: absent the flag the
+# crew state is never read here and the ladder is byte-identical.
+wedge_defer_validating() {  # <window> <since-file> <triage-label> <idle-age> <task>
+  local win=$1 since_file=$2 label=$3 age=$4 task=$5 verdict run step key vsf vage
+  [ -e "$CONFIG/wedge-defer-validating" ] || return 1
+  verdict=$(crew_run_is_validating "$task") || return 1
+  run=${verdict%% *}; step=${verdict#* }
+  key=$(window_key "$win")
+  vsf="$STATE/.validating-since-$key"
+  [ "$(cat "$vsf" 2>/dev/null || true)" = "$run" ] || printf '%s' "$run" > "$vsf"
+  vage=$(age_of "$vsf")
+  date +%s > "$since_file"
+  resurface_absorbed "$win" "$STATE/.validating-resurfaced-$key" "$vage" \
+    "stale: $win (idle ${age}s, no-mistakes run $run validating ($step) for ${vage}s, rechecked on a long cadence not a wedge; confirm the run is still progressing)"
+  triage_log "absorbed $label (no-mistakes run $run validating ($step), idle ${age}s): $win"
 }
 
 # The question the wedge timer never asked before it alarmed: is there still an
@@ -1925,20 +1983,27 @@ wedge_defer_guard() {  # <window> <since-file> <triage-label> <idle-age> <guard-
 # where it still consults that probe before returning rather than short-circuiting
 # ahead of it, and behind the same gate - nothing escalates after it either, so
 # there too the probe's own re-arm of the shared idle timer is what paces it.
-# The opt-in operator guard consult
-# (wedge_guard_evidence) runs after all
-# three, so a dead or missing endpoint is never deferred by a guard, and a home
-# without config/wedge-evidence-guards never reaches it.
+# The opt-in validating-run consult (wedge_defer_validating) runs after those three,
+# so an endpoint with no agent left in it is still reported once even while its
+# run executes; its crew-state read keeps the same one-per-threshold bound
+# because its deferral restarts the idle timer. A T3 Code window gets one more
+# consult after that (wedge_defer_t3code_running): its transcript can stay
+# byte-identical through a long tool call, so the shared thread classification
+# is rechecked before active work is reported as a wedge. The opt-in operator
+# guard consult (wedge_guard_evidence) runs after all of these, so a dead or
+# missing endpoint is never deferred by a guard, and a home without
+# config/wedge-evidence-guards never reaches it.
 wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-file> <task> <pane-hash> [dialog-name]
   local win=$1 since_file=$2 label=$3 escalation_file=$4 task=$5 hash=$6 dialog=${7-} since age n prev reason evidence guard guard_note
   local _wkey _wrollback_sentinel _wrb_ts _wrb_cap_reason _wrb_cap_status _wrb_rm_status
   local _wrb_since _wrb_now _wrb_age _wrb_cap_ts _wrb_gate
   _wkey=$(window_key "$win")
   # Cap-fire short-circuit: a previous poll wrote a rollback-failure sentinel,
-  # from either route that has to defend cap state this state dir would not
-  # persist - the cap-marker write whose own rollback also failed, or the
-  # escalation-count write below, whose failed write left the ceiling that count
-  # bounds unenforceable. Within FM_ROLLBACK_SENTINEL_TTL_SECS the wedge path is silent -
+  # from any of the routes that have to defend cap state this state dir would not
+  # persist - the cap-marker write whose own rollback also failed, the
+  # escalation-count write whose failed write left the ceiling that count
+  # bounds unenforceable, or the cap-fire counter reset whose failed reset
+  # leaves the saturated counter standing. Within FM_ROLLBACK_SENTINEL_TTL_SECS the wedge path is silent -
   # no wake, no marker write - so the operator observes one failure per
   # wedge-event instead of a wake-queue flood under persistent fs failure.
   # Read only where the cap is configured: with FM_WEDGE_MAX_ESCALATIONS at its
@@ -1990,7 +2055,7 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
   since=$(cat "$since_file" 2>/dev/null || true)
   case "$since" in
     ''|*[!0-9]*)
-      # Publish the repaired timer only after its old write-deferral chain is
+      # Publish the repaired timer only after its old deferral chains are
       # gone, so observers cannot mistake a new idle window for the old chain.
       clear_write_tracking "$_wkey"
       date +%s > "$since_file"
@@ -2034,6 +2099,12 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
           return 0
         fi
         if wedge_dead_record "$win" "$since_file" "$label" "$age" "$hash" "$task"; then
+          return 0
+        fi
+        if wedge_defer_validating "$win" "$since_file" "$label" "$age" "$task"; then
+          return 0
+        fi
+        if wedge_defer_t3code_running "$win" "$since_file" "$label" "$age"; then
           return 0
         fi
         guard_note=''
@@ -2093,10 +2164,13 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
         # marker check whatever hash they render. The terminal wake carries the
         # same evidence the escalation it replaces would have carried, because
         # it is the only one this window publishes for the rest of the horizon.
-        # The marker-write failure rolls back cap state to avoid amplifying a
-        # single write failure into a queue flood; a rollback that itself fails
-        # writes a transient sentinel so the next polls stay silent for
-        # FM_ROLLBACK_SENTINEL_TTL_SECS.
+        # Every cap-state write on this route - the escalation count above, the
+        # cap marker, and the escalation-counter reset the fire ends its episode
+        # with - takes that one three-tier defence, so a state dir that refuses
+        # any of them is never walked past with cap state it did not take: roll
+        # the cap state back rather than amplify a single write failure into a
+        # queue flood, and where the rollback itself fails write a transient
+        # sentinel so the next polls stay silent for FM_ROLLBACK_SENTINEL_TTL_SECS.
         if [ "$FM_WEDGE_MAX_ESCALATIONS" -gt 0 ] && [ "$n" -ge "$FM_WEDGE_MAX_ESCALATIONS" ]; then
           _wrb_cap_reason="$reason, PERMANENTLY-WEDGED: FM_WEDGE_MAX_ESCALATIONS=$FM_WEDGE_MAX_ESCALATIONS reached - no further wedge escalations for this WINDOW while its cap marker stands: until FM_CAP_HORIZON_SECS elapses, the crew resumes, or the operator manually removes STATE/.wedge-permanent-<key>"
           _wrb_cap_reason=$(stale_reason_naming_dialog "$_wrb_cap_reason" "$dialog")
@@ -2123,7 +2197,23 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
           fi
           wedge_episode_end "$_wkey" 1
           clear_write_tracking "$_wkey"
-          : > "$escalation_file"
+          # The reset is cap state like the count write above it, and the one
+          # whose failure the horizon would otherwise hide: it is what lets the
+          # count climb a fresh 1..N once the cap marker expires, so a state dir
+          # that refuses it leaves the counter saturated at the bound and the
+          # first post-horizon threshold would re-fire this terminal silence
+          # instead of escalating. The cycle ends in every failure tier, so the
+          # capped wake never goes out inline off a reset that failed; the durable
+          # terminal row this fire already queued stands for the drain.
+          if ! { : > "$escalation_file"; } 2>/dev/null; then
+            _wrb_rm_status=0
+            _wedge_cap_rollback "$_wkey" "$escalation_file" "$since_file" || _wrb_rm_status=$?
+            case "$_wrb_rm_status" in
+              2) triage_log "wedge escalation-counter reset FAILED AND rollback AND sentinel write ALL FAILED on $win - the counter stays saturated once the marker's horizon elapses; operator MUST intervene"; exit 1 ;;
+              1) triage_log "wedge escalation-counter reset FAILED AND rollback ALSO FAILED on $win - sentinel set (TTL $FM_ROLLBACK_SENTINEL_TTL_SECS); no wake-amplification"; exit 1 ;;
+              *) triage_log "wedge escalation-counter reset FAILED on $win - escalation count rolled back; the cap marker stands, so this window stays silent until its horizon (FM_CAP_HORIZON_SECS) elapses or an episode-ending route releases it (an operator can delete the marker to re-engage at once)"; exit 1 ;;
+            esac
+          fi
           triage_log "wedge permanently capped: $win (escalation $n, max $FM_WEDGE_MAX_ESCALATIONS, hash ${hash:0:12})"
           [ "$_wrb_cap_status" -eq 3 ] || wake "$_wrb_cap_reason"
           return 0
@@ -2139,6 +2229,31 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
       fi
       ;;
   esac
+}
+
+# wedge_defer_t3code_running: the T3 Code consult of the wedge ladder. A T3
+# window's capture is the thread's messages plus a session line, so it stays
+# byte-identical through a long tool call where a pane would keep repainting;
+# a still-running session is therefore read from the server itself before the
+# quiet transcript is reported. Only the adapter's `running` word defers,
+# covering V2's running turn and waiting post-turn drain. Starting, settled,
+# failed, missing, and unreadable threads keep the unchanged escalation.
+# The deferral is itself bounded by BUSY_TURN_MAX_SECS, measured from the latest
+# run boundary T3 records: a turn or post-turn drain that has lasted that long
+# without a newer boundary escalates like any
+# busy pane past the bound, and a missing turn timestamp never defers.
+# Returns 0 when it has handled the window, 1 to escalate on the unchanged path.
+wedge_defer_t3code_running() {  # <window> <since-file> <triage-label> <idle-age>
+  local win=$1 since_file=$2 label=$3 age=$4 turn_age
+  [ "$(window_backend "$win")" = t3code ] || return 1
+  fm_backend_source t3code || return 1
+  [ "$(fm_backend_t3code_probe "$win")" = running ] || return 1
+  turn_age=$(fm_backend_t3code_turn_age "$win") || return 1
+  [ "$turn_age" -lt "$BUSY_TURN_MAX_SECS" ] || return 1
+  clear_write_tracking "$(window_key "$win")"
+  date +%s > "$since_file"
+  triage_log "absorbed $label (T3 session still running, turn ${turn_age}s, idle ${age}s), timer reset: $win"
+  return 0
 }
 
 # busy_turn_over_age: 0 iff the last completed turn or explicit native-harness
@@ -2257,7 +2372,7 @@ busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-fil
       # woken in a loop for the whole declared wait. The suppressor therefore
       # advances to the declaration rather than the hash, and the daemon is woken
       # once per distinct declaration. The wedge timer, escalation count and
-      # write-deferral chain are cleared exactly as handle_paused_stale clears
+      # deferral chains are cleared exactly as handle_paused_stale clears
       # them, so an undeclared busy phase that had already started the timer does
       # not resume its count the moment the declaration is lifted. Normal-mode
       # pause tracking stays unwritten here, exactly as the idle away-mode handoff
@@ -2292,8 +2407,8 @@ clear_pause_state() {  # <window-key>
 
 # The hash-scoped half of clear_pause_tracking: the stale suppressor, its wedge
 # timer, escalation count, and any cap markers that episode fired, and both
-# deferral chains the timer can take - the write-deferral chain and the
-# wait-deferral throttle.
+# deferral chains the timer can take - the write- and validating-deferral
+# chains and the wait-deferral throttle.
 # Split out so a caller
 # that must keep a window's DECLARATION-scoped pause state - its .paused-* flag,
 # recheck, and re-surface throttle - can still reset the per-hash half alone.
@@ -2809,7 +2924,7 @@ fm_active_check_stop() {
 # and the signal is consumed, so a stop request could leave this watcher
 # polling forever while its stopper waits (fixed upstream in bash 5.3). Bash
 # 3.2 holds HUP and TERM until a running command substitution's child exits, so
-# fm_backend_capture pane reads go through watcher_capture instead. INT keeps
+# pane reads and the event wait go through watcher_waited instead. INT keeps
 # its trap because bash ignores a direct SIGINT while a child runs.
 watcher_stop_signals() {
   trap - HUP TERM
@@ -2855,22 +2970,25 @@ fm_capture_output_cleanup() {
   FM_CAPTURE_OUTPUT=
 }
 
-# watcher_capture: fm_backend_capture into WATCHER_CAPTURE with its exit status.
-# The read runs as a waited background process group rather than inside $(...),
-# so a stop is not held for a blocked read (watcher_stop_signals). The group is
-# recorded like a check's, so watcher_cleanup stops a read still in flight.
-watcher_capture() {  # <backend> <target> <lines> [expected-label]
+# watcher_waited: <command...> into WATCHER_CAPTURE with its exit status. The
+# command runs as a waited background process group rather than inside $(...),
+# so a stop is not held for a blocked read (watcher_stop_signals): pane reads
+# (watcher_capture) and the event wait that spans a whole POLL
+# (event_wait_or_sleep) both run here. The group is recorded like a check's, so
+# watcher_cleanup stops one still in flight. Its own setup failures return 2,
+# which the event wait reads as an unusable event path (sleep the budget).
+watcher_waited() {  # <command...>
   local rc pgid
   fm_capture_output_cleanup
   WATCHER_CAPTURE=
-  FM_CAPTURE_OUTPUT=$(mktemp "$STATE/.fm-capture-output.XXXXXX") || return 1
+  FM_CAPTURE_OUTPUT=$(mktemp "$STATE/.fm-capture-output.XXXXXX") || return 2
   FM_CHECK_SIGNAL_PENDING=
   trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
   # The group's stderr is redirected before the fork: bash 3.2 on macOS can
   # print a harmless "child setpgid ... Operation not permitted" race from the
   # child before the command's own redirections apply.
   set -m
-  { fm_backend_capture "$@" < /dev/null > "$FM_CAPTURE_OUTPUT" & } 2>/dev/null
+  { "$@" < /dev/null > "$FM_CAPTURE_OUTPUT" & } 2>/dev/null
   FM_ACTIVE_CHECK_PID=$!
   FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
   set +m
@@ -2880,15 +2998,30 @@ watcher_capture() {  # <backend> <target> <lines> [expected-label]
   if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
     fm_active_check_stop || true
     fm_capture_output_cleanup
-    return 1
+    return 2
   fi
   wait "$FM_ACTIVE_CHECK_PID"
   rc=$?
   FM_ACTIVE_CHECK_PID=
-  fm_active_check_stop || { fm_capture_output_cleanup; return 1; }
+  fm_active_check_stop || { fm_capture_output_cleanup; return 2; }
   WATCHER_CAPTURE=$(cat "$FM_CAPTURE_OUTPUT" 2>/dev/null || true)
   fm_capture_output_cleanup
   return "$rc"
+}
+
+# watcher_capture: fm_backend_capture through watcher_waited.
+watcher_capture() {  # <backend> <target> <lines> [expected-label]
+  watcher_waited fm_backend_capture "$@"
+}
+
+# The event wait's scratch directory, given to it as TMPDIR. A stop kills the
+# wait before its own cleanup removes its reader FIFO, so the watcher owns the
+# directory and removes it after each wait and in watcher_cleanup.
+WATCHER_WAIT_TMP=
+
+fm_wait_tmp_cleanup() {
+  [ -z "$WATCHER_WAIT_TMP" ] || rm -rf -- "$WATCHER_WAIT_TMP"
+  WATCHER_WAIT_TMP=
 }
 
 # 0 when any signaled status file carries a captain-relevant event in the bytes
@@ -3001,7 +3134,7 @@ heartbeat_scan_finds_actionable() {
 }
 
 # event_wait_or_sleep: the terminal wait of each supervision cycle. For a home
-# with push-capable windows (herdr), it replaces the blind `sleep POLL` with a
+# with push-capable windows (herdr, rex), it replaces the blind `sleep POLL` with a
 # bounded wait on the backend's native transition stream, so a crew going
 # `blocked` wakes the supervisor sub-second instead of after the stale-pane
 # wedge timer. For every other home - no push-capable window, backend not
@@ -3013,7 +3146,7 @@ heartbeat_scan_finds_actionable() {
 # a second watcher, so every guard/beacon/arm/turn-end mechanism is unchanged.
 event_wait_or_sleep() {
   local w b session first_backend="" first_session="" rec rc
-  local windows=()
+  local windows=() t3_windows=()
   while IFS= read -r w; do
     b=$(window_backend "$w")
     fm_backend_has_push "$b" || continue
@@ -3022,16 +3155,27 @@ event_wait_or_sleep() {
     # they are excluded from the fast escalation exactly as the stale loop skips
     # them.
     [ "$(window_kind "$w")" = secondmate ] && continue
+    # T3 Code's bounded wait runs only when no other push backend is recorded,
+    # so adding a T3 task to a herdr home never takes herdr's fast path away.
+    if [ "$b" = t3code ]; then
+      t3_windows+=("$w")
+      continue
+    fi
     session=${w%%:*}
     if [ -z "$first_backend" ]; then first_backend=$b; first_session=$session; fi
     # One socket connection covers one backend+session; a home normally has a
-    # single herdr session. A window in a different backend/session stays on the
+    # single herdr or rex session. A window in a different backend/session stays on the
     # poll path this cycle.
     if [ "$b" != "$first_backend" ] || [ "$session" != "$first_session" ]; then
       continue
     fi
     windows+=("$w")
   done < <(recorded_windows)
+  if [ "${#windows[@]}" -eq 0 ] && [ "${#t3_windows[@]}" -gt 0 ]; then
+    first_backend=t3code
+    first_session=$(fm_backend_event_session t3code "${t3_windows[0]}")
+    windows=("${t3_windows[@]}")
+  fi
 
   if [ "${#windows[@]}" -eq 0 ]; then
     sleep "$POLL"
@@ -3054,8 +3198,15 @@ event_wait_or_sleep() {
     return
   fi
 
-  rec=$(FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}")
+  # Waited, never $(...): this blocks up to POLL, and bash 3.2 would hold a stop
+  # signal for all of it (watcher_waited).
+  fm_wait_tmp_cleanup
+  WATCHER_WAIT_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-watch-wait.XXXXXX") || WATCHER_WAIT_TMP=
+  TMPDIR=${WATCHER_WAIT_TMP:-${TMPDIR:-/tmp}} FM_BACKEND_EVENTS_CAPABILITY_CONFIRMED=1 watcher_waited \
+    fm_backend_wait_transition "$first_backend" "$first_session" "$POLL" "$STATE" "${windows[@]}"
   rc=$?
+  rec=$WATCHER_CAPTURE
+  fm_wait_tmp_cleanup
   case "$rc" in
     0)
       _event_cap_fails=0
@@ -3152,6 +3303,13 @@ done
 if [ -n "$EVICTED_PID" ]; then
   echo "watcher: replaced stalled pid $EVICTED_PID (beacon ${EVICTED_BEAT_AGE}s past hard bound ${WATCHER_STALL_BOUND}s)"
 fi
+handling_successor_has_queued_row() {
+  local queued=1
+  fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK" || return 1
+  [ ! -s "$FM_WAKE_QUEUE" ] || queued=0
+  fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+  return "$queued"
+}
 WATCHER_RECOVERY_PENDING=0
 if [ -n "${FM_LOCK_RECOVERED_PID:-}" ]; then
   WATCHER_RECOVERY_PENDING=1
@@ -3200,6 +3358,23 @@ home_summary_refresh_detached() {
   FM_HOME_SUMMARY_IF_IDLE=1 \
     "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort </dev/null >/dev/null 2>&1 &
   HOME_SUMMARY_PID=$!
+}
+
+# Opt-in lane capacity facts (docs/configuration.md "Lane capacity"): publish
+# state/lane-capacity.json detached for the same beacon-freshness reason as the
+# home summary above. bin/fm-capacity.sh's header owns the document.
+LANE_CAPACITY_PID=
+lane_capacity_publish_detached() {
+  if [ -n "$LANE_CAPACITY_PID" ]; then
+    if kill -0 "$LANE_CAPACITY_PID" 2>/dev/null; then
+      return 0
+    fi
+    wait "$LANE_CAPACITY_PID" 2>/dev/null || true
+    LANE_CAPACITY_PID=
+  fi
+  FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG \
+    "$SCRIPT_DIR/fm-capacity.sh" --publish </dev/null >/dev/null 2>&1 &
+  LANE_CAPACITY_PID=$!
 }
 
 RECONCILE_REQUEST_PID=
@@ -3253,9 +3428,12 @@ watcher_cleanup() {
       transition=release-lock-existing
     fi
   fi
-  fm_active_check_stop || cleanup_status=1
+  # Quietly: a stop usually lands inside the waited event wait, and bash would
+  # report the group it kills here as a "Terminated" job line on stderr.
+  fm_active_check_stop 2>/dev/null || cleanup_status=1
   fm_check_output_cleanup
   fm_capture_output_cleanup
+  fm_wait_tmp_cleanup
   fm_custom_check_snapshot_cleanup
   if [ "$owns_lock" -eq 1 ] \
     && ! fm_recovery_transition "$WATCHER_DOWNTIME_MARKER" "$transition" "$WATCH_LOCK" \
@@ -3328,9 +3506,17 @@ rerecord_device_shifted_pr_poll() {  # <id>
 resurface_after_downtime() {
   # Handling successors already have a predecessor-delivered wake on the way.
   # Re-announcing from this cycle is what turned a lost handshake into an
-  # unbounded recovery loop; stay in the poll loop and supervise instead.
+  # unbounded recovery loop. A handled host turn explicitly settles its
+  # handoff after consuming the predecessor's rows, making any row left for
+  # main a recoverable downtime episode.
   if [ "${FM_WATCH_HANDLING_SUCCESSOR:-0}" = 1 ]; then
-    return 0
+    if ! fm_recovery_marker_arm_check "$WATCHER_DOWNTIME_MARKER"; then
+      echo "watcher: recovery state could not be consumed safely" >&2
+      exit 1
+    fi
+    [ "$FM_RECOVERY_MARKER_ACTION" = recover ] || return 0
+    handling_successor_has_queued_row || return 0
+    wake "check: rearm-resurface"
   fi
   if [ "$WATCHER_RECOVERY_PENDING" -ne 1 ]; then
     if ! fm_recovery_marker_arm_check "$WATCHER_DOWNTIME_MARKER"; then
@@ -3386,9 +3572,21 @@ while :; do
   # Opt-in Herdr project groups (docs/herdr-backend.md "Project groups"):
   # display-only tags and agents view, never a wake. Off costs one file test.
   [ ! -e "$CONFIG/herdr-project-groups" ] || FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-herdr-groups.sh" sync || true
+  # Opt-in Rex attention marks, validation progress, and tint (docs/rex-backend.md
+  # "Attention marks"): display and desktop notification only, never a wake.
+  # Off (no config file and no cached record) costs two file tests and a glob.
+  if [ -e "$CONFIG/rex-status-marks" ] || [ -e "$CONFIG/rex-tint" ] \
+    || compgen -G "$STATE/.rex-mark-*" >/dev/null || compgen -G "$STATE/.rex-progress-*" >/dev/null \
+    || compgen -G "$STATE/.rex-tint-*" >/dev/null; then
+    FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-rex-marks.sh" sync >/dev/null 2>&1 || true
+  fi
 
   if [ "$(age_of "$STATE/home-summary.json")" -ge "$HOME_SUMMARY_INTERVAL" ]; then
     home_summary_refresh_detached
+  fi
+  # Opt-in lane capacity facts: off costs one file test.
+  if [ -e "$CONFIG/lane-capacity" ] && [ "$(age_of "$STATE/lane-capacity.json")" -ge 30 ]; then
+    lane_capacity_publish_detached
   fi
 
   # Bearings publishes reconcile asks as local one-shot request files and
@@ -3750,7 +3948,7 @@ EOF
     ewf="$STATE/.wedge-escalations-$key"
     pf="$STATE/.paused-$key"   # flag: this key's stale is using the bounded pause cadence
     prev=$(cat "$hf" 2>/dev/null || true)
-    # Busy match: a backend's native semantic state when available (herdr), else
+    # Busy match: a backend's native semantic state when available (herdr, rex), else
     # the last 6 non-blank lines only (the TUI footer area, where every verified
     # harness renders its busy indicator) so busy-looking strings in displayed
     # content cannot suppress stale detection. Read once per window per poll and
@@ -4000,7 +4198,7 @@ EOF
     fi
   fi
 
-  # Terminal wait: a bounded native-event wait for push-capable homes (herdr),
+  # Terminal wait: a bounded native-event wait for push-capable homes (herdr, rex),
   # else the blind poll sleep. See event_wait_or_sleep.
   event_wait_or_sleep
 done
