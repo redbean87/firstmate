@@ -40,6 +40,11 @@
 #                 otherwise admitted and reserves its place under a machine-wide
 #                 lock. See "resource policy" below for holders, reservations,
 #                 and expiry. Secondmates are not exempt.
+#   claude-subscription  a Claude launch (including a raw claude command)
+#                 needs upstream's Claude account pin (config/claude-account)
+#                 and a claude.ai login for the pinned root, asked of the claude
+#                 that both this process and the worker's login shell resolve.
+#                 Secondmates are not exempt.
 # Unknown policy names, unreadable or malformed files, and an empty policy list
 # all refuse.
 set -u
@@ -65,7 +70,7 @@ POLICY_FILE="$CONFIG/fork-policies"
 POLICIES=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$POLICY_FILE" | grep -v '^$') || true
 [ -n "$POLICIES" ] || unusable "config/fork-policies enables no policy; delete the file to disable fork policy"
 while IFS= read -r policy; do
-  case "$policy" in consult-gate|project-pin|resource) ;; *) unusable "config/fork-policies names unknown policy '$policy'" ;; esac
+  case "$policy" in consult-gate|project-pin|resource|claude-subscription) ;; *) unusable "config/fork-policies names unknown policy '$policy'" ;; esac
 done <<EOF
 $POLICIES
 EOF
@@ -134,6 +139,68 @@ policy_project_pin() {
     || refuse "project $name is pinned to harness $want_harness, not '${FM_LP_HARNESS:-}'"
   [ -z "$want_model" ] || [ "$MODEL" = "$want_model" ] \
     || refuse "project $name is pinned to model $want_model, not '${MODEL:-default}'"
+}
+
+# real_path <path>: the path with every symlink resolved, or nothing.
+real_path() { perl -MCwd=realpath -e 'my $p = realpath($ARGV[0]); print $p if defined $p' -- "$1"; }
+
+# claude-subscription. Upstream's Claude account pin (bin/fm-worker-account-lib.sh)
+# runs first, at both hooks' callers, and sheds the API credentials Claude ranks
+# above a stored login; this policy needs that pin and adds that the pinned login
+# is a claude.ai subscription. It also refuses unless the claude on this
+# process's PATH and the one the worker's login shell resolves are the same file,
+# because the worker types a bare `claude` into that shell; the sign-in check
+# then runs exactly that file.
+policy_claude_subscription() {
+  local mate='' pin_config token err declared root here shell probe from_shell out verdict name secs
+  [ "${FM_LP_HARNESS:-}" = claude ] || return 0
+  # shellcheck source=bin/fm-worker-account-lib.sh
+  . "$FORK_ROOT/bin/fm-worker-account-lib.sh" 2>/dev/null \
+    || unusable "claude-subscription cannot load upstream bin/fm-worker-account-lib.sh"
+  for name in fm_worker_account_config fm_worker_account_resolve fm_run_timed; do
+    declare -F "$name" >/dev/null || unusable "claude-subscription needs upstream $name, which is missing"
+  done
+  secs=${FM_WORKER_ACCOUNT_CHECK_SECONDS:-30}
+
+  [ "$FM_LP_KIND" = secondmate ] && mate=$FM_LP_TASK
+  pin_config=$(fm_worker_account_config claude "$CONFIG" "$mate") \
+    || unusable "the Claude account pin cannot be inspected"
+  err=$(mktemp "${TMPDIR:-/tmp}/fm-fork-claude.XXXXXX") || unusable "cannot create a temporary file"
+  token=$(fm_worker_account_resolve claude "$pin_config" "config/claude-account" 2>"$err") \
+    || { out=$(cat "$err"); rm -f "$err"; unusable "the Claude account pin is invalid: ${out#error: }"; }
+  rm -f "$err"
+  [ -n "$token" ] || refuse "claude-subscription needs a Claude account pin (config/claude-account holding 'ordinary' or a config root), so the launch sheds API credentials"
+  declared=${token%%$'\t'*}
+  root=${token#*$'\t'}
+  root=${root%%$'\t'*}
+
+  here=$(command -v claude 2>/dev/null) || here=
+  case "$here" in /*) [ -f "$here" ] && [ -x "$here" ] || here= ;; *) here= ;; esac
+  [ -n "$here" ] || refuse "no claude executable is on PATH to check"
+  shell=${SHELL:-}
+  case "$shell" in /*) [ -x "$shell" ] || shell= ;; *) shell= ;; esac
+  [ -n "$shell" ] || refuse "SHELL does not name the executable login shell the worker types its launch into, so the claude it will run cannot be checked"
+  probe=$(cd "${FM_LP_PROJECT:-}" 2>/dev/null || cd "${HOME:-/}" || exit 1
+          fm_run_timed "$secs" "$shell" -lic 'command -v claude' </dev/null 2>/dev/null) || probe=
+  from_shell=$(printf '%s\n' "$probe" | grep '^/' | tail -n 1)
+  [ -n "$from_shell" ] || refuse "the worker's login shell ($shell -lic) did not resolve a claude executable within ${secs}s"
+  [ "$(real_path "$here")" = "$(real_path "$from_shell")" ] && [ -n "$(real_path "$here")" ] \
+    || refuse "the worker's login shell runs $from_shell, but this process resolves $here; make both PATHs reach the same claude"
+
+  local -a clean=(env -i "HOME=${HOME:-}" "PATH=${PATH:-}" "USER=${USER:-$(id -un)}")
+  clean+=("LOGNAME=${LOGNAME:-${USER:-$(id -un)}}")
+  [ -z "${TMPDIR:-}" ] || clean+=("TMPDIR=$TMPDIR")
+  [ -z "$root" ] || clean+=("CLAUDE_CONFIG_DIR=$root")
+  out=$(fm_run_timed "$secs" "${clean[@]}" "$here" auth status 2>/dev/null </dev/null) || true
+  # shellcheck disable=SC2016 # jq program, not shell expansion
+  verdict=$(printf '%s\n' "$out" | jq -r 'if type != "object" or (has("loggedIn") | not) then "unreadable"
+    elif .loggedIn != true then "signed-out" else (.authMethod // "unknown") end' 2>/dev/null) || verdict=
+  case "${verdict:-unreadable}" in
+  claude.ai) return 0 ;;
+  signed-out) refuse "claude-subscription requires a claude.ai login for $declared, but $here reports it signed out" ;;
+  unreadable) refuse "claude-subscription could not read the account type from $here auth status; refusing rather than risk API billing" ;;
+  *) refuse "claude-subscription requires a claude.ai login, but $declared is signed in with $verdict; sign in with a Claude subscription or remove claude-subscription from config/fork-policies" ;;
+  esac
 }
 
 # --- resource policy ---------------------------------------------------------
@@ -400,5 +467,6 @@ EOF
 
 enabled consult-gate && policy_consult_gate
 enabled project-pin && policy_project_pin
+enabled claude-subscription && policy_claude_subscription
 enabled resource && policy_resource
 exit 0

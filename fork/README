@@ -18,7 +18,7 @@ Ownership boundary
                       Canonical copies: fork/hooks/*.block. They are the only
                       fork edits to upstream files.
   Fork policy         fork/bin/fm-launch-policy: consult gate, project pins,
-                      machine/model resource capacity.
+                      machine/model resource capacity, Claude subscription.
   ChatGPT channel     fork/chatgpt/: consultation client, loop, plan
                       validator, audit/plan/result contract templates.
   Discord bridge      fork/discord/: gateway and outbox process, sender,
@@ -66,8 +66,13 @@ fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT META KIND STATE DATA
 FM_HOME FM_ROOT, fm_meta_get, die. fm-fork-hook-check verifies these hook
 inputs and the integration boundary (below).
 
-Upstream helper dependencies of the policy (resource policy only; the consult
-gate and pins use none). The policy sources bin/fm-wake-lib.sh,
+Upstream helper dependencies of claude-subscription: it sources
+bin/fm-worker-account-lib.sh (which sources bin/fm-timeout-lib.sh) and uses
+fm_worker_account_config, fm_worker_account_resolve, and fm_run_timed; a
+missing library or function refuses the launch (exit 2).
+
+Upstream helper dependencies of the resource policy (the consult gate and
+pins use none). The policy sources bin/fm-wake-lib.sh,
 bin/fm-secondmate-registry-lib.sh, and bin/fm-backend.sh, and refuses the
 launch if any of them cannot be loaded. It then uses:
   agent state       fm_backend_agent_state, fm_backend_of_meta,
@@ -98,7 +103,7 @@ Policies and configuration
 --------------------------
 
 config/fork-policies - one policy name per line (# comments allowed):
-  consult-gate | project-pin | resource
+  consult-gate | project-pin | resource | claude-subscription
 An empty list, an unknown name, or an unreadable file refuses every launch.
 Delete the file to turn fork policy off for a home.
 
@@ -115,6 +120,29 @@ consult-gate - ship and scout launches need one of:
 project-pin - config/fork-project-pins.json:
   {"projects": {"<project directory name>": {"harness": "pi", "model": "..."}}}
 A pinned project refuses another harness or model, and any raw launch command.
+
+claude-subscription - no file of its own. A Claude launch (harness claude,
+including a raw claude command), fresh or relaunch, secondmates included:
+  - needs upstream's Claude account pin: config/claude-account, or
+    config/secondmate-accounts/<id>/claude-account for a secondmate, holding
+    'ordinary' or a config root on ONE line. Upstream resolves and checks that
+    pin before either hook and sheds the API credentials Claude ranks above a
+    stored login; no pin refuses, because without it nothing sheds them;
+  - resolves `claude` on this process's PATH and in the worker's login shell
+    ($SHELL -lic 'command -v claude', run from the project directory, bounded
+    by FM_WORKER_ACCOUNT_CHECK_SECONDS, default 30s) and refuses unless both
+    are the same file after symlinks, because the worker types a bare
+    `claude` into its pane shell;
+  - runs that file's `claude auth status` with only HOME, PATH, TMPDIR, USER,
+    LOGNAME (both derived from `id -un` when unset; the macOS keychain login
+    reads as signed out without them) and the pinned root, and allows only
+    loggedIn with authMethod claude.ai. Signed out, another method (console,
+    apiKey, ...), or an unreadable answer refuses.
+  It replaces the earlier core edit that added a `subscription` line to
+  config/claude-account; upstream's parser refuses that second line.
+  Residual gap: a PATH change the pane shell picks up only inside the new
+  worktree (direnv, per-directory shims) is not seen; the probe runs from the
+  project directory instead.
 
 resource - config/fork-resources.json:
   {"strata": {"capacity": 1, "match": {"model_prefix": "strata-local/"}}}
