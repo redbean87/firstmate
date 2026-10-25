@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# fm-discord-release - immutable, content-addressed releases of the fork
+# Discord bridge, run by the LaunchAgent (fork/discord/README, Service).
+#
+# Usage:
+#   fm-discord-release build  <checkout> <deploy-root>   stage, verify, keep; prints the id
+#   fm-discord-release verify <deploy-root> [<id>]       check a release (default: current)
+#   fm-discord-release switch <deploy-root> <id>         point `current` at a verified release
+#   fm-discord-release list   <deploy-root>              releases, newest first; * marks current, - others
+#
+# A release is <deploy-root>/releases/<id>/ holding bin/ exported from the
+# checkout's HEAD commit (refused unless bin/ matches HEAD exactly, untracked
+# files included) and the bridge's own files from fork/discord/ (listed below;
+# they may be untracked). MANIFEST.sha256 lists every file's SHA-256; the id
+# is the first 16 hex digits of the manifest's own SHA-256, so equal content
+# gives the same id and any change gives a new one. RELEASE records the id,
+# build time, bin/ commit, and source checkout. Nothing else is copied: no
+# .env, state, config, data, caches, or links. The tree is made read-only.
+#
+# build stages under <deploy-root>/.stage.*, removed on any failure; an id
+# that already exists is left untouched. It never changes `current`: switch
+# does that by atomic rename, after verify passes, and a running bridge is
+# unaffected (fm-discord-service resolves its release physically). Nothing
+# here deletes a release or touches runtime state; rollback is switch to an
+# older id and a service restart.
+set -euo pipefail
+
+BRIDGE_FILES=(fm-discord-bridge.py fm-discord-send.sh fm-discord-lib.sh fm-discord-reply-hook.sh
+  fm-discord-service README extension/firstmate-extension.json extension/fm-discord-inbound.mjs)
+
+die() { printf 'fm-discord-release: %s\n' "$*" >&2; exit 1; }
+usage() { sed -n '4,8p' "$0" | sed 's/^# //' >&2; exit 2; }
+safe_id() { case "$1" in *[!0-9a-f]* | "") return 1 ;; esac; [ "${#1}" = 16 ]; }
+
+manifest() {  # <tree>: the manifest for every file under bin/ and fork/
+  (cd "$1" && find bin fork -type f | LC_ALL=C sort | while IFS= read -r f; do shasum -a 256 "$f"; done)
+}
+
+verify_tree() {  # <release-dir> <id>
+  local dir=$1 id=$2 bad
+  [ -d "$dir" ] || die "no release $id"
+  [ -f "$dir/MANIFEST.sha256" ] && [ -f "$dir/RELEASE" ] || die "release $id has no manifest"
+  [ "$(shasum -a 256 "$dir/MANIFEST.sha256" | cut -c1-16)" = "$id" ] || die "release $id: manifest does not match its id"
+  [ "$(manifest "$dir")" = "$(cat "$dir/MANIFEST.sha256")" ] || die "release $id: files differ from the manifest"
+  bad=$(find "$dir" \( -type l -o ! -type f ! -type d \) -print | head -n 1)
+  [ -z "$bad" ] || die "release $id holds a link or special file: ${bad#"$dir"/}"
+  bad=$(find "$dir" -perm -u+w -print | head -n 1)
+  [ -z "$bad" ] || die "release $id is writable: ${bad#"$dir"/}"
+  bad=$(find "$dir" \( -name '.env*' -o -name '__pycache__' -o -name '*.pyc' -o -name 'state' -o -name '.tmp-*' \) -print | head -n 1)
+  [ -z "$bad" ] || die "release $id holds a forbidden entry: ${bad#"$dir"/}"
+}
+
+cmd_build() {
+  local src=$1 root=$2 head stage id dest f
+  [ -d "$src/.git" ] || [ -f "$src/.git" ] || die "$src is not a git checkout"
+  head=$(git -C "$src" rev-parse --verify HEAD) || die "no HEAD commit in $src"
+  [ -z "$(git -C "$src" status --porcelain --untracked-files=all -- bin)" ] || die "bin/ differs from HEAD $head; refusing"
+  for f in "${BRIDGE_FILES[@]}"; do
+    [ -f "$src/fork/discord/$f" ] && [ ! -L "$src/fork/discord/$f" ] || die "missing or linked bridge file fork/discord/$f"
+  done
+  mkdir -p "$root/releases"
+  chmod 700 "$root"
+  stage=$(mktemp -d "$root/.stage.XXXXXX")
+  # shellcheck disable=SC2064 # expand $stage now: the trap must remove this stage
+  trap "chmod -R u+w '$stage' 2>/dev/null || true; rm -rf '$stage' || true" EXIT
+  git -C "$src" archive "$head" bin | tar -x -C "$stage"
+  mkdir -p "$stage/fork/discord/extension"
+  for f in "${BRIDGE_FILES[@]}"; do cp "$src/fork/discord/$f" "$stage/fork/discord/$f"; done
+  chmod 755 "$stage/fork/discord/fm-discord-service" "$stage/fork/discord/fm-discord-bridge.py" "$stage/fork/discord/fm-discord-send.sh"
+  manifest "$stage" > "$stage/MANIFEST.sha256"
+  id=$(shasum -a 256 "$stage/MANIFEST.sha256" | cut -c1-16)
+  printf 'release %s\nbuilt %s\nbin from git %s\nfork/discord from %s\n' \
+    "$id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$head" "$src" > "$stage/RELEASE"
+  dest="$root/releases/$id"
+  if [ -e "$dest" ]; then
+    printf 'fm-discord-release: release %s already exists; left unchanged\n' "$id" >&2
+  else
+    chmod -R a-w "$stage"
+    chmod u+w "$stage"
+    mv "$stage" "$dest"
+    trap - EXIT
+    chmod a-w "$dest"
+    verify_tree "$dest" "$id"
+  fi
+  printf '%s\n' "$id"
+}
+
+current_id() { [ -L "$1/current" ] && basename "$(readlink "$1/current")"; }
+
+cmd_verify() {
+  local root=$1 id=${2:-}
+  [ -n "$id" ] || id=$(current_id "$root") || die "no current release in $root"
+  safe_id "$id" || die "not a release id: $id"
+  verify_tree "$root/releases/$id" "$id"
+  printf 'verified %s (%s files)\n' "$id" "$(wc -l < "$root/releases/$id/MANIFEST.sha256" | tr -d ' ')"
+}
+
+cmd_switch() {
+  local root=$1 id=$2
+  safe_id "$id" || die "not a release id: $id"
+  verify_tree "$root/releases/$id" "$id"
+  python3 -c 'import os, sys
+root, target = sys.argv[1], sys.argv[2]
+tmp = os.path.join(root, ".current.%d" % os.getpid())
+os.symlink(target, tmp)
+os.replace(tmp, os.path.join(root, "current"))' "$root" "releases/$id"
+  printf 'current -> %s\n' "$id"
+}
+
+cmd_list() {
+  local root=$1 cur d id
+  cur=$(current_id "$root" || true)
+  for d in "$root"/releases/*/; do
+    [ -d "$d" ] || continue
+    id=$(basename "$d")
+    printf '%s %s %s\n' "$(sed -n 's/^built //p' "$d/RELEASE" 2>/dev/null)" "$([ "$id" = "$cur" ] && echo '*' || echo '-')" "$id"
+  done | sort -r | awk '{print $2, $3, " " $1}'
+}
+
+case "${1:-}" in
+  build) [ "$#" = 3 ] || usage; cmd_build "$2" "$3" ;;
+  verify) [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage; cmd_verify "$2" "${3:-}" ;;
+  switch) [ "$#" = 3 ] || usage; cmd_switch "$2" "$3" ;;
+  list) [ "$#" = 2 ] || usage; cmd_list "$2" ;;
+  *) usage ;;
+esac

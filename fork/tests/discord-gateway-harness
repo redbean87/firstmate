@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Fake-transport harness for the fork Discord bridge's gateway client.
+
+Loads the REAL fork/discord/fm-discord-bridge.py as a module and runs its
+Gateway thread body (Gateway.run) against scripted connections. Only the
+transport is replaced: ws_connect returns scripted connections (or raises),
+ws_send records payloads, and the stop event records backoff waits instead of
+sleeping. Everything else - identify/resume, READY/RESUMED handling, op 7 and
+op 9, MESSAGE_CREATE acceptance into the durable inbox, history recovery
+through the fake REST API, and the gateway-health notices - is production
+code. No socket is opened.
+
+Usage: discord-gateway-harness <bridge.py> <scenario-json>
+The scenario is {"connections": [ <connection> ... ]}; a connection is
+"refuse" (ws_connect raises) or a list of frames, each a gateway payload
+object, "drop" (the connection raises ConnectionError), "pause" (one real
+second with no frame, so background recovery can run), or a harness action
+with no frame: {"harness": "write"|"remove", "file": <path>, "text": <content>}
+changes scripted state at that point (remove also takes an empty directory),
+and {"harness": "await", "file": <path>, "text": <substring>, "count": <n>}
+blocks until the file holds the substring at least n times (default 1), or
+exits 3 after 20 seconds. A relative path is under $FAKE_DISCORD_DIR. Awaiting
+the fake API's requests.jsonl or the bridge log synchronizes a scenario with
+the bridge's own progress instead of with time. After the last frame
+of the last connection the harness stops the gateway.
+A scenario {"health": [[down_since_or_null, now], ...]} instead runs the real
+Sources.check_gateway and an operations delivery pass at each controlled
+time against a stub gateway state, and reports the operations posts made. The bridge's
+configuration comes from the environment, as for the bridge itself.
+Prints one JSON report: sent payload ops, connect targets, recorded waits,
+and the gateway's final down_since.
+"""
+import importlib.util
+import json
+import os
+import socket
+import sys
+import threading
+
+sys.dont_write_bytecode = True  # leave no __pycache__ beside the bridge
+spec = importlib.util.spec_from_file_location("fm_discord_bridge", sys.argv[1])
+bridge = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bridge)
+with open(sys.argv[2], "r", encoding="utf-8") as f:
+    scenario = json.load(f)
+
+sent, targets, waits = [], [], []
+connections = list(scenario.get("connections", []))
+
+
+class FakeSock:
+    def close(self):
+        pass
+
+
+def await_text(path, text, count):
+    for _ in range(400):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                if f.read().count(text) >= count:
+                    return
+        except OSError:
+            pass
+        real_sleep(0.05)
+    sys.stderr.write("harness: timed out awaiting %r x%d in %s\n" % (text, count, path))
+    os._exit(3)
+
+
+class FakeConn:
+    def __init__(self, frames, last):
+        self.frames, self.last, self.sock = list(frames), last, FakeSock()
+
+    def recv_message(self, timeout):
+        if not self.frames:
+            if not self.last:
+                raise ConnectionError("scripted connection exhausted")
+            stop.set()
+            raise socket.timeout()
+        frame = self.frames.pop(0)
+        if isinstance(frame, dict) and "harness" in frame:
+            target = os.path.join(os.environ["FAKE_DISCORD_DIR"], frame["file"])
+            if frame["harness"] == "write":
+                with open(target + ".tmp", "w", encoding="utf-8") as f:
+                    f.write(frame.get("text", ""))
+                os.replace(target + ".tmp", target)
+            elif frame["harness"] == "await":
+                await_text(target, frame["text"], frame.get("count", 1))
+            elif os.path.isdir(target):
+                os.rmdir(target)
+            elif os.path.exists(target):
+                os.unlink(target)
+            raise socket.timeout()
+        if frame == "pause":
+            real_sleep(1)
+            raise socket.timeout()
+        if frame == "drop":
+            raise ConnectionError("scripted drop")
+        return json.dumps(frame)
+
+
+def fake_connect(host, port, path):
+    targets.append("%s%s" % (host, path))
+    if not connections:
+        stop.set()
+        raise ConnectionError("no more scripted connections")
+    conn = connections.pop(0)
+    if conn == "refuse":
+        raise ConnectionError("scripted refusal")
+    return FakeConn(conn, last=not connections)
+
+
+class RecordingStop(threading.Event):
+    def wait(self, timeout=None):
+        waits.append(round(timeout, 3))
+        return self.is_set()
+
+
+real_sleep = bridge.time.sleep
+bridge.ws_connect = fake_connect
+bridge.ws_send = lambda sock, payload: sent.append(payload)
+bridge.time.sleep = lambda seconds: waits.append(("sleep", round(seconds, 3)))
+
+home = os.path.abspath(os.environ["FM_HOME"])
+cfg = bridge.Config(home)
+paths = bridge.Paths(home)
+paths.ensure(cfg)
+log = bridge.Log(paths, cfg)
+api = bridge.Api(cfg)
+if "health" in scenario:
+    outbox = bridge.Outbox(cfg, paths, log, api)
+    sources = bridge.Sources(cfg, paths, log, outbox)
+
+    class StubGateway:
+        down_since = None
+    stub = StubGateway()
+    for down_since, at in scenario["health"]:
+        os.environ["FM_DISCORD_BRIDGE_NOW"] = str(at)
+        stub.down_since = down_since
+        sources.check_gateway(stub)
+        outbox.deliver("operations")
+    print(json.dumps({"ok": True}))
+    sys.exit(0)
+
+stop = RecordingStop()
+gw = bridge.Gateway(cfg, bridge.Inbound(cfg, paths, log), api, log, stop)
+gw.run()
+for t in threading.enumerate():
+    if t is not threading.current_thread():
+        t.join(timeout=30)
+print(json.dumps({
+    "ops": [p.get("op") for p in sent],
+    "resume_sessions": [p["d"].get("session_id") for p in sent if p.get("op") == 6],
+    "targets": targets,
+    "waits": waits,
+    "down_since": gw.down_since,
+    "bot_user_id": cfg.bot_user_id,
+}))

@@ -19,7 +19,10 @@ Ownership boundary
                       fork edits to upstream files.
   Fork policy         fork/bin/fm-launch-policy: consult gate, project pins,
                       machine/model resource capacity.
-  ChatGPT channel     fork/chatgpt/: consultation client, loop, template.
+  ChatGPT channel     fork/chatgpt/: consultation client, loop, plan
+                      validator, audit/plan/result contract templates.
+  Discord bridge      fork/discord/: gateway and outbox process, sender,
+                      inbound process-event extension, optional reply hook.
   Fork checks/tests   fork/bin/fm-fork-hook-check, fork/tests/.
   Fork CI             .github/workflows/fork-ci.yml.
   Home configuration  config/fork-policies, config/fork-project-pins.json,
@@ -28,8 +31,12 @@ Ownership boundary
 ChatGPT consultation channel: fork/chatgpt/ (see fork/chatgpt/README); it
 writes the consult gate's relaunch delivery proof and needs no upstream edits.
 
-Not in this stage: the Discord adapter, task slicing, and exclusive-area
-enforcement. They will live under fork/ and need no further upstream edits.
+Discord bridge: fork/discord/ (see fork/discord/README). It reaches Firstmate
+through upstream's documented extension points - an external process-event
+adapter, the reply mirror, and the fleet ledger - and needs no upstream edits.
+
+Not in this stage: task slicing and exclusive-area enforcement. They will live
+under fork/ and need no further upstream edits.
 
 
 The two hook points

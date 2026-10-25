@@ -1,0 +1,26 @@
+#!/bin/bash
+# LaunchAgent entry point for the fork Discord bridge (fork/discord/README,
+# Service). Runs the bridge from the release this file belongs to, in the
+# foreground, so launchd owns the process and its signals.
+#
+# Usage: fm-discord-service [run options]   (FM_HOME must be set)
+#
+# The environment is rebuilt rather than inherited: a fixed PATH (curl and jq
+# from /usr/bin), umask 077 for every file the bridge creates, quiet stderr
+# (structured lines go to state/discord-bridge/bridge.log; launchd's own log
+# keeps only crashes), and FM_HOME as the one required setting. The bridge
+# reads its Discord settings from $FM_HOME/.env itself; nothing secret is
+# passed here. Paths resolve physically, so switching the deployment's
+# `current` link never changes the code a running bridge calls into.
+# Tests only: FM_DISCORD_PYTHON replaces the interpreter, FM_DISCORD_TEST_PATH
+# is put before PATH (the fake Discord API), and FAKE_DISCORD_DIR passes on.
+set -eu
+umask 077
+[ -n "${FM_HOME:-}" ] && [ -d "$FM_HOME" ] || { echo "fm-discord-service: FM_HOME must name the Firstmate home" >&2; exit 1; }
+here=$(cd "$(dirname "$0")" && pwd -P)   # <release>/fork/discord
+python=${FM_DISCORD_PYTHON:-/opt/homebrew/bin/python3}
+cd "$here/../.."
+exec env -i HOME="${HOME:?}" FM_HOME="$FM_HOME" LANG=C.UTF-8 FM_DISCORD_BRIDGE_QUIET=1 \
+  PATH="${FM_DISCORD_TEST_PATH:+$FM_DISCORD_TEST_PATH:}/usr/bin:/bin:/opt/homebrew/bin" \
+  ${FAKE_DISCORD_DIR:+FAKE_DISCORD_DIR="$FAKE_DISCORD_DIR"} \
+  "$python" -B "$here/fm-discord-bridge.py" run "$@"

@@ -1,0 +1,425 @@
+Firstmate fork: Discord bridge
+==============================
+
+A direct Discord bot channel for one owner. Owner messages reach Firstmate as
+labeled untrusted input; Firstmate's final replies go to a Replies channel;
+operational events go to a separate Operations channel. It uses only
+upstream's documented extension points and edits no upstream file. Like
+fork/README, this file is plain text so upstream's documentation-audience
+check does not require it in an upstream-owned inventory.
+
+Ported in part from the earlier core-edit implementation (origin/main
+bin/fm-discord-*.sh, bin/fm-discord-gateway.py): the gateway client, the
+sender's splitting and authenticated call, and owner-only authorization.
+Not ported: the watcher shim and cadence edits, the outcome-store and
+wake-drain taps, slash commands, OAuth setup, and the Approve/Reply decision
+template.
+
+
+Files
+-----
+
+  fm-discord-bridge.py      the bridge process: gateway, inbound checks, durable
+                            inbox and outbox, reply/ledger/health sources, and
+                            the operator commands (--help lists them).
+  fm-discord-send.sh        one REST call per invocation: split, post-one, get.
+  fm-discord-lib.sh         config loading, redaction, chunking, REST helper.
+  fm-discord-reply-hook.sh  optional Claude Stop hook for full-length replies.
+  extension/                the process-event-adapter/1 package (adapter
+                            "discord") that hands inbox batches to Firstmate.
+  fm-discord-service        LaunchAgent launcher for a release (see "Service").
+  ../bin/fm-discord-release builds, verifies, and switches releases.
+
+Tests: fork/tests/fm-fork-discord-outbound.test.sh,
+fork/tests/fm-fork-discord-inbound.test.sh,
+fork/tests/fm-fork-discord-activation.test.sh (run loop, gateway through a
+fake transport, full outbox, history paging, retention, cursor recovery), and
+fork/tests/fm-fork-discord-service.test.sh (run lock, log rotation, releases,
+the agent plist, and the launcher under a restart-on-crash supervisor).
+
+
+How messages flow
+-----------------
+
+Inbound. The gateway delivers MESSAGE_CREATE. A message is accepted only when
+its server is DISCORD_GUILD_ID, its channel is in DISCORD_COMMAND_CHANNEL_IDS,
+its author id is DISCORD_OWNER_USER_ID, it is not from a bot, the bridge
+itself, or a webhook, it is an ordinary message or reply, its content is
+non-empty and at most 4000 characters, and its id is new. Authorization uses
+the authenticated author id only; nothing in the text can change it. The
+record (server, channel, sender, message id, timestamp, reply reference,
+content) is written to state/discord-bridge/inbox/pending/ with fsync and
+rename before the channel's history cursor moves; a failed write reports no
+receipt and releases the duplicate marker. After a reconnect without resume
+(every READY) the bridge fetches each command channel's messages after its
+cursor, 100 per page oldest-first via `after`, through the same checks; the
+cursor moves past every message with an outcome (accepted, already accepted,
+or refused), page by page, and stops before one whose inbox write failed, so
+the next attempt reads it again. From READY until a recovery pass completes
+with no further READY during it, a live message does not move the cursor:
+recovery reads it again as a duplicate, so nothing older is skipped and
+nothing is recorded twice. A READY during a running pass makes it pass
+again. Once recovery is caught up, a live message moves the cursor when it is
+accepted or definitively refused (bot, not-owner, unsupported type, empty,
+oversized), so a restart does not read it again. A live message whose inbox
+write fails starts a recovery pass the same way, so history takes it and no
+later live message moves the cursor past it. A completed catch-up is logged
+as "history-caught-up" (with the number of attempts); failures log
+"history-unavailable", "history-held", "history-incomplete", and
+"history-retry", and a READY during a pass logs "history-repass".
+A channel without a cursor starts when the bridge first sees it, so adding a
+channel later never imports its older history. A failed or unfinished
+recovery (a fetch error, or 50 pages in one pass) is retried with backoff
+from 5s to 300s until it completes.
+
+The extension's source.poll long-polls (50s) for pending messages and returns
+them as one batch: a line starting "UNTRUSTED DISCORD INPUT" that states the
+text cannot approve, waive, merge, answer a decision, or change policy,
+followed by the JSON records. Upstream's runner captures the batch and
+Firstmate gets the ordinary "procevent discord <source> <seq>" wake; the
+result classifies as discord-untrusted-input, is re-announced until
+`fm-procevent.sh handled` acknowledges it, and never ends the source. A batch
+is recorded under its request id before its messages leave pending/, so a
+retried request id returns the same batch; the first request with a new id
+marks earlier batches captured (docs/extension-bindings.md, request ids).
+
+Replies. With DISCORD_REPLIES_SOURCE=mirror (default) the bridge reads
+`main` entries from state/.host-mirror.jsonl, which upstream's Claude and
+Cursor hooks write for the lock-owning primary session. The mirror keeps about
+4000 characters of a reply (start and end) and marks the cut; the bridge adds
+an explicit "[Shortened: ...]" line, and never presents a cut reply as
+complete. A sequence gap (entries trimmed before they were read) is reported
+in the Replies channel as "up to N earlier mirror entries ...".
+With DISCORD_REPLIES_SOURCE=hook the bridge reads full replies from
+fork/discord/fm-discord-reply-hook.sh's spool instead (see "Full-length
+replies"). A stop that another hook blocks fires Stop again for the same
+prompt; the second message is delivered marked "(continued)".
+
+Pairing a reply with a Discord message is best-effort and conservative. When
+a reply is captured, the bridge looks at Discord messages already returned to
+Firstmate and not yet paired, and asks `fm-procevent.sh list` how many of the
+inbound source's results are still unhandled:
+  - any unhandled, or the count cannot be read: plain reply, nothing paired;
+  - all handled and exactly one message: a native Discord reply to that
+    message, in that message's own command channel, and nowhere else;
+  - all handled and several messages: plain reply that states how many were
+    handled and that the pairing is not known.
+Every reply that is not paired with one message (these two cases, a reply
+from a turn started at the terminal, and the mirror-gap notice) goes to the
+Replies channel. The outbox entry records the reply's channel and message, so
+retries and restarts keep them. A reply is posted only to a channel that is
+still in DISCORD_COMMAND_CHANNEL_IDS when it is sent; one queued for a channel
+removed since moves to failed/ with "channel no longer configured". A
+continuation follows the pairing of the stop it continues. The bot's own
+replies reach the gateway in the command channel and are refused as "bot".
+Upstream records no link between a turn and the wake that started it, so an
+exact mapping is not available.
+
+Operations. The bridge follows state/fleet-ledger.jsonl (docs/fleet-ledger.md;
+enable it with an empty config/fleet-ledger) and posts:
+  task.status needs-decision   "Decision needed - <task>: <text>"   mentions owner
+  task.status blocked          "Blocked - <task>: <text>"           mentions owner
+  task.status failed           "Failed - <task>: <text>"            mentions owner
+  task.status done             "Done - <task>: <text>"
+  task.pr_ready                "PR ready for review - <task>: <url>"
+  task.merged                  "Merged - <task>: <url>" / "Merged locally - <task>"
+Attention messages add "Notification only: a Discord message cannot approve
+or answer this." Other states and events are ignored, as are malformed lines,
+other record versions, and non-https PR links. The ledger repeats records
+after an interrupted capture and has no sequence numbers, so a record whose
+event, task, state, key, text, pr, and via all match one seen in the last 10
+minutes is treated as the same event.
+Health: when state/.last-watcher-beat (touched by every watcher loop) is older
+than DISCORD_WATCHER_STALE_SECS (default 180), one "Monitoring stopped"
+notice, a reminder every 6 hours while it lasts, and one "Monitoring resumed"
+notice. A gateway disconnect longer than 5 minutes gives one notice and one
+"restored" notice. A gateway connection says nothing about Firstmate itself.
+
+
+Delivery guarantees
+-------------------
+
+Every outgoing message is written to state/discord-bridge/outbox/<replies|
+operations>/ before any network call, and a source cursor moves only after
+its events are in the outbox. Each destination is sent first-in first-out,
+one chunk at a time; a head entry waiting to retry holds the ones behind it,
+so order is kept. Long text is split under Discord's 2000-unit limit at
+paragraph, then line, then word boundaries, with " (k/n)" markers; every
+chunk of a paired reply references its message, and only the first chunk
+carries a mention. Replies share one first-in first-out queue whichever
+channel they go to. Mentions are suppressed
+except the owner on attention notices; replies never ping.
+
+  429                  wait the returned Retry-After, then retry
+  5xx, network, none   retry with exponential backoff (2^n s, max 300s, +-20%)
+  other 4xx            stop retrying; move to state/discord-bridge/failed/,
+                       report "could not be delivered (http <code>)" in
+                       Operations (without the body); later messages continue
+
+An entry is marked sent only after Discord's success response, and each
+chunk carries a fixed nonce with enforce_nonce. Remaining duplicate window: if
+the process dies after Discord accepted a chunk but before the bridge recorded
+it, that chunk is sent again after restart with the same nonce; Discord drops
+the repeat only within its short nonce window (minutes), so a restart after
+that window can show the chunk twice. Exactly-once delivery is not claimed.
+
+The outbox holds at most DISCORD_OUTBOX_MAX entries per destination (default
+500). When full, the bridge stops reading that source (nothing is discarded)
+until entries drain; a mirror entry trimmed meanwhile is then reported as a
+gap. Each full episode is logged once ("outbox-full", with the count, never
+text), a full Replies backlog also posts one Operations notice, and the end
+of the episode is logged ("outbox-capacity-restored").
+
+Retention. Hourly while running (and at start), cleanup removes inbound
+duplicate markers, delivered-event markers, and captured or claimed inbox
+copies whose files are older than 30 days, and logs {"event": "prune",
+"removed": n, "errors": n}; a record it cannot remove stays and is counted.
+The inbox, outbox, failed/, uncaptured batches, and cursors are never removed
+by age; failed/ is kept until removed by hand. Removing a 30-day-old
+duplicate marker cannot readmit its message: history is read only after each
+channel's cursor, and the gateway replays only events from the current
+session.
+
+
+Setup
+-----
+
+1. Discord application: create a bot, copy its token, and invite it to the
+   server with Send Messages and Read Message History. Enable the privileged
+   Message Content intent in the Developer Portal and set
+   DISCORD_MESSAGE_CONTENT=1, or the gateway delivers empty content for
+   messages that do not mention the bot (those are refused as empty).
+2. Channels: a command channel (inbound; paired replies answer there), a
+   Firstmate Replies channel (every other reply), and a Firstmate Operations
+   channel. Replies and Operations must differ, and Operations never accepts
+   commands. The bot needs View Channel, Send Messages, and Read Message
+   History in each command channel. DISCORD_COMMAND_CHANNEL_IDS is the whole
+   inbound allowlist; any other channel is refused, so a test channel left
+   out of it needs no setting.
+3. $FM_HOME/.env (gitignored; the environment wins over it):
+     DISCORD_BOT_TOKEN=...
+     DISCORD_GUILD_ID=<server id>
+     DISCORD_OWNER_USER_ID=<owner user id>
+     DISCORD_COMMAND_CHANNEL_IDS=<id>[,<id>...]
+     DISCORD_REPLIES_CHANNEL_ID=<id>
+     DISCORD_OPERATIONS_CHANNEL_ID=<id>
+     DISCORD_MESSAGE_CONTENT=1
+   Optional: DISCORD_REPLIES_SOURCE=mirror|hook, DISCORD_INBOUND_SOURCE_ID
+   (default discord-inbound), DISCORD_WATCHER_STALE_SECS, DISCORD_OUTBOX_MAX.
+   Check with: fork/discord/fm-discord-bridge.py check-config
+   The bridge refuses to start when any required value is absent or invalid,
+   and when a configured channel is not in the configured server.
+4. Fleet ledger: touch config/fleet-ledger.
+5. Run the bridge: fork/discord/fm-discord-bridge.py run
+   Its first start creates state/discord-bridge/, which the extension needs.
+   It runs in the foreground; to run it as a login service instead, see
+   "Service". `status` and `stop` report and stop it, deciding by the run
+   lock (state/discord-bridge/bridge.lock), never by the pid in that file
+   alone; a second `run` exits "already running". A stopped bridge keeps its
+   inbox and outbox, and resumes them on start. Messages it accepts wait in
+   the inbox until step 6 is done.
+6. Inbound extension (outside every Git project, as upstream requires), with
+   FM_HOME exported as this home:
+     mkdir -p "$HOME/.local/share/firstmate-packages"
+     cp -R fork/discord/extension "$HOME/.local/share/firstmate-packages/discord-inbound"
+     bin/fm-extension.sh bind "$HOME/.local/share/firstmate-packages/discord-inbound" \
+       --adapter discord --trust-same-user-code --consent artifact-references
+     bin/fm-procevent.sh register-extension discord discord-inbound \
+       --config-ref "dir:$FM_HOME/state/discord-bridge"
+   Keep the printed owner token; `fm-procevent.sh retire discord-inbound
+   --if-owner <token>` removes the registration. A registered source keeps
+   Firstmate's supervision running, and the watcher restarts it every loop.
+   To change the package, retire the registration and then the binding
+   (bin/fm-extension.sh retire-binding), and bind the new copy.
+   Registered before the bridge's first start, the source reports
+   "extension-unavailable" results until state/discord-bridge/ exists. To
+   recover, start the bridge, mark each such result handled
+   (`fm-procevent.sh handled discord-inbound <sequence>`; `fm-procevent.sh
+   list` shows the pending count), and run `fm-procevent.sh ensure-listening
+   discord-inbound`.
+
+
+Service (prepared, not activated)
+---------------------------------
+
+A per-user LaunchAgent, org.firstmate.fork.discord-bridge, can run the bridge
+at login from an immutable release. These pieces exist in the repository;
+nothing loads them. Installing is a separate, deliberate step.
+
+Releases. fork/bin/fm-discord-release builds content-addressed, read-only
+releases under a deployment root (default used below:
+D=~/.local/share/firstmate-discord-bridge):
+  fork/bin/fm-discord-release build  "$PWD" "$D"    prints the new id
+  fork/bin/fm-discord-release verify "$D" <id>     manifest, read-only, no links,
+                                                   no .env/state/caches
+  fork/bin/fm-discord-release switch "$D" <id>     atomically repoint current
+  fork/bin/fm-discord-release list   "$D"
+A release holds bin/ exported from HEAD (build refuses if bin/ differs from
+HEAD, untracked files included) and this directory's runtime files;
+MANIFEST.sha256 lists every file and the id is its digest. build never
+changes `current`, never deletes a release, and touches no runtime state.
+
+Agent. fork/discord/fm-discord-service is the launcher: it clears the
+environment, sets PATH=/usr/bin:/bin:/opt/homebrew/bin, umask 077, FM_HOME,
+and quiet stderr, and runs /opt/homebrew/bin/python3 -B on its own release,
+resolved physically, so switching `current` never changes a running bridge.
+The bridge reads its Discord settings from $FM_HOME/.env (keep it 0600).
+`fm-discord-bridge.py launchd-plist [--deploy "$D"]` prints the agent:
+RunAtLoad; KeepAlive {SuccessfulExit: false}, so a crash or signal is
+restarted (at most every 60s) and a clean stop is not; ExitTimeOut 75, so a
+send in flight finishes; Umask 077; output to
+$FM_HOME/state/discord-bridge/launchd.log (crashes only; the structured log
+is bridge.log, rotated at about 5 MB to bridge.log.1). Write it outside
+~/Library/LaunchAgents until installing: a plist there loads at next login.
+
+Installing (only when authorized; never alongside a foreground bridge or
+the legacy dev.firstmate.discord-gateway, which must stay disabled):
+  fork/discord/fm-discord-bridge.py stop          end the foreground bridge
+  fork/discord/fm-discord-bridge.py status        must say "not running"
+  fork/discord/fm-discord-bridge.py launchd-plist --deploy "$D" \
+    > ~/Library/LaunchAgents/org.firstmate.fork.discord-bridge.plist
+  plutil -lint ~/Library/LaunchAgents/org.firstmate.fork.discord-bridge.plist
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.firstmate.fork.discord-bridge.plist
+Operating:
+  launchctl print gui/$(id -u)/org.firstmate.fork.discord-bridge    state, pid
+  fork/discord/fm-discord-bridge.py status                          lock holder, queues
+  tail state/discord-bridge/bridge.log                              events
+  launchctl kickstart -k gui/$(id -u)/org.firstmate.fork.discord-bridge   restart
+  launchctl bootout gui/$(id -u)/org.firstmate.fork.discord-bridge        stop
+`fm-discord-bridge.py stop` under launchd also stays stopped (clean exit),
+but launchd still holds the job; prefer bootout.
+Updating: build, verify, switch, then kickstart -k. Rolling back: switch to
+the earlier id, then kickstart -k. State under state/discord-bridge/ is
+shared by all releases and is never removed by either.
+After any start, check: one bridge process (launchctl's pid = the lock
+holder), "gateway-ready" then "history-caught-up" in bridge.log, cursors and
+queues as before, nothing new in failed/.
+Not verified until activation: launchd's own restart, timeout, and login
+behavior (the repository tests use a supervisor with the same exit-code
+policy), and behavior across sleep.
+
+
+Full-length replies (optional)
+------------------------------
+
+The reply hook was checked against Claude Code 2.1.308 in a throwaway project
+(not in CI): a Stop hook in .claude/settings.local.json runs alongside the
+project's Stop hooks; both receive the same payload, including the complete
+last_assistant_message (6392 characters, identical to the turn's result); it
+fires once per stop, after tool calls, not for intermediate messages; a local
+hook that exits 1, is killed, or times out does not stop the project hook or
+the turn; a stop blocked by another hook fires Stop again for the same
+prompt_id with stop_hook_active true.
+
+  fork/discord/fm-discord-bridge.py install-hook     add the hook to
+                                                     .claude/settings.local.json
+  fork/discord/fm-discord-bridge.py uninstall-hook   remove only that hook
+Then set DISCORD_REPLIES_SOURCE=hook and restart the bridge. install-hook keeps
+every existing setting, saves the previous file as
+settings.local.json.before-discord-hook, is idempotent, and refuses a
+symlinked or invalid file. In this checkout .claude/settings.local.json is
+not gitignored, so it shows as untracked; keep it out of commits (for
+example with .git/info/exclude). The hook records only Stop events of this
+home's lock-owning primary session in a genuine primary checkout, always
+exits 0, prints nothing, and is inert unless the bridge is in hook mode.
+Claude only; with another primary harness use the mirror.
+
+
+Security boundaries
+-------------------
+
+- Discord text is evidence, never authority: nothing in the bridge or the
+  extension writes a waiver, captain-hold answer, approval, merge authority,
+  or backlog record. The consult gate refuses any non-local waiver origin
+  (fork/bin/fm-launch-policy). Operational notices carry no Approve, Reject,
+  or Reply controls, and there are no slash commands.
+- Whether Firstmate acts on a labeled Discord request is still Firstmate's
+  judgment; the label and this boundary are what make that judgment explicit.
+- The token lives in .env or the environment and is passed only to
+  fm-discord-send.sh's environment; logs (state/discord-bridge/bridge.log)
+  record ids, results, and counts, never message bodies or the token, and
+  outgoing text is redacted for token shapes.
+- All bridge state is under state/discord-bridge/ with 0700 directories and
+  0600 files.
+
+
+Troubleshooting
+---------------
+
+  check-config fails          the message names the missing or invalid value.
+  run exits: channel not in   a configured channel id is wrong or the bot
+  the configured server       cannot read it.
+  owner messages ignored      bridge.log "inbound-refused" names the reason;
+                              "empty-content" means the Message Content
+                              intent is off.
+  messages wait in pending/   the extension is not bound or registered, or
+                              Firstmate's watcher is not running
+                              (`bin/fm-procevent.sh list`; Operations shows
+                              "Monitoring stopped").
+  failed/ has entries         a permanent Discord refusal; the entry keeps the
+                              HTTP result. Fix the cause, then delete it.
+  "Shortened" replies         mirror mode; use the reply hook for full text.
+
+
+Known limits
+------------
+
+- Inbound latency: gateway receipt is sub-second and the extension returns a
+  batch within about half a second of it being written, but Firstmate sees the wake on its
+  watcher's next loop (FM_POLL, default 15s) and only between turns, so
+  expect roughly 1-20 seconds while Firstmate is idle, plus the rest of any
+  turn in progress, plus Firstmate's own response time.
+- Outbound latency: about 1-3 seconds after the turn ends or the ledger
+  record is written; ledger lines Firstmate itself writes trail by up to one
+  watcher loop (docs/fleet-ledger.md).
+- Decisions that Firstmate files on the backlog without a status line reach
+  Discord only inside its final reply, not as an Operations notice.
+- The gateway client's protocol handling (identify, resume, op 7, op 9,
+  backoff, recovery after READY) is tested through a fake transport
+  (fork/tests/discord-gateway-harness); the websocket framing, TLS, heartbeat
+  timing, and Discord's real session behavior need a live server to verify.
+- Pairing replies with Discord messages is heuristic, as described above.
+- The extension's bound copy is a snapshot of fork/discord/extension; a
+  change there takes effect only after retiring and re-binding (Setup step 6).
+- A message in a thread under a command channel has the thread's own channel
+  id, so it is refused as wrong-channel; post directly in the channel.
+- Recovery limits. By design: an inbox write that keeps failing stalls
+  recovery at that message (retried 5s, 10s, ... up to 300s apart, logged
+  "history-held" each time); live messages are still recorded meanwhile but
+  no cursor moves until the write succeeds. By design: a message Discord's
+  history returns malformed is treated as an outcome and passed, so it cannot
+  block its channel forever. Residual risk: duplicate markers are kept 30
+  days, so a cursor held back longer than that could readmit a message whose
+  marker was cleaned up. Residual risk: if the recovery thread itself crashes,
+  history stays not caught up (live messages recorded, cursors held) until the
+  next READY starts recovery again; a restart also does.
+
+
+Task threads (design only; not implemented)
+-------------------------------------------
+
+Replies are native replies in the command channel today. Threads could be
+added later, off by default behind one new setting, without changing the
+inbound checks or the outbox:
+
+- Creating: when a paired reply is queued, its outbox entry gains a first
+  step "open the thread for message M" (POST /channels/<channel>/messages/
+  <M>/threads), recorded before the call. A thread started from a message
+  has that message's id, so a retry after a crash, or Discord's "already
+  has a thread" answer, resolves to the same thread without a nonce. The
+  reply then goes to channel M.
+- Allowlist: the bridge keeps a durable table of threads it opened (thread
+  id, parent channel, triggering message). A message in a thread is
+  accepted only when its thread is in that table and the parent is still in
+  DISCORD_COMMAND_CHANNEL_IDS; every other check (server, owner, bot,
+  webhook, type, size, duplicate) is unchanged. Threads others open stay
+  refused, so the allowlist never widens by itself.
+- Follow-ups: a reply paired with a message in a known thread goes to that
+  thread; Config.channel_for accepts table threads whose parent is allowed.
+- Recovery: each known, unarchived thread gets its own history cursor, read
+  with the same oldest-first `after` paging after a reconnect.
+- Archived and locked threads: sending to an archived thread reopens it when
+  the bot may send in threads; a locked or deleted thread is a permanent
+  failure (failed/ plus an Operations notice), never a silent fallback.
+- Permissions: Create Public Threads and Send Messages in Threads in each
+  command channel; startup would check them before enabling the setting.

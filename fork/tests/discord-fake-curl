@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Fake curl for the fork Discord tests: a scripted Discord REST API.
+
+Driven by $FAKE_DISCORD_DIR:
+  requests.jsonl  one record per call: method, path, body (parsed JSON), auth
+                  (whether an Authorization header file was given; the token
+                  itself is never recorded)
+  responses       FIFO of scripted outcomes, one per line, consumed by POST
+                  calls: "<http-code> [retry-after]" or "fail" (transport
+                  error); an empty queue answers 200
+  get/<name>.json body for a GET whose path, with "/" and "?" and "&" and "="
+                  replaced by "_", equals <name>; absent answers 404
+  get-fail        when it holds <n> > 0, the next n GETs answer 503
+  get-hold        while it exists and holds a string the GET's file name
+                  contains, that GET waits (up to 20s) until it is removed
+  kill-after-post when it holds <n>, the n-th successful POST is answered and
+                  then the calling fm-discord-bridge.py process is SIGKILLed,
+                  simulating a crash between Discord's acceptance and the
+                  bridge recording it
+POST bodies get {"id": "<n>"} with a counter so each sent message has an id.
+"""
+import json
+import os
+import signal
+import subprocess
+import time
+import sys
+
+args = sys.argv[1:]
+opts = {"-D": None, "-o": None, "-w": None, "-X": "GET", "--data-binary": None}
+headers = []
+url = None
+i = 0
+while i < len(args):
+    a = args[i]
+    if a in ("-D", "-o", "-w", "-X", "--data-binary", "-m"):
+        opts[a] = args[i + 1]
+        i += 2
+        continue
+    if a == "-H":
+        headers.append(args[i + 1])
+        i += 2
+        continue
+    if a == "-s":
+        i += 1
+        continue
+    url = a
+    i += 1
+
+base = os.environ["FAKE_DISCORD_DIR"]
+path = url.split("/api/v10", 1)[1] if url and "/api/v10" in url else (url or "")
+body = None
+if opts["--data-binary"] and opts["--data-binary"].startswith("@"):
+    with open(opts["--data-binary"][1:], "r", encoding="utf-8") as f:
+        body = json.load(f)
+auth = any(h.startswith("@") and open(h[1:], encoding="utf-8").read().startswith("Authorization: Bot ")
+           for h in headers)
+with open(os.path.join(base, "requests.jsonl"), "a", encoding="utf-8") as f:
+    f.write(json.dumps({"method": opts["-X"], "path": path, "body": body, "auth": auth}) + "\n")
+
+code, retry, out = "200", None, "{}"
+if opts["-X"] == "POST":
+    queue = os.path.join(base, "responses")
+    lines = []
+    if os.path.exists(queue):
+        with open(queue, "r", encoding="utf-8") as f:
+            lines = [l for l in f.read().splitlines() if l.strip()]
+    if lines:
+        head = lines.pop(0).split()
+        with open(queue, "w", encoding="utf-8") as f:
+            f.write("".join(l + "\n" for l in lines))
+        if head[0] == "fail":
+            sys.exit(7)
+        code = head[0]
+        retry = head[1] if len(head) > 1 else None
+    if code.startswith("2"):
+        counter = os.path.join(base, "counter")
+        n = int(open(counter).read()) + 1 if os.path.exists(counter) else 1
+        with open(counter, "w") as f:
+            f.write(str(n))
+        out = json.dumps({"id": str(900000000000000000 + n)})
+        kill_after = os.path.join(base, "kill-after-post")
+        if os.path.exists(kill_after) and int(open(kill_after).read().strip()) == n:
+            os.unlink(kill_after)
+            # Accepted remotely, then the bridge dies before recording it.
+            pid = os.getppid()
+            while pid > 1:
+                ps = subprocess.run(["ps", "-o", "ppid=,command=", "-p", str(pid)],
+                                    capture_output=True, text=True).stdout.strip()
+                if not ps:
+                    break
+                ppid, _, command = ps.partition(" ")
+                if "fm-discord-bridge.py" in command:
+                    os.kill(pid, signal.SIGKILL)
+                    break
+                pid = int(ppid)
+    elif code == "429":
+        out = json.dumps({"retry_after": float(retry or 1)})
+else:
+    get_hold = os.path.join(base, "get-hold")
+    name = path.replace("/", "_").replace("?", "_").replace("&", "_").replace("=", "_")
+    for _ in range(400):
+        try:
+            hold = open(get_hold, encoding="utf-8").read().strip()
+        except OSError:
+            break
+        if not hold or hold not in name:
+            break
+        time.sleep(0.05)
+    get_fail = os.path.join(base, "get-fail")
+    if os.path.exists(get_fail) and int(open(get_fail).read().strip() or 0) > 0:
+        left = int(open(get_fail).read().strip()) - 1
+        with open(get_fail, "w") as f:
+            f.write(str(left))
+        if opts["-w"]:
+            sys.stdout.write("503")
+        sys.exit(0)
+    canned = os.path.join(base, "get", name + ".json")
+    if os.path.exists(canned):
+        with open(canned, "r", encoding="utf-8") as f:
+            out = f.read()
+    else:
+        code, out = "404", "{}"
+
+if opts["-D"]:
+    with open(opts["-D"], "w", encoding="utf-8") as f:
+        f.write("HTTP/1.1 %s X\r\n" % code)
+        if retry:
+            f.write("Retry-After: %s\r\n" % retry)
+if opts["-o"]:
+    with open(opts["-o"], "w", encoding="utf-8") as f:
+        f.write(out)
+if opts["-w"]:
+    sys.stdout.write(code)

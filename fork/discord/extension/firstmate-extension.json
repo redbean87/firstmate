@@ -1,0 +1,15 @@
+{
+  "schema": "firstmate.extension-manifest.v1",
+  "id": "org.firstmate.fork.discord-inbound",
+  "version": "1.0.0",
+  "host_protocols": [1],
+  "entrypoint": "fm-discord-inbound.mjs",
+  "capabilities": [
+    {
+      "name": "process-event-adapter",
+      "versions": [1],
+      "adapter_names": ["discord"]
+    }
+  ],
+  "required_consents": ["artifact-references"]
+}
