@@ -241,6 +241,58 @@ test_ledger_events_reach_operations_once() {
   pass "ledger: decision, blocker, failure, completion, PR ready, and merges reach operations once; duplicates and malformed records are safe"
 }
 
+test_ledger_rate_limit_summarizes_held_back_notices() {
+  local st="$DTMP/ledgerrate/home/state" ops summary t
+  discord_world ledgerrate
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}" DISCORD_OPS_RATE_MAX=2 DISCORD_OPS_RATE_WINDOW_SECS=600 FM_DISCORD_BRIDGE_NOW=5000)
+  fresh_beat
+  : > "$W_HOME/config/fleet-ledger"
+  bridge tick
+  for t in t1 t2 t3 t4; do
+    FM_HOME="$W_HOME" "$LEDGER" pr_ready "$t" "https://github.com/o/r/pull/${t#t}" || fail "pr_ready $t failed"
+  done
+  printf 'failed: build broke\n' > "$st/t5.status"
+  FM_HOME="$W_HOME" "$LEDGER" capture || fail "ledger capture failed"
+  bridge tick; bridge tick
+  ops=$(posts "$D_OPS" | jq -r .content)
+  [ "$(post_count "$D_OPS")" = 2 ] || fail "only DISCORD_OPS_RATE_MAX notices post inside one window: $ops"
+  assert_not_contains "$ops" "t3" "a notice over the limit is held back"
+  assert_grep '"event": "ledger-rate-limited"' "$W_HOME/state/discord-bridge/bridge.log" "held-back notices are logged"
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}" DISCORD_OPS_RATE_MAX=2 DISCORD_OPS_RATE_WINDOW_SECS=600 FM_DISCORD_BRIDGE_NOW=5700)
+  bridge tick; bridge tick
+  [ "$(post_count "$D_OPS")" = 3 ] || fail "the end of the window posts exactly one summary"
+  summary=$(posts "$D_OPS" | tail -n 1)
+  assert_contains "$(jq -r .content <<<"$summary")" "3 more operational notices" "the summary counts every held-back notice"
+  assert_contains "$(jq -r .content <<<"$summary")" "(1 needing attention)" "the summary counts attention notices"
+  assert_contains "$(jq -r .content <<<"$summary")" "Tasks: t3, t4, t5" "the summary names the held-back tasks"
+  [ "$(jq -c .mentions <<<"$summary")" = "[\"$D_OWNER\"]" ] || fail "a summary holding an attention notice mentions the owner"
+  FM_HOME="$W_HOME" "$LEDGER" pr_ready t6 https://github.com/o/r/pull/6 || fail "pr_ready t6 failed"
+  bridge tick
+  [ "$(post_count "$D_OPS")" = 4 ] || fail "a fresh window posts normally again"
+  assert_contains "$(posts "$D_OPS" | tail -n 1 | jq -r .content)" "PR ready for review - t6" "the next notice is the event itself"
+  pass "ledger rate limit: notices over the window cap are held back, logged, and summarized once with counts, tasks, and an owner mention"
+}
+
+test_transient_failures_end_after_max_attempts() {
+  discord_world exhaust
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}" DISCORD_MAX_ATTEMPTS=3 FM_DISCORD_BRIDGE_NOW=1000)
+  fresh_beat
+  bridge tick
+  printf '503\n503\n503\n' > "$W_FAKE/responses"
+  mirror_say "never delivered"
+  bridge tick
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}" DISCORD_MAX_ATTEMPTS=3 FM_DISCORD_BRIDGE_NOW=1010); bridge tick
+  [ -z "$(ls "$W_HOME/state/discord-bridge/failed")" ] || fail "two attempts are still under the limit"
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}" DISCORD_MAX_ATTEMPTS=3 FM_DISCORD_BRIDGE_NOW=1030); bridge tick
+  [ "$(post_count "$W_REPLIES")" = 3 ] || fail "the third attempt is the last"
+  [ "$(find "$W_HOME/state/discord-bridge/failed" -name '*.json' | wc -l | tr -d ' ')" = 1 ] || fail "an exhausted message is kept for diagnosis"
+  [ -z "$(ls "$W_HOME/state/discord-bridge/outbox/replies")" ] || fail "an exhausted message no longer holds the queue"
+  assert_contains "$(posts "$D_OPS" | jq -r .content)" "gave up after 3 attempts, last http 503" "the give-up is reported in operations"
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}" DISCORD_MAX_ATTEMPTS=3 FM_DISCORD_BRIDGE_NOW=2000); bridge tick
+  [ "$(post_count "$W_REPLIES")" = 3 ] || fail "an exhausted message is never retried"
+  pass "bounded retries: transient failures stop after DISCORD_MAX_ATTEMPTS, are kept in failed/, and reported once"
+}
+
 test_watcher_health_alerts_once_and_recovers() {
   local stale
   discord_world health

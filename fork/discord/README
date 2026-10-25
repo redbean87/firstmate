@@ -129,6 +129,18 @@ other record versions, and non-https PR links. The ledger repeats records
 after an interrupted capture and has no sequence numbers, so a record whose
 event, task, state, key, text, pr, and via all match one seen in the last 10
 minutes is treated as the same event.
+Rate limit: at most DISCORD_OPS_RATE_MAX ledger notices (default 10) are
+posted per DISCORD_OPS_RATE_WINDOW_SECS (default 600). A notice over the limit
+is not posted on its own; it is logged as "ledger-rate-limited" (key and task,
+never text) and counted. When the window ends, one summary posts instead:
+"Discord notices paused: N more operational notices in <window> were not
+posted one by one ... Tasks: <up to 20 task ids>", mentioning the owner when
+any held-back notice needed attention. While that summary waits for room in a
+full outbox, new notices join it. The window and counts are kept in the
+ledger cursor, so a restart neither resets the limit nor loses the summary.
+Health notices and the bridge's own delivery-failure notices are not counted;
+they are already limited to one notice per episode (watcher, gateway, full
+backlog) or one per failed message.
 Health: when state/.last-watcher-beat (touched by every watcher loop) is older
 than DISCORD_WATCHER_STALE_SECS (default 180), one "Monitoring stopped"
 notice, a reminder every 6 hours while it lasts, and one "Monitoring resumed"
@@ -155,6 +167,14 @@ except the owner on attention notices; replies never ping.
   other 4xx            stop retrying; move to state/discord-bridge/failed/,
                        report "could not be delivered (http <code>)" in
                        Operations (without the body); later messages continue
+  DISCORD_MAX_ATTEMPTS failed attempts in a row (default 30, about two hours
+                       with the 300s cap; 429s count too): treated as a
+                       permanent failure, reported as "gave up after N
+                       attempts, last <result>"
+
+A failed Operations message is only logged ("outbox-permanent-failure"); it is
+never announced in Operations, so a broken Operations channel cannot produce
+notices about its own failures.
 
 An entry is marked sent only after Discord's success response, and each
 chunk carries a fixed nonce with enforce_nonce. Remaining duplicate window: if
@@ -205,7 +225,9 @@ Setup
      DISCORD_OPERATIONS_CHANNEL_ID=<id>
      DISCORD_MESSAGE_CONTENT=1
    Optional: DISCORD_REPLIES_SOURCE=mirror|hook, DISCORD_INBOUND_SOURCE_ID
-   (default discord-inbound), DISCORD_WATCHER_STALE_SECS, DISCORD_OUTBOX_MAX.
+   (default discord-inbound), DISCORD_WATCHER_STALE_SECS, DISCORD_OUTBOX_MAX,
+   DISCORD_OPS_RATE_MAX, DISCORD_OPS_RATE_WINDOW_SECS, DISCORD_MAX_ATTEMPTS.
+   A missing, zero, negative, or non-numeric value uses the default.
    Check with: fork/discord/fm-discord-bridge.py check-config
    The bridge refuses to start when any required value is absent or invalid,
    and when a configured channel is not in the configured server.

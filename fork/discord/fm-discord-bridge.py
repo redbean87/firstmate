@@ -42,6 +42,7 @@ DISCORD_GUILD_ID, DISCORD_OWNER_USER_ID, DISCORD_COMMAND_CHANNEL_IDS,
 DISCORD_REPLIES_CHANNEL_ID, DISCORD_OPERATIONS_CHANNEL_ID, and optionally
 DISCORD_REPLIES_SOURCE (mirror|hook), DISCORD_MESSAGE_CONTENT,
 DISCORD_INBOUND_SOURCE_ID, DISCORD_WATCHER_STALE_SECS, DISCORD_OUTBOX_MAX,
+DISCORD_OPS_RATE_MAX, DISCORD_OPS_RATE_WINDOW_SECS, DISCORD_MAX_ATTEMPTS,
 DISCORD_API_BASE. Secrets are never printed or logged.
 """
 import base64
@@ -128,7 +129,8 @@ class Config:
             "DISCORD_COMMAND_CHANNEL_IDS", "DISCORD_REPLIES_CHANNEL_ID",
             "DISCORD_OPERATIONS_CHANNEL_ID", "DISCORD_REPLIES_SOURCE",
             "DISCORD_MESSAGE_CONTENT", "DISCORD_INBOUND_SOURCE_ID",
-            "DISCORD_WATCHER_STALE_SECS", "DISCORD_OUTBOX_MAX", "DISCORD_API_BASE")
+            "DISCORD_WATCHER_STALE_SECS", "DISCORD_OUTBOX_MAX", "DISCORD_OPS_RATE_MAX",
+            "DISCORD_OPS_RATE_WINDOW_SECS", "DISCORD_MAX_ATTEMPTS", "DISCORD_API_BASE")
 
     def __init__(self, home):
         self.home = home
@@ -150,6 +152,9 @@ class Config:
         self.source_id = raw["DISCORD_INBOUND_SOURCE_ID"].strip() or "discord-inbound"
         self.stale_secs = self._int(raw["DISCORD_WATCHER_STALE_SECS"], 180)
         self.outbox_max = self._int(raw["DISCORD_OUTBOX_MAX"], 500)
+        self.ops_rate_max = self._int(raw["DISCORD_OPS_RATE_MAX"], 10)
+        self.ops_rate_window = self._int(raw["DISCORD_OPS_RATE_WINDOW_SECS"], 600)
+        self.max_attempts = self._int(raw["DISCORD_MAX_ATTEMPTS"], 30)
         self.api_base = (raw["DISCORD_API_BASE"].strip() or API_DEFAULT).rstrip("/")
         self.bot_user_id = ""
 
@@ -654,17 +659,23 @@ class Outbox:
                 else:
                     write_json(path, entry)
                 continue
+            entry["attempts"] += 1
+            # A transient failure that never clears ends like a permanent one,
+            # so one stuck head entry cannot hold its destination forever.
+            if rc != 2 and entry["attempts"] >= self.cfg.max_attempts:
+                rc, out = 2, "gave up after %d attempts, last %s" % (entry["attempts"], out)
             if rc == 2:
                 entry["failure"] = out
                 write_json(path, entry)
                 os.replace(path, os.path.join(self.paths.failed, names[0]))
                 self.log("outbox-permanent-failure", dest=dest, event_id=entry["event_id"], result=out)
+                # A failed operations message is only logged: a notice about it
+                # would go to the same failing channel and could repeat itself.
                 if dest != "operations":
                     self.enqueue("operations", "delivery-failed-%s-%s" % (dest, sha(names[0])[:16]),
                                  "Discord bridge: a %s message could not be delivered (%s) and was kept "
                                  "for diagnosis; later messages continue." % (entry["kind"], out), "health")
                 continue
-            entry["attempts"] += 1
             if rc == 3:
                 try:
                     delay = max(0.5, float(out.split(" ", 1)[1]))
@@ -886,18 +897,65 @@ class Sources:
             if mapped:
                 fields = [str(rec.get(k, "")) for k in ("event", "task", "state", "key", "text", "pr", "via")]
                 key = sha("\x1f".join(fields))[:24]
-                if key not in recent:
+                if key not in recent and self.rate_limited(cur, rec["task"], mapped[1]):
+                    recent[key] = now()
+                    self.log("ledger-rate-limited", key=key, task=rec["task"])
+                elif key not in recent:
                     event_id = "ledger-%s-%s" % (key, rec.get("ts", 0))
                     r = self.outbox.enqueue("operations", event_id, mapped[0], "operation",
                                             mention=self.cfg.owner if mapped[1] else None)
                     if r == "full":
                         break
+                    if r == "queued":
+                        cur["rate"]["count"] += 1
                     recent[key] = now()
                 else:
                     self.log("ledger-duplicate", key=key)
             offset += consumed
             cur.update({"offset": offset, "recent": recent, "dev": st.st_dev, "ino": st.st_ino})
             self.save_cursor("ledger", cur)
+
+    def rate_limited(self, cur, task, attention):
+        """Count one ledger notice against the operations rate window (stored
+        in the ledger cursor). Over DISCORD_OPS_RATE_MAX it is held back and
+        recorded for the window's summary instead of being posted."""
+        rate = cur.get("rate")
+        waiting = isinstance(rate, dict) and bool(rate.get("suppressed"))
+        if not waiting and (not isinstance(rate, dict) or now() - rate.get("start", 0) >= self.cfg.ops_rate_window):
+            rate = cur["rate"] = {"start": now(), "count": 0}
+        # While a summary is still waiting to be queued, new notices join it.
+        if not waiting and rate["count"] < self.cfg.ops_rate_max:
+            return False
+        rate["suppressed"] = rate.get("suppressed", 0) + 1
+        rate["attention"] = rate.get("attention", 0) + (1 if attention else 0)
+        tasks = rate.setdefault("tasks", [])
+        if task not in tasks and len(tasks) < 20:
+            tasks.append(task)
+        return True
+
+    def flush_ledger_rate(self):
+        """After a window with held-back notices ends, post one summary so
+        nothing held back is invisible. A full outbox keeps it for later."""
+        cur = self.cursor("ledger")
+        rate = cur.get("rate") if isinstance(cur, dict) else None
+        if not isinstance(rate, dict) or not rate.get("suppressed"):
+            return
+        if now() - rate.get("start", 0) < self.cfg.ops_rate_window:
+            return
+        n, attention, tasks = rate["suppressed"], rate.get("attention", 0), rate.get("tasks", [])
+        text = ("Discord notices paused: %d more operational notice%s in %s were not posted one by one, "
+                "to avoid flooding this channel%s. Tasks: %s. Check Firstmate for details."
+                % (n, "" if n == 1 else "s", describe_age(self.cfg.ops_rate_window),
+                   " (%d needing attention)" % attention if attention else "", ", ".join(tasks)))
+        if attention:
+            text += "\n" + NOT_APPROVAL
+        r = self.outbox.enqueue("operations", "ledger-rate-summary-%d" % int(rate["start"]), text, "operation",
+                                mention=self.cfg.owner if attention else None)
+        if r == "full":
+            return
+        self.log("ledger-rate-summary", suppressed=n, attention=attention)
+        cur["rate"] = {"start": now(), "count": 0}
+        self.save_cursor("ledger", cur)
 
     def check_watcher(self):
         health = self.cursor("health") or {}
@@ -1268,6 +1326,7 @@ def tick(cfg, paths, log, outbox, sources, gw=None):
     else:
         sources.poll_mirror()
     sources.poll_ledger()
+    sources.flush_ledger_rate()
     sources.check_watcher()
     sources.check_gateway(gw)
     for dest in DESTS:
