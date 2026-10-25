@@ -228,8 +228,11 @@ fm_chatgpt_bridge_health() {
 # Prints the assistant output text a bridge response carries, the single
 # extraction every consumer uses to decide a turn produced an answer. Empty
 # output means the turn produced no response text, a failure even at HTTP 2xx.
+# Message items whose phase is "commentary" are not the answer: the bridge
+# emits its own notices that way (its "Local tools unavailable" banner is one),
+# so they are skipped. Final-answer items and items with no phase are kept.
 fm_chatgpt_response_text() {
-  jq -r '[(.output // [])[] | select(.type == "message") | (.content // [])[] | select(.type == "output_text" or .type == "text") | .text] | join("\n")' "$1"
+  jq -r '[(.output // [])[] | select(.type == "message" and .phase != "commentary") | (.content // [])[] | select(.type == "output_text" or .type == "text") | .text] | join("\n")' "$1"
 }
 
 # fm_chatgpt_hash <content>

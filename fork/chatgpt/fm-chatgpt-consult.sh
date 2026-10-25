@@ -11,8 +11,11 @@
 # The --mode audit instructions inject fork/chatgpt/audit-brief-template
 # verbatim, so the generated audit prompt's shape
 # (exact initial scope, expansion clause, reading budgets, carry-forward
-# discipline, stop rules) has one owner and this script holds no second copy;
-# a missing template refuses on stderr before any bridge contact.
+# discipline, stop rules, finding ids) has one owner and this script holds no
+# second copy; a missing template refuses on stderr before any bridge contact.
+# The --mode plan instructions inject fork/chatgpt/plan-contract.template the
+# same way and refuse the same way without it. This script returns the plan
+# reply as text; fork/chatgpt/fm-chatgpt-loop.sh validates it.
 #
 # --thread is required and names the Firstmate-owned turn-identity id stamped
 # into every request. It does not carry conversation continuity by itself:
@@ -83,13 +86,42 @@ case "$MODE" in
       printf 'fm-chatgpt: audit-brief template could not be read: %s\n' "$AUDIT_TEMPLATE_FILE" >&2
       exit 1
     }
-    INSTRUCTIONS="You are a senior engineer writing audit instructions for a worker. Read the objective and context below and return only a self-contained audit prompt that the worker will follow; this is prompt generation, not the audit itself. The prompt must state the specific questions the worker must answer, the evidence and scope to inspect, the required report shape, and explicit stop rules, and it must carry the objective's essential details so it stands alone. Structure the returned prompt on the audit-brief template below, filling every field the objective and context support; where they supply no files, symbols, or line ranges, the prompt opens with the template's bounded reconnaissance phase to establish exact initial scope before deep inspection. This turn has no local tools and does not need any local tools: do not attempt tool use and never emit or discuss a tool-availability notice or banner. Return only the audit prompt.
+    INSTRUCTIONS="You are a senior engineer writing audit instructions for a worker. Read the objective and context below and return only a self-contained audit prompt that the worker will follow; this is prompt generation, not the audit itself. The prompt must state the specific questions the worker must answer, the evidence and scope to inspect, the required report shape including the template's stable finding ids, and explicit stop rules, and it must carry the objective's essential details so it stands alone. Structure the returned prompt on the audit-brief template below, filling every field the objective and context support; where they supply no files, symbols, or line ranges, the prompt opens with the template's bounded reconnaissance phase to establish exact initial scope before deep inspection. This turn has no local tools and does not need any local tools: do not attempt tool use and never emit or discuss a tool-availability notice or banner. Return only the audit prompt.
 
 Audit-brief template the returned prompt must follow:
 $AUDIT_TEMPLATE"
     ;;
   plan)
-    INSTRUCTIONS="You are a senior implementation planner. Read the objective, context, and any findings below and return a concrete step-by-step execution plan a junior worker can follow without further design decisions. Return the plan only."
+    # The plan contract is the single owner of the plan's shape and rules, and
+    # the same file fork/chatgpt/fm-chatgpt-plan-validate.sh enforces; it is
+    # injected verbatim, and a missing contract refuses before bridge contact.
+    PLAN_CONTRACT_FILE="$LIBDIR/plan-contract.template"
+    [ -f "$PLAN_CONTRACT_FILE" ] || {
+      printf 'fm-chatgpt: plan contract missing: %s\n' "$PLAN_CONTRACT_FILE" >&2
+      printf 'fm-chatgpt: the plan stage needs fork/chatgpt/plan-contract.template so every generated plan follows the validated version-1 contract\n' >&2
+      exit 1
+    }
+    PLAN_CONTRACT=$(cat "$PLAN_CONTRACT_FILE") || {
+      printf 'fm-chatgpt: plan contract could not be read: %s\n' "$PLAN_CONTRACT_FILE" >&2
+      exit 1
+    }
+    # The reply format is restated here, at the point a live reply went
+    # wrong (an unlabelled fence after a banner); P1 in the contract stays
+    # the rule's owner, and an unlabelled fence is still refused.
+    PLAN_FORMAT=$(cat <<'EOF'
+Reply format, required: your entire reply is exactly one fenced code block and nothing else - no preamble, no banner, no notice, and no text after it. The opening fence is a line of exactly ```json and the closing fence is a line of exactly ```. A reply shaped like this passes; an opening fence of ``` with no json label is refused:
+
+```json
+{"v": 1, "summary": "...", "assumptions": [], "out_of_scope": [], "tasks": [{"id": "T1", "title": "...", "basis": ["A1"], "depends_on": [], "steps": ["..."], "acceptance_criteria": ["..."], "verification": [{"command": "...", "expect": "..."}]}], "stop_conditions": ["..."]}
+```
+EOF
+)
+    INSTRUCTIONS="You are a senior implementation planner. Read the objective, context, and audit findings below and return a concrete execution plan a worker can follow without further design decisions, as exactly the JSON plan the contract below specifies. Every task cites the finding ids it acts on. This turn has no local tools and does not need any local tools: do not attempt tool use and never emit or discuss a tool-availability notice or banner.
+
+$PLAN_FORMAT
+
+Implementation plan contract the returned plan must follow:
+$PLAN_CONTRACT"
     ;;
 esac
 

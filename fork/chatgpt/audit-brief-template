@@ -56,5 +56,6 @@ Fewer findings are not a win: judge the result by missed defects, never by token
 
 ## Report requirements
 - Findings with file:line evidence.
+- Every finding opens with a stable id - `A1`, `A2`, and so on in report order, for example `A1. <finding>` - and an id is never reused or renumbered within the report; the implementation plan cites findings by these ids. A report with no findings says `No findings.` instead.
 - A scope-expansion log: what was added beyond the initial scope, why, and what it showed.
 - A "scope sufficient" statement backed by evidence, together with unresolved investigation leads or an explicit "none".

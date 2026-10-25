@@ -256,8 +256,56 @@ test_plan_request_shape() {
   out=$(bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" --mode plan --thread thread-plan-1 2>"$dir/stderr.txt"); rc=$?
   stop_stub "$pid"
   expect_code 0 "$rc" "a plan consult against the stub should succeed"
-  assert_contains "$(jq -r '.instructions' "$dir/request.json")" "execution plan" "a plan request must frame the planner role"
-  pass "a plan consult posts the planner framing with the prompt text"
+  local instr
+  instr=$(jq -r '.instructions' "$dir/request.json")
+  assert_contains "$instr" "execution plan" "a plan request must frame the planner role"
+  assert_contains "$instr" "Implementation plan contract the returned plan must follow:" "a plan request must inject the plan contract"
+  assert_contains "$instr" "# Implementation plan contract, version 1" "the injected contract must be the version-1 template"
+  assert_contains "$instr" "P11: \`basis\` cites the audit findings" "the injected contract must carry the finding-basis rule"
+  assert_contains "$instr" "What validation does not prove" "the injected contract must state what validation does not prove"
+  assert_contains "$instr" "your entire reply is exactly one fenced code block and nothing else - no preamble, no banner" \
+    "a plan request must forbid any preamble or banner outside the block"
+  # shellcheck disable=SC2016 # literal markdown fences, not expansions
+  assert_contains "$instr" 'The opening fence is a line of exactly ```json' "a plan request must require the json-labelled opening fence"
+  # shellcheck disable=SC2016 # literal markdown fences, not expansions
+  assert_contains "$instr" 'an opening fence of ``` with no json label is refused' "a plan request must say an unlabelled fence is refused"
+  # shellcheck disable=SC2016 # literal markdown fences, not expansions
+  assert_contains "$instr" '```json
+{"v": 1, "summary": "...", ' "a plan request must carry the minimal format example"
+  assert_contains "$instr" "no local tools" "a plan request must state that local tools are unavailable and unneeded"
+  [ "$out" = "stubbed consultation answer" ] || fail "the consult client must return the plan reply as text for the loop to validate, got: $out"
+  pass "a plan consult injects the version-1 plan contract and returns the reply text unvalidated for the loop"
+}
+
+test_plan_contract_missing_fails_closed() {
+  local dir out rc pid
+  dir="$TMP_ROOT/nocontract"
+  mkdir -p "$dir/chatgpt"
+  cp "$ROOT/fork/chatgpt/fm-chatgpt-consult.sh" "$ROOT/fork/chatgpt/fm-chatgpt-bridge-lib.sh" "$ROOT/fork/chatgpt/audit-brief-template" "$dir/chatgpt/"
+  new_prompt
+  pid=$(start_stub "$dir")
+  rm -f "$dir/request.json"  # left by start_stub's readiness probe
+  out=$(bash "$dir/chatgpt/fm-chatgpt-consult.sh" \
+    --prompt-file "$TMP_ROOT/prompt.txt" --mode plan --thread t-nocontract 2>&1); rc=$?
+  stop_stub "$pid"
+  [ "$rc" -ne 0 ] || fail "a plan consult without the plan contract must refuse"
+  assert_contains "$out" "plan contract missing" "the refusal must name the missing contract"
+  assert_contains "$out" "fork/chatgpt/plan-contract.template" "the refusal must name the required file"
+  [ ! -f "$dir/request.json" ] || fail "a plan consult without the contract must never contact the bridge"
+  pass "a plan consult refuses before contacting the bridge when the plan contract is missing"
+}
+
+test_audit_instructions_require_finding_ids() {
+  local dir=$TMP_ROOT/auditids pid instr
+  mkdir -p "$dir"
+  new_prompt
+  pid=$(start_stub "$dir")
+  bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" --mode audit --thread thread-ids >/dev/null 2>&1
+  stop_stub "$pid"
+  instr=$(jq -r '.instructions' "$dir/request.json")
+  assert_contains "$instr" "stable finding ids" "the audit instructions must ask for the template's stable finding ids"
+  assert_contains "$instr" "Every finding opens with a stable id - \`A1\`, \`A2\`" "the injected audit template must define the finding-id rule"
+  pass "audit prompts are generated against a template that numbers every finding A1, A2, ..."
 }
 
 test_metadata_stamping() {
@@ -365,6 +413,8 @@ test_rejection_without_reported_size_invents_nothing() {
 test_audit_template_missing_fails_closed
 test_audit_request_shape
 test_plan_request_shape
+test_plan_contract_missing_fails_closed
+test_audit_instructions_require_finding_ids
 test_metadata_stamping
 test_model_slug
 test_thread_propagation

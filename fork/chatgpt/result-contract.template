@@ -1,0 +1,36 @@
+# Plan result contract, version 1
+
+This file is the single owner of the plan-result contract: every field and rule below is stated here once.
+Firstmate appends this same file to every plan handoff and checks each recorded result against the numbered rules; a result that breaks any rule is refused and changes nothing.
+
+## What to write
+When you finish, or stop on a stop condition, write a report to `data/<worker>/report.md` and a result to `data/<worker>/plan-result.json`, where `data/<worker>/` is the data directory of your own task in the Firstmate home.
+The result is one JSON object of this shape, with one entry per planned task:
+
+```json
+{
+  "v": 1,
+  "report": "report.md",
+  "tasks": [
+    {
+      "id": "T1",
+      "status": "pass",
+      "evidence": [{"command": "the planned verification command, character for character", "exit_code": 0, "summary": "what the command showed"}]
+    }
+  ]
+}
+```
+
+## Rules
+- R1: the result parses as one JSON object with exactly the keys `v`, `report`, and `tasks`, and `v` is the integer 1.
+- R2: every planned task appears in `tasks` exactly once, and no other id appears.
+- R3: each task entry has exactly the keys `id`, `status`, and `evidence`, and `status` is `pass`, `fail`, or `blocked`.
+- R4: every evidence entry has exactly the keys `command`, `exit_code`, and `summary`; `command` and `summary` are non-empty strings and `exit_code` is an integer.
+- R5: a `pass` task has exactly one evidence entry for each of its planned verification commands, each naming that command exactly as planned, and nothing else.
+- R6: a `fail` or `blocked` task has at least one evidence entry explaining what failed or what blocked it.
+- R7: `report` names a non-empty regular file inside `data/<worker>/`, either relative to that directory or as an absolute path; symlinks are resolved first, and a path that leaves the directory is refused.
+
+## What recording a result means
+Report only commands you actually ran and what they actually showed.
+Use `blocked` when a stop condition, a missing prerequisite, or a conflict with your launch instructions prevents a task.
+A recorded all-pass result is "reported complete": Firstmate checks its shape and the report file, but does not re-run any command or independently confirm the evidence.

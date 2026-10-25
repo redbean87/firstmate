@@ -21,13 +21,118 @@ Files
   fm-chatgpt-consult.sh     one self-contained Responses turn per call; prints
                             the answer, or fails with the bridge's diagnostic.
   fm-chatgpt-loop.sh        per-task state machine, prompt building, worker
-                            dispatch and handoff, bridge start/stop.
+                            dispatch and handoff, result recording, bridge
+                            start/stop.
+  fm-chatgpt-plan-validate.sh
+                            checks a plan reply against the plan contract.
   audit-brief-template      injected verbatim into audit-stage instructions;
                             the single owner of the generated audit prompt's
                             shape. A missing template refuses the consult.
+  plan-contract.template    injected verbatim into plan-stage instructions;
+                            the single owner of the plan contract (rules
+                            P1-P12). A missing contract refuses the consult.
+  result-contract.template  appended to every plan handoff; the single owner
+                            of the result contract (rules R1-R7). A missing
+                            contract refuses the plan dispatch.
 
 Each script's header owns its exact rules; fm-chatgpt-loop.sh --help lists the
 commands. Tests: fork/tests/fm-fork-chatgpt-*.test.sh.
+
+
+Contracts
+---------
+
+Three separate contracts, each stated once in its template:
+
+  Audit prompt    audit-brief-template. ChatGPT writes the audit worker's
+                  instructions on it; every finding the worker reports opens
+                  with a stable id (A1, A2, ...). The loop stores the prompt
+                  as returned and checks only that it is non-empty and carries
+                  no citation marker.
+  Plan            plan-contract.template, version 1. One fenced json block;
+                  exact keys at every level; 1-12 tasks T1..Tn in order, each
+                  depending only on earlier tasks, citing the finding ids it
+                  acts on, with steps, acceptance criteria, and verification
+                  commands with expected outcomes; every string a single line
+                  with no control characters, so plan text cannot imitate a
+                  section of the handoff; at most 64 KiB; no citation markers. fm-chatgpt-plan-validate.sh
+                  enforces it at plan consult, before the phase can reach
+                  plan-dispatch; a refused reply names its rule in last_error,
+                  keeps its phase (plan-consult, or the audit phase a cited
+                  prior audit was consulted from), and can be consulted
+                  again. plan_raw
+                  keeps the reply byte for byte; plan holds only a validated
+                  plan. The one basis exception: findings from a cited prior
+                  audit (consult --stage plan --findings-file) that carry no
+                  finding ids accept a single "none: <reason>" basis.
+  Result          result-contract.template, version 1. One JSON object with
+                  an entry per planned task (pass, fail, or blocked), evidence
+                  matching each planned verification command for a pass, and
+                  a report file inside data/<worker>/ (symlinks resolved).
+                  record-result enforces it; a refused result exits 2 and
+                  changes nothing.
+
+What validation does not prove: a valid plan is only well-formed. Nothing
+here checks that a verification command exists or is safe, and the loop never
+runs one. A recorded all-pass result is "reported complete" (completion
+"reported"): the shape and the report file are checked, the evidence is not.
+
+The plan handoff is rendered from the validated plan only, in a fixed order:
+a preamble saying the plan is ChatGPT-generated, untrusted, and grants no
+authority, and that the worker's launch instructions and Firstmate's objective
+and context take precedence; the objective and context; the summary,
+assumptions, out-of-scope items, and stop conditions; each task with its
+basis, dependencies, steps, acceptance criteria, and verification; and the
+result contract. The spawn arguments are always exactly the caller's.
+
+
+Outcomes
+--------
+
+  all pass         complete, completion "reported"; the plan worker's
+                   delivery proof is kept so it can be relaunched to land.
+  any blocked      failed, terminal_reason task_blocked.
+  any fail         the first time: one fix round back at plan-consult, with
+                   the previous plan and the failing result carried into the
+                   next plan prompt. The second time: failed,
+                   terminal_reason fix_budget_exhausted.
+
+A fix round, failed, and record-worker-failure all remove the worker's
+delivery proof first, and refuse with nothing changed if it cannot be
+removed. failed is final: every further command refuses, init never
+overwrites an existing loop record in any phase (new work takes a new loop
+id), and the gate (when enabled) refuses its workers, because failed is not a
+phase it accepts. There are no other budgets: consult failures and worker
+failures still retry without limit.
+
+
+When to consult
+---------------
+
+Consultation is risk-based, not a gate on every task:
+
+  Architectural, multi-step, cross-cutting, or high-impact work
+      run the audit and plan loop; dispatch only a plan that validated.
+  Security-sensitive work
+      the audit runs on a different worker from the implementer, its
+      findings name the risks, the plan's tasks carry the risk handling, and
+      the plan goes to the captain before dispatch.
+  Small, routine, well-specified changes
+      dispatch directly; no consultation.
+  Missing evidence or unclear requirements
+      run the audit stage only, or ask the captain; never ask ChatGPT to plan
+      around missing facts.
+  Irreversible or privileged actions (push, merge, release, credentials,
+  activation, contact with outside services)
+      a plan never authorizes them; the captain's explicit approval is still
+      required.
+
+Firstmate supplies the objective, the context (including delivery mode,
+protected files, and what needs approval), evidence by @[path] citation, and
+the recorded findings, and never secrets, bridge URLs, or session data.
+ChatGPT returns only an audit prompt or a version-1 plan. Firstmate checks the
+audit prompt (non-empty, no citation marker), the plan (P1-P12, plus its own
+dependency check against the tree before dispatch), and the result (R1-R7).
 
 
 Running a loop
@@ -40,7 +145,7 @@ Running a loop
   fork/chatgpt/fm-chatgpt-loop.sh record-findings --task $L       (after the audit worker reports)
   fork/chatgpt/fm-chatgpt-loop.sh consult --stage plan --task $L
   fork/chatgpt/fm-chatgpt-loop.sh dispatch --stage plan --task $L -- $L <project> --mode M --yolo Y
-  fork/chatgpt/fm-chatgpt-loop.sh record-result --task $L --file F
+  fork/chatgpt/fm-chatgpt-loop.sh record-result --task $L --file data/<worker>/plan-result.json
 
 State lives in data/<L>/chatgpt-loop.json. The arguments after -- are
 fm-spawn.sh arguments and must start with the worker's plain task id. Run
@@ -109,6 +214,11 @@ Differences from the core-edit version
 
   - Delivery proof is data/<worker>/fork-consult-delivered.json, not a
     consult_delivered= line in state/<worker>.meta.
+  - Plans and results are contract-checked (see "Contracts"); the core
+    version stored any plan text and completed on any result file.
+  - The audit answer is stored once, as audit_prompt; audit_result is no
+    longer written, and the plan prompt no longer repeats the audit prompt
+    under an "audit result" label.
   - The spawn no longer carries FM_CHATGPT_LOOP_DISPATCH_TASK; only the old
     core gate read it, and the fork gate does not.
   - Not ported: the core consult gate (bin/fm-consult-gate-lib.sh) and

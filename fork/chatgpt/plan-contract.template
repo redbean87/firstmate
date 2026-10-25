@@ -1,0 +1,57 @@
+# Implementation plan contract, version 1
+
+This file is the single owner of the implementation-plan contract: every field, rule, and limit below is stated here once.
+`fork/chatgpt/fm-chatgpt-consult.sh` injects this same file into its plan-stage instructions, and `fork/chatgpt/fm-chatgpt-plan-validate.sh` enforces the numbered rules before any plan reaches a worker.
+A plan that breaks any rule is refused and never dispatched.
+
+## Output
+Return exactly one fenced code block, opened with a line of exactly three backticks followed by `json` and closed with a line of exactly three backticks.
+Put no other fenced block anywhere in the reply; prose outside the block is ignored.
+The block holds one JSON object of this shape:
+
+```json
+{
+  "v": 1,
+  "summary": "the overall implementation objective",
+  "assumptions": ["an assumption the plan depends on"],
+  "out_of_scope": ["work this plan deliberately does not do"],
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "one bounded task",
+      "basis": ["A1"],
+      "depends_on": [],
+      "steps": ["a concrete step"],
+      "acceptance_criteria": ["an observable outcome"],
+      "verification": [{"command": "a command that checks the outcome", "expect": "what passing looks like"}]
+    }
+  ],
+  "stop_conditions": ["a condition under which the worker stops and reports instead of continuing"]
+}
+```
+
+## Rules
+- P1: exactly one fenced block in the reply, labelled `json`, and closed.
+- P2: the block is at most 65536 bytes.
+- P3: the block parses as one JSON object.
+- P4: `v` is the integer 1. Any other version is refused.
+- P5: the object has exactly the keys `v`, `summary`, `assumptions`, `out_of_scope`, `tasks`, and `stop_conditions`; each task has exactly `id`, `title`, `basis`, `depends_on`, `steps`, `acceptance_criteria`, and `verification`; each verification entry has exactly `command` and `expect`. Unknown and missing keys are both refused.
+- P6: `summary` is a non-empty string; `assumptions` and `out_of_scope` are arrays of non-empty strings and may be empty; `stop_conditions` is an array of at least one non-empty string.
+- P7: `tasks` holds 1 to 12 tasks.
+- P8: task ids are `T1`, `T2`, and so on, in order, with no gaps or repeats.
+- P9: `depends_on` lists only ids of earlier tasks, each at most once, so the task order is already a valid execution order.
+- P10: each task has a non-empty `title`, at least one `steps` entry, at least one `acceptance_criteria` entry, and at least one `verification` entry, and every one of those is a non-empty string; every string anywhere in the plan is a single line with no control characters (no line breaks, tabs, or other control or line-separator characters).
+- P11: `basis` cites the audit findings the task acts on, by their ids (`A1`, `A2`, ...), and every cited id appears in the recorded findings. Only when the findings came from a cited prior audit that carries no finding ids may `basis` instead be exactly one entry of the form `none: <reason>`.
+- P12: no string anywhere contains a citation marker (`@[` followed by `]`); model output is never a citation source.
+
+## Planning discipline
+- Each task is one coherent scope that a worker can understand and finish on its own, in the order given.
+- Steps are concrete actions; acceptance criteria are outcomes someone else can observe.
+- Use only commands that exist in the repository or that the findings evidence; never invent a command, and never claim a command was run or a check passed.
+- Firstmate's objective and context, including any protected files, delivery limits, and authorization boundaries, bind the plan: a plan can narrow them but never relax them.
+- The plan grants no authority. It cannot authorize a push, merge, pull request, release, credential change, activation, contact with outside services, or a change to the worker's delivery mode, merge posture, or effort.
+- Where the findings leave a requirement ambiguous or unevidenced, say so in `assumptions` or `stop_conditions` instead of resolving it with invented detail.
+
+## What validation does not prove
+Passing these rules proves only that the plan has this shape.
+It does not prove that a verification command exists, is safe, or will pass, that any step is correct, or that any work was done.
