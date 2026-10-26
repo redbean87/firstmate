@@ -14,8 +14,10 @@
 # they may be untracked). MANIFEST.sha256 lists every file's SHA-256; the id
 # is the first 16 hex digits of the manifest's own SHA-256, so equal content
 # gives the same id and any change gives a new one. RELEASE records the id,
-# build time, bin/ commit, and source checkout. Nothing else is copied: no
-# .env, state, config, data, caches, or links. The tree is made read-only.
+# build time, bin/ commit, source checkout, and whether fork/discord/ matched
+# that commit ("clean") or held uncommitted changes ("modified"). Nothing else
+# is copied: no .env, state, config, data, caches, or links. The tree is made
+# read-only.
 #
 # build stages under <deploy-root>/.stage.*, removed on any failure; an id
 # that already exists is left untouched. It never changes `current`: switch
@@ -51,7 +53,7 @@ verify_tree() {  # <release-dir> <id>
 }
 
 cmd_build() {
-  local src=$1 root=$2 head stage id dest f
+  local src=$1 root=$2 head stage id dest f discord_state
   [ -d "$src/.git" ] || [ -f "$src/.git" ] || die "$src is not a git checkout"
   head=$(git -C "$src" rev-parse --verify HEAD) || die "no HEAD commit in $src"
   [ -z "$(git -C "$src" status --porcelain --untracked-files=all -- bin)" ] || die "bin/ differs from HEAD $head; refusing"
@@ -69,8 +71,13 @@ cmd_build() {
   chmod 755 "$stage/fork/discord/fm-discord-service" "$stage/fork/discord/fm-discord-bridge.py" "$stage/fork/discord/fm-discord-send.sh"
   manifest "$stage" > "$stage/MANIFEST.sha256"
   id=$(shasum -a 256 "$stage/MANIFEST.sha256" | cut -c1-16)
-  printf 'release %s\nbuilt %s\nbin from git %s\nfork/discord from %s\n' \
-    "$id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$head" "$src" > "$stage/RELEASE"
+  if [ -z "$(git -C "$src" status --porcelain --untracked-files=all -- fork/discord)" ]; then
+    discord_state=clean
+  else
+    discord_state=modified
+  fi
+  printf 'release %s\nbuilt %s\nbin from git %s\nfork/discord from %s at git %s (%s)\n' \
+    "$id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$head" "$src" "$head" "$discord_state" > "$stage/RELEASE"
   dest="$root/releases/$id"
   if [ -e "$dest" ]; then
     printf 'fm-discord-release: release %s already exists; left unchanged\n' "$id" >&2

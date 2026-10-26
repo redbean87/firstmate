@@ -7,9 +7,10 @@
 #
 # Checks:
 #   - HK1 appears exactly once in bin/fm-spawn.sh, byte-identical to
-#     fork/hooks/hk1-spawn.block, after the backlog-close refusal and directly
-#     before the first endpoint step (`W="fm-$ID"`); every upstream variable it
-#     reads is assigned earlier in the file.
+#     fork/hooks/hk1-spawn.block, after the project capacity admission and
+#     directly before the brief check, so before the launch-brief render and
+#     the first endpoint step (`W="fm-$ID"`); every upstream variable it reads
+#     is assigned earlier in the file and none is reassigned before launch.
 #   - HK2 appears exactly once in bin/fm-control.sh, byte-identical to
 #     fork/hooks/hk2-control.block, inside do_relaunch() after
 #     resolve_relaunch_profile and before safe_checkpoint and do_exit; the

@@ -191,7 +191,8 @@ scout launch by data/<launched id>/ only. With it enabled:
     task id L, dispatched while the loop is at the stage's dispatch phase.
     A worker with any other id is refused at spawn; the loop records the
     spawn failure and stays at <stage>-dispatch. Distinct worker ids need a
-    gate change (deferred; see docs/M2.txt V11).
+    gate change: a launch grant binding the worker to its loop (see
+    fork/README, plan breakdown).
   - The plan stage under the gate also needs worker id L, so the audit
     worker L must be finished and cleaned up before the plan dispatch. How
     fm-spawn treats a second fresh launch of a still-recorded task id is not

@@ -110,6 +110,7 @@ test_release_tool_builds_verifies_switches_and_refuses() {
   [ -z "$(find "$dep/releases/$id1" -perm -u+w)" ] || fail "the release is read-only"
   assert_no_grep "$D_TOKEN" "$dep/releases/$id1/MANIFEST.sha256" "no secret reaches the release"
   assert_contains "$(cat "$dep/releases/$id1/RELEASE")" "bin from git $(git -C "$REL_SRC" rev-parse HEAD)" "RELEASE names the bin/ commit"
+  assert_contains "$(cat "$dep/releases/$id1/RELEASE")" "at git $(git -C "$REL_SRC" rev-parse HEAD) (modified)" "RELEASE marks fork/discord files that are not committed at that commit"
   "$RELEASE_TOOL" switch "$dep" "$id1" >/dev/null || fail "switch failed"
   [ "$(readlink "$dep/current")" = "releases/$id1" ] || fail "current points at the release"
 

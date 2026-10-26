@@ -23,7 +23,8 @@ Ownership boundary
                       validator, audit/plan/result contract templates.
   Discord bridge      fork/discord/: gateway and outbox process, sender,
                       inbound process-event extension, optional reply hook.
-  Fork checks/tests   fork/bin/fm-fork-hook-check, fork/tests/.
+  Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
+                      fork/tests/.
   Fork CI             .github/workflows/fork-ci.yml.
   Home configuration  config/fork-policies, config/fork-project-pins.json,
                       config/fork-resources.json (gitignored, per home).
@@ -35,8 +36,18 @@ Discord bridge: fork/discord/ (see fork/discord/README). It reaches Firstmate
 through upstream's documented extension points - an external process-event
 adapter, the reply mirror, and the fleet ledger - and needs no upstream edits.
 
-Not in this stage: task slicing and exclusive-area enforcement. They will live
-under fork/ and need no further upstream edits.
+Plan breakdown (the worker-construction step) is part of the ChatGPT channel,
+not the bridge: the bridge (codex-chatgpt-web, fm-chatgpt-bridge-lib.sh,
+fm-chatgpt-consult.sh) only carries one consultation turn, while the plan
+contract and validator make ChatGPT return a dependency-ordered task list
+T1..Tn. Today the loop hands that whole list to ONE plan worker (worker id =
+loop id) and records one result with an entry per task. Not yet built:
+dispatching each task to its own worker in dependency order, which needs the
+consult gate to accept distinct worker ids tied to their loop (a launch
+grant), per-task worker and result records in the loop, and a
+checked dependency validation against the tree instead of a manual one.
+Exclusive-area enforcement is also not built. Both will live under fork/ and
+need no further upstream edits.
 
 
 The two hook points
@@ -350,13 +361,54 @@ risk, and record the reason.
 Upstream sync procedure
 -----------------------
 
-  1. git fetch upstream
-  2. Dry run in a disposable clone or worktree: merge upstream/main and note
-     conflicts. Conflicts outside the two hook blocks mean upstream-owned files
-     were edited; stop and fix that first.
-  3. Merge, then run:  fork/bin/fm-fork-hook-check --base <merged upstream commit>
-                       fork/tests/run
-  4. If a check reports a lost anchor or a contract variable change, re-anchor
-     the block from fork/hooks/*.block (do not edit it in place) and rerun.
-  5. Run additional upstream tests only when a specific risk or failure calls
-     for it.
+fork/bin/fm-fork-sync (its header owns exact behaviour) does the
+non-destructive steps; fetching, resolving, fast-forwarding, pushing, and any
+cleanup stay manual. Commands run from the active checkout
+(~/Projects/firstmate-next); C is the upstream commit to import.
+
+  1. Fetch the commit (the only network step besides the push):
+       git fetch --no-tags upstream <sha or main>
+       C=$(git rev-parse FETCH_HEAD)          # or the exact sha you named
+  2. Prepare an isolated integration (backup ref, branch, worktree, merge):
+       fork/bin/fm-fork-sync prepare "$C"
+     It writes refs/backup/stage1-enforcement-pre-sync-<short>, creates branch
+     fork/sync-<short> in ../firstmate-sync-<short>, and merges there. The
+     active checkout, its branch, its untracked notes, and the running
+     session are not touched. W below is that worktree.
+  3. Exit 3 means conflicts, listed by owner. Resolve in W only:
+       hook file   take upstream's version, then re-insert the block from
+                   fork/hooks/*.block verbatim at the anchor the README names
+                   (git -C "$W" checkout --theirs -- <file>, then edit);
+       fork-owned  upstream now writes a fork path: stop, decide by hand;
+       upstream    the fork edited an upstream file: a boundary violation.
+                   Stop; remove the fork edit (take --theirs) and move the
+                   behaviour under fork/ before continuing.
+     Then git -C "$W" add <files> && git -C "$W" commit --no-edit.
+  4. Check (boundary vs C, ShellCheck, fork tests, review listing):
+       "$W"/fork/bin/fm-fork-sync check "$C" --root "$W"
+     A lost anchor or contract variable change: re-anchor the block from
+     fork/hooks/*.block (never edit the block in place) and rerun. Run extra
+     upstream tests only for a named risk, and record why.
+  5. Review before landing:
+       git -C "$W" log --oneline fork/stage1-enforcement..HEAD
+       git -C "$W" diff "$C" HEAD -- bin/          # only the two hook blocks
+       git -C "$W" diff fork/stage1-enforcement HEAD --stat
+  6. Land and publish (needs the captain's go; this updates the code the
+     running session executes, as any self-update does):
+       git merge --ff-only fork/sync-<short>      # in the active checkout
+       fork/bin/fm-fork-hook-check --base "$C"
+       git push origin fork/stage1-enforcement
+     --ff-only refuses if the branch moved or if the import would overwrite
+     an untracked file; resolve that rather than forcing.
+
+Recovery (nothing here discards landed or pushed work):
+  - Abandon an unfinished import: git -C "$W" merge --abort, then
+    git worktree remove "$W"; branch fork/sync-<short> and the backup ref
+    stay until you delete them deliberately.
+  - Undo a local fast-forward that was not pushed, in the active checkout:
+       git reset --keep refs/backup/stage1-enforcement-pre-sync-<short>
+    (--keep refuses rather than lose uncommitted changes to tracked files).
+  - After a push, do not rewrite the branch; fix forward with a new commit.
+  - prepare refuses when its backup ref, branch, or worktree already exists:
+    finish or deliberately remove the earlier attempt first (--worktree
+    only changes the worktree path, not the branch or backup ref names).
