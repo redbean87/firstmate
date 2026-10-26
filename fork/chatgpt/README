@@ -245,8 +245,10 @@ withdrawn when a task is recorded and at finish.
 
 Validated end to end on 2026-10-25 in an isolated home (real spawn, consult
 gate, worktrees, tmux panes, steering inbox, backlog transitions, teardown,
-and loop result recording) with scripted workers; not yet run with model
-workers.
+and loop result recording), first with scripted workers and then with pi
+model workers on opencode-go/mimo-v2.6-flash: four tasks, two of them a
+dependent chain, one worker killed and retried, all reported and recorded.
+Still keep it disabled in a working home until the captain enables it.
 
 
 Differences from the core-edit version
