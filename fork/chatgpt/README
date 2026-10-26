@@ -191,8 +191,8 @@ scout launch by data/<launched id>/ only. With it enabled:
     task id L, dispatched while the loop is at the stage's dispatch phase.
     A worker with any other id is refused at spawn; the loop records the
     spawn failure and stays at <stage>-dispatch. Distinct worker ids need a
-    gate change: a launch grant binding the worker to its loop (see
-    fork/README, plan breakdown).
+    launch grant, which only fm-chatgpt-breakdown.sh issues (see "Plan
+    breakdown").
   - The plan stage under the gate also needs worker id L, so the audit
     worker L must be finished and cleaned up before the plan dispatch. How
     fm-spawn treats a second fresh launch of a still-recorded task id is not
@@ -208,6 +208,40 @@ scout launch by data/<launched id>/ only. With it enabled:
 
 With the gate disabled the loop works exactly as above with any worker id;
 the proof file is still written but nothing requires it.
+
+
+Plan breakdown
+--------------
+
+fm-chatgpt-breakdown.sh (its header owns the exact rules) is the
+worker-construction step: it runs a validated plan one worker per plan task
+instead of handing the whole plan to one worker. It never consults ChatGPT
+and leaves the plan and result contracts unchanged. Disabled unless the home
+has config/chatgpt-breakdown; do not enable it in a working home until a real
+multi-task run has passed end to end.
+
+  B=fork/chatgpt/fm-chatgpt-breakdown.sh
+  $B start --task $L                                 (loop at plan-dispatch)
+  $B ready --task $L                                 (tasks dispatchable now)
+  $B dispatch --task $L --plan-task T1 -- <project> --mode M --yolo Y
+  $B record-task-result --task $L --plan-task T1     (after the worker reports)
+  $B record-task-failure --task $L --plan-task T1 --reason TEXT
+  $B finish --task $L                                (loop records the result)
+
+Each worker id is L-r<round>-t<n> (-a<attempt> on a retry) and needs its own
+brief and backlog item like any spawn. A task dispatches only after every
+dependency reported pass, and only onto a base that already holds each
+dependency's committed change (otherwise its prompt is withheld and the
+spawned worker must be cleaned up). Independent tasks may run at once. A
+worker that dies is retried once on a new id; a task that reports fail is
+not retried here - finish hands the aggregated result to the loop, whose
+single fix round re-plans with ChatGPT. Tasks never reached are reported fail
+(or blocked) "not dispatched". Launch grants live in data/<worker>/ and are
+withdrawn when a task is recorded and at finish.
+
+Not yet proven: a real multi-task run with live workers. Landing a
+dependency's change onto the base its dependents start from (a merge or a
+pushed base branch) stays the supervisor's job.
 
 
 Differences from the core-edit version

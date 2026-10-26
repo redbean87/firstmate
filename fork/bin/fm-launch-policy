@@ -28,7 +28,10 @@
 #                 (data/<id>/fork-consult-waiver.json, origin "local"); a
 #                 relaunch also accepts delivery proof
 #                 (data/<id>/fork-consult-delivered.json). A waiver of any
-#                 other origin, Discord included, refuses.
+#                 other origin, Discord included, refuses. A per-task plan
+#                 worker passes only by its launch grant
+#                 (data/<id>/fork-consult-grant.json, consult_grant below),
+#                 and a loop running its plan task by task refuses its own id.
 #   project-pin   config/fork-project-pins.json:
 #                 {"projects": {"<project dir name>": {"harness": "...", "model": "..."}}}
 #                 A pinned project refuses a different harness or model and any
@@ -96,14 +99,53 @@ effective_model() {
 }
 MODEL=$(effective_model)
 
-json_ok() { jq -e "$2" "$1" >/dev/null 2>&1; }
+json_ok() { local f=$1; shift; jq -e "$@" "$f" >/dev/null 2>&1; }
+
+# plan_sha <loop record>: SHA-256 of its stored plan text, as
+# fork/chatgpt/fm-chatgpt-breakdown.sh computes it for a grant.
+plan_sha() {
+  if command -v sha256sum >/dev/null 2>&1; then jq -j '.plan' "$1" | sha256sum | cut -d' ' -f1
+  else jq -j '.plan' "$1" | shasum -a 256 | cut -d' ' -f1; fi
+}
+
+# consult_grant <grant file>: a per-task breakdown worker's launch grant
+# (fork/chatgpt/fm-chatgpt-breakdown.sh). It admits only the worker it names,
+# for its loop's open breakdown, at the attempt and plan it was issued for.
+consult_grant() {
+  local grant=$1 l bd lp want
+  json_ok "$grant" 'type == "object" and ((keys | sort) == ["attempt", "loop", "plan_sha256", "plan_task", "v", "worker"])
+      and .v == 1 and (.loop | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
+      and (.plan_task | type == "string" and test("^T[1-9][0-9]?$")) and (.worker | type == "string")
+      and (.attempt | type == "number" and . >= 1 and floor == .) and (.plan_sha256 | type == "string" and test("^[0-9a-f]{64}$"))' \
+    || unusable "launch grant $grant is malformed"
+  # shellcheck disable=SC2016 # jq program, not shell expansion
+  json_ok "$grant" --arg w "$FM_LP_TASK" '.worker == $w' || refuse "its launch grant names a different worker"
+  l=$(jq -r '.loop' "$grant")
+  [ "$l" != "$FM_LP_TASK" ] || refuse "a launch grant cannot name its own loop"
+  bd="$FM_LP_DATA/$l/chatgpt-breakdown.json"
+  lp="$FM_LP_DATA/$l/chatgpt-loop.json"
+  [ -f "$bd" ] && [ -f "$lp" ] || refuse "its launch grant names loop $l, which has no breakdown record"
+  case "$FM_LP_PHASE" in spawn) want='["dispatching"]' ;; *) want='["dispatching", "running"]' ;; esac
+  # shellcheck disable=SC2016 # jq program, not shell expansion
+  json_ok "$bd" --slurpfile g "$grant" --argjson want "$want" '$g[0] as $g | .state == "open" and .loop == $g.loop
+      and .plan_sha256 == $g.plan_sha256 and (.tasks[$g.plan_task] | type == "object" and .worker == $g.worker
+        and .attempts == $g.attempt and (.status as $s | $want | index($s) != null))' \
+    || refuse "its launch grant is not the current one for that loop's plan task (closed breakdown, other worker or attempt, or task not being dispatched)"
+  json_ok "$lp" '.phase == "plan-worker"' || refuse "its launch grant's loop $l is not running its plan"
+  [ "$(plan_sha "$lp")" = "$(jq -r '.plan_sha256' "$grant")" ] || refuse "loop $l's plan changed since its launch grant was issued"
+}
 
 policy_consult_gate() {
-  local dir="$FM_LP_DATA/$FM_LP_TASK" waiver loop delivered
+  local dir="$FM_LP_DATA/$FM_LP_TASK" waiver loop delivered grant
   [ "$FM_LP_KIND" = secondmate ] && return 0
   waiver="$dir/fork-consult-waiver.json"
   loop="$dir/chatgpt-loop.json"
   delivered="$dir/fork-consult-delivered.json"
+  grant="$dir/fork-consult-grant.json"
+  if [ -e "$grant" ]; then
+    consult_grant "$grant"
+    return 0
+  fi
   if [ -e "$waiver" ]; then
     json_ok "$waiver" 'type == "object"' || unusable "consultation waiver $waiver is not a JSON object"
     json_ok "$waiver" '.origin == "local"' || refuse "its consultation waiver did not originate locally; only a local waiver counts (a Discord-origin waiver never does)"
@@ -118,6 +160,9 @@ policy_consult_gate() {
   fi
   [ -e "$loop" ] || refuse "no stored ChatGPT prompt for this task (data/$FM_LP_TASK/chatgpt-loop.json) and no local waiver"
   json_ok "$loop" 'type == "object"' || unusable "consultation record $loop is not a JSON object"
+  if [ -f "$dir/chatgpt-breakdown.json" ] && json_ok "$dir/chatgpt-breakdown.json" '.state != "closed"'; then
+    refuse "its plan is running task by task; only granted per-task workers may launch"
+  fi
   # shellcheck disable=SC2016 # jq program, not shell expansion
   json_ok "$loop" '(.phase as $p | {"audit-dispatch": "audit_prompt", "audit-worker": "audit_prompt", "plan-dispatch": "plan", "plan-worker": "plan", "complete": "plan"}[$p]) as $f | $f != null and ((.[$f] // "") | type == "string" and test("\\S"))' \
     || refuse "its ChatGPT record holds no prompt for the stage its phase puts in play"

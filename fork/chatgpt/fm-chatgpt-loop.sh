@@ -80,6 +80,9 @@
 # finished round's scoped fields so a finished round's prompt can never pass
 # the fork consult gate as the new round's consultation.
 # A wrong-phase call refuses with a nonzero exit and no state change.
+# fork/chatgpt/fm-chatgpt-breakdown.sh may run the plan stage task by task
+# instead; while its record is open, record-result and plan
+# record-worker-failure refuse, and its finish step records the plan result.
 #
 # Findings feedback is part of stage completion, never a separate afterthought:
 # after the audit worker reports done, record-findings is the completion step
@@ -237,6 +240,16 @@ clear_delivery() {
   file=$(delivery_file "$1")
   rm -f -- "$file" 2>/dev/null
   [ ! -e "$file" ] && [ ! -L "$file" ]
+}
+
+# refuse_open_breakdown <task> <command>: while fm-chatgpt-breakdown.sh runs
+# the plan task by task, only its finish step records the plan result.
+refuse_open_breakdown() {
+  local bd="$DATA/$1/chatgpt-breakdown.json"
+  [ -n "${FM_CHATGPT_BREAKDOWN_FINISH:-}" ] && return 0
+  [ -f "$bd" ] && [ "$(jq -r '.state // ""' "$bd" 2>/dev/null)" != closed ] || return 0
+  printf 'fm-chatgpt-loop: task %s is running its plan task by task (data/%s/chatgpt-breakdown.json); use fm-chatgpt-breakdown.sh instead of %s; no state changed\n' "$1" "$1" "$2" >&2
+  return 1
 }
 
 require_phase() {
@@ -709,8 +722,12 @@ cmd_consult() {
 # fixed order; and ends with the result contract the worker reports in. Only
 # the validated plan is rendered, never plan_raw, and nothing here feeds the
 # spawn arguments: they are exactly what the caller passed after --.
+# render_plan_message <state-file> <worker> [<plan-task-id>]: the plan handoff.
+# With a plan task id (fork/chatgpt/fm-chatgpt-breakdown.sh) only that task is
+# rendered, under the same preamble and result contract, and the handoff says
+# its result lists exactly that task.
 render_plan_message() {
-  local file=$1 worker=$2
+  local file=$1 worker=$2 only=${3:-}
   [ -f "$RESULT_CONTRACT" ] || {
     printf 'fm-chatgpt-loop: result contract missing: %s\n' "$RESULT_CONTRACT" >&2
     return 1
@@ -719,9 +736,10 @@ render_plan_message() {
     printf 'fm-chatgpt-loop: the stored plan is not a validated plan object\n' >&2
     return 1
   }
-  jq -r --arg w "$worker" --rawfile rc "$RESULT_CONTRACT" '
+  jq -r --arg w "$worker" --arg only "$only" --rawfile rc "$RESULT_CONTRACT" '
     def bullets: if length == 0 then "- none" else map("- " + .) | join("\n") end;
     (.plan | fromjson) as $p
+    | ($p.tasks | if $only == "" then . else map(select(.id == $only)) end) as $mine
     | [
         "FIRSTMATE PLAN HANDOFF - implementation plan contract v1",
         "",
@@ -744,8 +762,9 @@ render_plan_message() {
         "Stop conditions:",
         ($p.stop_conditions | bullets),
         "",
-        "Tasks, in order; each depends only on earlier tasks:",
-        ($p.tasks[]
+        (if $only == "" then "Tasks, in order; each depends only on earlier tasks:"
+         else "Your task is \($only), one task of a larger plan; do only this task. Its prerequisites (\($mine[0].depends_on | if length == 0 then "none" else join(", ") end)) have already reported pass. For the result contract below, the planned tasks are exactly: \($only)." end),
+        ($mine[]
           | "",
             "\(.id). \(.title)",
             "  Basis: \(.basis | join(", "))",
@@ -983,6 +1002,7 @@ cmd_record_result() {
   local file worker verdict outcome result report sha used tmp
   file=$(need_state "$task") || return 1
   require_phase "$file" plan-worker "$task" || return 1
+  refuse_open_breakdown "$task" record-result || return 1
   worker=$(read_field "$file" worker_task)
   [ -n "$worker" ] || { printf 'fm-chatgpt-loop: task %s records no plan worker to check the result against; no state changed\n' "$task" >&2; return 2; }
   # Every refusal below is a supervisor input error: it exits 2 and writes
@@ -1073,23 +1093,25 @@ physical_path() {
   printf '%s/%s\n' "$dir" "$(basename -- "$p")"
 }
 
-# validate_result <state-file> <result-file> <worker-task-id>: check a plan
-# result against fork/chatgpt/result-contract.template (the owner of rules
-# R1-R7) and the stored plan. On success print one JSON object
+# validate_result <state-file> <result-file> <worker-task-id> [<plan-task-id>]:
+# check a plan result against fork/chatgpt/result-contract.template (the owner
+# of rules R1-R7) and the stored plan; with a plan task id, the planned tasks
+# are that one task only. On success print one JSON object
 # {outcome: pass|fail|blocked, report: <physical report path>, result: <the
 # result>}; on a refusal print "result rule R<n>: <reason>" on stderr and
 # return 1. Nothing here runs a command or judges evidence beyond its shape.
 validate_result() {
-  local file=$1 rfile=$2 worker=$3 err report base resolved
+  local file=$1 rfile=$2 worker=$3 only=${4:-} err report base resolved
   jq -e -s 'length == 1 and (.[0] | type == "object")' "$rfile" >/dev/null 2>&1 || {
     printf 'fm-chatgpt-loop: result rule R1: the result must parse as exactly one JSON object\n' >&2
     return 1
   }
   # shellcheck disable=SC2016 # jq program, not shell expansion
-  err=$(jq -r --slurpfile st "$file" '
+  err=$(jq -r --slurpfile st "$file" --arg only "$only" '
     def nes: type == "string" and test("\\S");
     ($st[0].plan | fromjson) as $plan
-    | ($plan.tasks | map({key: .id, value: [.verification[].command] | sort}) | from_entries) as $planned
+    | ($plan.tasks | if $only == "" then . else map(select(.id == $only)) end
+       | map({key: .id, value: [.verification[].command] | sort}) | from_entries) as $planned
     | if (keys | sort) != ["report", "tasks", "v"] then
         "R1: the result must have exactly the keys v, report, tasks (has \(keys | join(", ")))"
       elif .v != 1 or (.v | type) != "number" then "R1: v must be the integer 1, got \(.v | tojson)"
@@ -1171,6 +1193,7 @@ cmd_record_worker_failure() {
   file=$(need_state "$task") || return 1
   want="$stage-worker"
   require_phase "$file" "$want" "$task" || return 1
+  [ "$stage" != plan ] || refuse_open_breakdown "$task" record-worker-failure || return 1
   # The failed worker's delivery proof goes before anything else changes: a
   # worker the loop has given up on must leave no proof a relaunch could pass
   # on, and a proof that cannot be removed refuses the record unchanged.
@@ -1343,6 +1366,10 @@ cmd_bridge() {
     *) printf 'fm-chatgpt-loop: unknown bridge verb %s\n' "$verb" >&2; usage; return 2 ;;
   esac
 }
+
+# Sourced by fork/chatgpt/fm-chatgpt-breakdown.sh for its helpers: stop here.
+# shellcheck disable=SC2317 # reachable only when executed
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
 sub=${1:-}
 shift || true

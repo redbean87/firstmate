@@ -40,14 +40,12 @@ Plan breakdown (the worker-construction step) is part of the ChatGPT channel,
 not the bridge: the bridge (codex-chatgpt-web, fm-chatgpt-bridge-lib.sh,
 fm-chatgpt-consult.sh) only carries one consultation turn, while the plan
 contract and validator make ChatGPT return a dependency-ordered task list
-T1..Tn. Today the loop hands that whole list to ONE plan worker (worker id =
-loop id) and records one result with an entry per task. Not yet built:
-dispatching each task to its own worker in dependency order, which needs the
-consult gate to accept distinct worker ids tied to their loop (a launch
-grant), per-task worker and result records in the loop, and a
-checked dependency validation against the tree instead of a manual one.
-Exclusive-area enforcement is also not built. Both will live under fork/ and
-need no further upstream edits.
+T1..Tn. By default the loop hands that whole list to ONE plan worker.
+fork/chatgpt/fm-chatgpt-breakdown.sh instead runs one worker per plan task in
+dependency order under consult-gate launch grants; it is disabled unless the
+home has config/chatgpt-breakdown, and stays off until a real multi-task run
+has passed (fork/chatgpt/README "Plan breakdown"). Exclusive-area
+enforcement is not built. Both live under fork/ and need no upstream edits.
 
 
 The two hook points
@@ -127,6 +125,11 @@ consult-gate - ship and scout launches need one of:
                                      any other origin, Discord included, refuses
   data/<id>/fork-consult-delivered.json  {"stage": "audit"|"plan"}
                                      relaunch only, never a fresh spawn
+  data/<id>/fork-consult-grant.json  a per-task plan worker's launch grant
+                                     (fork/chatgpt/fm-chatgpt-breakdown.sh);
+                                     checked first, and when present it alone
+                                     decides; a loop whose plan runs task by
+                                     task refuses a fresh spawn of its own id
 
 project-pin - config/fork-project-pins.json:
   {"projects": {"<project directory name>": {"harness": "pi", "model": "..."}}}
