@@ -191,6 +191,16 @@ test_firstmate_receives_untrusted_batches_and_replies_pair_on_evidence() {
   FM_HOME="$W_HOME" "$PROCEVENT" reconcile >/dev/null 2>&1
   assert_not_contains "$(wake_payloads)" "procevent discord discord-inbound 1" "a handled result is not re-announced"
 
+  # The extension renames a batch from batches/ to captured/ when the next
+  # poll starts, which can land between the bridge's two directory listings
+  # and show it the same batch twice. Hold that state so the pairing below
+  # always meets it.
+  local bdir="$W_HOME/state/discord-bridge/inbox" f
+  for f in "$bdir"/batches/*.json "$bdir"/captured/*.json; do
+    [ -f "$f" ] || continue
+    cp -n "$f" "$bdir/batches/" 2>/dev/null || true
+    cp -n "$f" "$bdir/captured/" 2>/dev/null || true
+  done
   mirror_say "Answer to your question: two tasks are under way."
   bridge tick
   [ "$(posts "$D_CMD" | tail -n 1 | jq -r .reply_to)" = 740000000000000001 ] \

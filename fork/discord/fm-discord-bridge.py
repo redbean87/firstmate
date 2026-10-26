@@ -715,14 +715,19 @@ class Sources:
         answered = state.get("answered", {})
         last = state.get("last") if isinstance(state.get("last"), dict) else {}
         candidates = []
+        seen = set()
         for directory in (self.paths.batches, self.paths.captured):
             for name in os.listdir(directory):
                 batch = read_json(os.path.join(directory, name))
                 # returned_at is milliseconds; reply timestamps are whole seconds.
                 if not isinstance(batch, dict) or batch.get("returned_at", 0) / 1000.0 > captured_at + 1:
                     continue
+                # The extension moves a batch from batches/ to captured/ when the
+                # next poll starts; one landing between these two listings shows
+                # the same messages twice, so each message counts once.
                 for m in batch.get("messages", []):
-                    if isinstance(m, dict) and m.get("id") not in answered:
+                    if isinstance(m, dict) and m.get("id") not in answered and m.get("id") not in seen:
+                        seen.add(m.get("id"))
                         candidates.append(m)
         if continuation and not candidates:
             if last.get("channel") in self.cfg.command_channels and last.get("message_id"):
