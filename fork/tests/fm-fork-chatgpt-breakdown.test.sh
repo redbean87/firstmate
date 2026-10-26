@@ -166,6 +166,11 @@ test_code_changes_must_reach_dependents() {
   bd record-task-result --task L --plan-task T2 >/dev/null || fail "record T2"
   assert_equals "true false" "$(task_field T1 changed) $(task_field T2 changed)" "code change is recorded from the worktree"
   [ ! -e "$H/data/L-r1-t1/fork-consult-grant.json" ] || fail "a recorded task loses its grant"
+  git clone -q "$W/proj" "$W/projclone"
+  out=$(bd dispatch --task L --plan-task T3 -- "$W/projclone" --mode no-mistakes); rc=$?
+  expect_code 4 "$rc" "the pre-check must refuse when origin's base provably lacks T1's commit"
+  assert_contains "$out" "no attempt charged" "the pre-check refusal is free"
+  assert_equals "pending 0" "$(task_field T3 status) $(task_field T3 attempts)" "nothing was charged or spawned"
   out=$(dispatch T3); rc=$?
   expect_code 3 "$rc" "T3 must not start on a base without T1's commit"
   assert_contains "$out" "does not contain the dependency commits T1@" "the refusal names the missing commit"

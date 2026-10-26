@@ -42,7 +42,11 @@
 #           the args after -- (project, --mode, ...) without the id. Each
 #           attempt is charged once, when Tn moves to dispatching and its
 #           grant data/<worker>/fork-consult-grant.json is written; a spawn
-#           deferred for capacity (exit 75) is not charged. After the spawn,
+#           deferred for capacity (exit 75) is not charged. Before that, a
+#           read-only pre-check (git ls-remote in the project directory, the
+#           first arg after --) refuses uncharged, exit 4, when the base the
+#           worker would start from (--base-branch, else origin's HEAD) is a
+#           known commit that lacks a dependency's change. After the spawn,
 #           every dependency that changed code must have its recorded head
 #           commit in the worker's worktree HEAD, or the prompt is not sent,
 #           the grant is withdrawn, and the spawned worker must be cleaned up
@@ -187,6 +191,34 @@ cmd_bd_ready() {
   ready_tasks "$1"
 }
 
+# base_lacks_dependencies <record> <Tn> <spawn args...>: print " Tk@<sha>"
+# for each dependency that changed code and is provably absent from the remote
+# base the worker would start from. Read-only: ls-remote and local object
+# checks only. Prints nothing when the base cannot be read, leaving the
+# post-spawn check to decide.
+base_lacks_dependencies() {
+  local bd=$1 pt=$2 proj=$3 branch="" i=0 tip dep head
+  shift 2
+  local -a a=("$@")
+  while [ "$i" -lt "${#a[@]}" ]; do
+    case "${a[$i]}" in
+      --base-branch) branch=${a[$((i + 1))]:-} ;;
+      --base-branch=*) branch=${a[$i]#--base-branch=} ;;
+    esac
+    i=$((i + 1))
+  done
+  [ -d "$proj" ] || return 0
+  [ -n "$branch" ] || branch=$(git -C "$proj" ls-remote --symref origin HEAD 2>/dev/null | sed -n 's|^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$|\1|p')
+  [ -n "$branch" ] || return 0
+  tip=$(git -C "$proj" ls-remote origin "refs/heads/$branch" 2>/dev/null | cut -f1)
+  [ -n "$tip" ] && git -C "$proj" cat-file -e "$tip^{commit}" 2>/dev/null || return 0
+  for dep in $(jq -r --arg t "$pt" '.tasks[$t].depends_on[]' "$bd"); do
+    [ "$(jq -r --arg d "$dep" '.tasks[$d].changed' "$bd")" = true ] || continue
+    head=$(jq -r --arg d "$dep" '.tasks[$d].head_commit' "$bd")
+    git -C "$proj" merge-base --is-ancestor "$head" "$tip" 2>/dev/null || printf ' %s@%s' "$dep" "${head:0:12}"
+  done
+}
+
 cmd_bd_dispatch() {
   local task=$1 pt=$2 effort=$3
   shift 3
@@ -221,6 +253,8 @@ cmd_bd_dispatch() {
   fm_task_id_creation_valid "$worker" || bd_die "worker id $worker is not a valid task id (loop id too long?)"
   [ ! -e "$STATE/$worker.meta" ] || bd_die "a task record for $worker already exists; refusing to reuse it"
   prompt=$(render_plan_message "$file" "$worker" "$pt") || bd_die "the handoff for $pt could not be rendered; nothing launched"
+  missing=$(base_lacks_dependencies "$bd" "$pt" "${args[@]}")
+  [ -z "$missing" ] || bd_die "$pt's dependencies are not on the base its worker would start from:$missing; land them (merge, or the project's delivery path) and dispatch again - nothing launched, no attempt charged" 4
   mkdir -p "$DATA/$worker" || bd_die "could not create data/$worker"
   clear_delivery "$worker" || bd_die "could not clear an earlier delivery proof for $worker"
   # The attempt is charged here, exactly once, together with the grant.

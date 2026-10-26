@@ -231,17 +231,22 @@ multi-task run has passed end to end.
 Each worker id is L-r<round>-t<n> (-a<attempt> on a retry) and needs its own
 brief and backlog item like any spawn. A task dispatches only after every
 dependency reported pass, and only onto a base that already holds each
-dependency's committed change (otherwise its prompt is withheld and the
-spawned worker must be cleaned up). Independent tasks may run at once. A
+dependency's committed change. Landing that change is an explicit supervisor
+step through the project's own delivery path (merge the dependency's PR, or
+land its local branch) before dispatching the dependent: dispatch refuses
+first, free and before spawning (exit 4), when origin's base visibly lacks it,
+and after spawning withholds the prompt (exit 3, worker to be cleaned up) if
+the worker's starting commit still lacks it. Independent tasks may run at once. A
 worker that dies is retried once on a new id; a task that reports fail is
 not retried here - finish hands the aggregated result to the loop, whose
 single fix round re-plans with ChatGPT. Tasks never reached are reported fail
 (or blocked) "not dispatched". Launch grants live in data/<worker>/ and are
 withdrawn when a task is recorded and at finish.
 
-Not yet proven: a real multi-task run with live workers. Landing a
-dependency's change onto the base its dependents start from (a merge or a
-pushed base branch) stays the supervisor's job.
+Validated end to end on 2026-10-25 in an isolated home (real spawn, consult
+gate, worktrees, tmux panes, steering inbox, backlog transitions, teardown,
+and loop result recording) with scripted workers; not yet run with model
+workers.
 
 
 Differences from the core-edit version
