@@ -63,8 +63,20 @@ case "$*" in
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n'; exit 0 ;;
-  list-windows) exit 0 ;;
-  has-session|new-session|new-window|kill-window) exit 0 ;;
+  list-windows)
+    [ ! -s "$FM_FAKE_ROVO_STATE.window" ] || cat "$FM_FAKE_ROVO_STATE.window"
+    exit 0 ;;
+  new-window)
+    name=
+    previous=
+    for arg in "$@"; do
+      [ "$previous" = -n ] && name=$arg
+      previous=$arg
+    done
+    printf '%s\n' "$name" > "$FM_FAKE_ROVO_STATE.window"
+    exit 0 ;;
+  kill-window) : > "$FM_FAKE_ROVO_STATE.window"; exit 0 ;;
+  has-session|new-session) exit 0 ;;
   send-keys)
     prev=
     literal=
@@ -141,7 +153,6 @@ make_spawn_case() {
   wt="$case_dir/wt"
   fakebin=$(make_rovo_fakebin "$case_dir/fake")
   mkdir -p "$home/data/$id" "$home/projects" "$home/state" "$home/config"
-  fm_test_seed_consult_record "$home" "$id"
   cat > "$home/data/$id/brief.md" <<'EOF'
 # Task
 ## Captain's intent

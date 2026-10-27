@@ -78,9 +78,9 @@ FM_BACKLOG_CLOSE_REPLAY_RESULT=
 # library does not source fm-tasks-axi-lib.sh does not apply.
 # shellcheck source=bin/fm-timeout-lib.sh disable=SC1091
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-timeout-lib.sh"
-# fm-pr-lib.sh owns which URL is a Gerrit change. It is functions and empty
-# globals only, so it is sourced once rather than re-initialising a caller's
-# parsed identity.
+# fm-pr-lib.sh owns which URL is a Gerrit change or a GitLab merge request. It
+# is functions and empty globals only, so it is sourced once rather than
+# re-initialising a caller's parsed identity.
 if ! declare -F fm_pr_url_parse >/dev/null 2>&1; then
   # shellcheck source=bin/fm-pr-lib.sh disable=SC1091
   . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-pr-lib.sh"
@@ -517,21 +517,27 @@ fm_backlog_start() {  # <data-dir> <id>
 }
 
 # tasks-axi takes a --pr link only as a canonical GitHub or Forgejo pull request
-# and refuses anything else, so a Gerrit change URL is recorded on the row as a
-# note instead. The subshell keeps the parse from overwriting a caller's
-# FM_PR_* identity.
-fm_backlog_pr_is_gerrit_change() {  # <url>
-  ( fm_pr_url_parse "$1" && [ "$FM_PR_PROVIDER" = gerrit ] )
+# and refuses anything else, so a Gerrit change or GitLab merge request URL is
+# recorded on the row as a note instead. Prints the note's label for such a URL
+# and fails for one tasks-axi accepts. The subshell keeps the parse from
+# overwriting a caller's FM_PR_* identity.
+fm_backlog_pr_note_label() {  # <url>
+  ( fm_pr_url_parse "$1" || exit 1
+    case "$FM_PR_PROVIDER" in
+      gerrit) printf 'Gerrit change\n' ;;
+      gitlab) printf 'GitLab merge request\n' ;;
+      *) exit 1 ;;
+    esac )
 }
 
 fm_backlog_done() {  # <data-dir> <id> [flag...]
-  local data=$1 id=$2 arg previous_arg=''
+  local data=$1 id=$2 arg label previous_arg=''
   local -a done_args=()
   shift 2
   for arg in "$@"; do
-    if [ "$previous_arg" = --pr ] && fm_backlog_pr_is_gerrit_change "$arg"; then
+    if [ "$previous_arg" = --pr ] && label=$(fm_backlog_pr_note_label "$arg"); then
       done_args[${#done_args[@]}-1]=--note
-      done_args+=("Gerrit change $arg")
+      done_args+=("$label $arg")
     else
       done_args+=("$arg")
     fi
@@ -543,36 +549,10 @@ fm_backlog_done() {  # <data-dir> <id> [flag...]
 fm_backlog_row_artifact_supported() {
   local id=$1 flag=${2:-} value=${3:-}
   case "$flag" in
-    --pr) ! fm_backlog_pr_is_gerrit_change "$value" ;;
+    --pr) ! fm_backlog_pr_note_label "$value" >/dev/null ;;
     --report) [ "$value" = "data/$id/report.md" ] ;;
     *) return 1 ;;
   esac
-}
-
-# fm_backlog_row_body_decode <show-full-output>
-# Print the decoded body one `tasks-axi show <id> --full` rendering carries, or
-# return 1 when it cannot be decoded. Single owner of that decode, shared by
-# fm_backlog_retain below and bin/fm-consult-gate-lib.sh's waiver note, so a
-# body containing non-ASCII can never decode differently on two paths.
-# The leading quote selects a JSON-encoded bare string, which is exactly the
-# value an older JSON::PP rejects unless allow_nonref is asked for, so the
-# decoder requests it rather than inheriting the local default. It then writes
-# bytes, because printing the decoded characters to a stream with no :raw layer
-# emits a codepoint at or below U+00FF as one latin-1 byte and silently
-# corrupts the body this rewrites.
-fm_backlog_row_body_decode() {
-  printf '%s\n' "$1" | sed -n 's/^  body: //p' | head -1 |
-    LC_ALL=C perl -MJSON::PP -e '
-      local $/;
-      my $shown = <STDIN>;
-      $shown =~ s/\s+\z//;
-      exit 0 if $shown eq "" || $shown eq "-";
-      my $value = $shown =~ /\A"/
-        ? JSON::PP->new->utf8->allow_nonref->decode($shown) : $shown;
-      binmode STDOUT, ":raw";
-      utf8::encode($value) if utf8::is_utf8($value);
-      print $value unless $value eq "-";
-    '
 }
 
 # Keep a captain-held row open across the removal of the work record that
@@ -605,7 +585,7 @@ fm_backlog_retain() {  # <data-dir> <id> [flag...]
           deliverable="${deliverable:+$deliverable; }PR $arg"
           row_args=(--pr "$arg")
         else
-          deliverable="${deliverable:+$deliverable; }Gerrit change $arg"
+          deliverable="${deliverable:+$deliverable; }$(fm_backlog_pr_note_label "$arg") $arg"
         fi
         ;;
       --note) deliverable="${deliverable:+$deliverable; }$arg" ;;
@@ -622,10 +602,27 @@ fm_backlog_retain() {  # <data-dir> <id> [flag...]
         || FM_BACKLOG_TRANSITION_ERROR="tasks-axi show $id failed with no output"
       return "$command_status"
     fi
-    if ! body=$(fm_backlog_row_body_decode "$out"); then
+    # The leading quote selects a JSON-encoded bare string, which is exactly the
+    # value an older JSON::PP rejects unless allow_nonref is asked for, so the
+    # decoder below requests it rather than inheriting the local default. It then
+    # writes bytes, because printing the decoded characters to a stream with no
+    # :raw layer emits a codepoint at or below U+00FF as one latin-1 byte and
+    # silently corrupts the body this rewrites.
+    body=$(printf '%s\n' "$out" | sed -n 's/^  body: //p' | head -1 \
+      | LC_ALL=C perl -MJSON::PP -e '
+        local $/;
+        my $shown = <STDIN>;
+        $shown =~ s/\s+\z//;
+        exit 0 if $shown eq "" || $shown eq "-";
+        my $value = $shown =~ /\A"/
+          ? JSON::PP->new->utf8->allow_nonref->decode($shown) : $shown;
+        binmode STDOUT, ":raw";
+        utf8::encode($value) if utf8::is_utf8($value);
+        print $value unless $value eq "-";
+      ') || {
       FM_BACKLOG_TRANSITION_ERROR="could not decode the task body of $id"
       return 1
-    fi
+    }
     line="Deliverable of the finished work: $deliverable"
     case $'\n'"$body"$'\n' in
       *$'\n'"$line"$'\n'*) ;;

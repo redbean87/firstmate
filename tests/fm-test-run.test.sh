@@ -97,7 +97,6 @@ init_changed_fixture_repo() {
   for script in \
     fm-brief.test.sh \
     fm-ask-user-authority.test.sh \
-    fm-chatgpt-consult.test.sh \
     fm-documentation-audiences.test.sh \
     fm-test-isolation-proof.test.sh \
     fm-test-run.test.sh \
@@ -159,12 +158,9 @@ init_changed_fixture_repo() {
   printf '# .pi/extensions/fm-primary-pi-watch.ts\n' >>"$repo/tests/fm-pi-watch-extension.test.sh"
   mkdir -p \
     "$repo/.agents/skills/example" \
-    "$repo/.agents/skills/audit-brief" \
     "$repo/.agents/skills/harness-adapters/references/common" \
     "$repo/.claude" "$repo/.pi/extensions" "$repo/docs" "$repo/src"
   : >"$repo/.agents/skills/example/SKILL.md"
-  : >"$repo/.agents/skills/example/reference.md"
-  : >"$repo/.agents/skills/audit-brief/audit-brief-template.md"
   : >"$repo/.agents/skills/harness-adapters/SKILL.md"
   : >"$repo/.agents/skills/harness-adapters/references/common/dispatch.md"
   : >"$repo/.claude/settings.json"
@@ -378,20 +374,6 @@ test_changed_dependency_selection_and_unmapped_failure() {
   assert_contains "$listed" "tests/fm-harness-adapter-instructions-live-e2e.test.sh" "harness adapter router selects opt-in instruction coverage"
   git -C "$repo" add .agents/skills/harness-adapters/SKILL.md
   git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm harness-adapter-router-change
-
-  printf '\n' >>"$repo/.agents/skills/example/reference.md"
-  listed=$(cd "$repo" && bin/fm-test-run.sh --list --changed --base HEAD)
-  assert_contains "$listed" "tests/fm-ask-user-authority.test.sh" \
-    "skill auxiliary markdown selects pure contract coverage"
-  git -C "$repo" add .agents/skills/example/reference.md
-  git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm skill-auxiliary-markdown-change
-
-  printf '\n' >>"$repo/.agents/skills/audit-brief/audit-brief-template.md"
-  listed=$(cd "$repo" && bin/fm-test-run.sh --list --changed --base HEAD)
-  assert_contains "$listed" "tests/fm-chatgpt-consult.test.sh" \
-    "audit-brief template selects its consumer consult suite"
-  git -C "$repo" add .agents/skills/audit-brief/audit-brief-template.md
-  git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm audit-brief-template-change
 
   printf '\n' >>"$repo/bin/fm-procevent-quota.sh"
   printf '\n' >>"$repo/bin/fm-quota-choose.sh"
@@ -808,8 +790,8 @@ SH
   end_n=$(grep -c '^FM_TEST_END ' "$out" || true)
   [ "$begin_n" -eq 1 ] || fail "expected one FM_TEST_BEGIN, got $begin_n"
   [ "$end_n" -eq 1 ] || fail "expected one FM_TEST_END, got $end_n"
-  grep -Eq '^FM_TEST_BEGIN .+ family=unclassified expected_gate_skip=none weight_ms=[0-9]+$' "$out" \
-    || fail "BEGIN line missing family/expected_gate_skip/weight_ms: $(grep '^FM_TEST_BEGIN' "$out")"
+  grep -Eq '^FM_TEST_BEGIN .+ family=unclassified expected_gate_skip=none$' "$out" \
+    || fail "BEGIN line missing family/expected_gate_skip: $(grep '^FM_TEST_BEGIN' "$out")"
   grep -Eq '^FM_TEST_END .+ exit=0 duration_ms=[0-9]+ gate_skip=false$' "$out" \
     || fail "END line missing exit/duration/gate_skip: $(grep '^FM_TEST_END' "$out")"
   summary=$(grep '^FM_TEST_SUMMARY ' "$out" || true)
@@ -834,50 +816,6 @@ assert "family" in doc["scripts"][0]
 ' "$json" || { rm -rf "$tmp"; fail "JSON timing artifact missing required fields"; }
   rm -rf "$tmp"
   pass "timing markers and JSON artifact are valid"
-}
-
-# The cap-kill tripwire (bin/fm-test-shard-tripwire.sh) reports modeled-versus-
-# actual from the FM_TEST_BEGIN line alone, because a killed shard writes
-# nothing else. Hold that the marker carries the runner's own modeled weight:
-# the seeded hint when the script has one, the default weight when it does not.
-test_begin_marker_carries_modeled_weight() {
-  local tmp repo hinted unhinted out
-  tmp=$(fm_test_tmproot fm-test-run-weight-marker)
-  repo="$tmp/repo"
-  mkdir -p "$repo/bin" "$repo/tests"
-  cp "$RUNNER" "$repo/bin/fm-test-run.sh"
-  cp "$ROOT/tests/git-config-helpers.sh" "$repo/tests/"
-  hinted=tests/fm-weight-marker-hinted.test.sh
-  unhinted=tests/fm-weight-marker-unhinted.test.sh
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/$hinted"
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/$unhinted"
-  python3 - "$repo/bin/fm-test-run.sh" <<'PY' \
-    || fail "could not seed the fixture hint table"
-from pathlib import Path
-import sys
-runner = Path(sys.argv[1])
-text = runner.read_text()
-marker = "portable_serial_weight_hints() {\n  cat <<'EOF'\n"
-assert marker in text, "hint table shape changed"
-runner.write_text(text.replace(
-    marker,
-    marker + "tests/fm-weight-marker-hinted.test.sh 123456\n",
-    1,
-))
-PY
-  chmod +x "$repo/bin/fm-test-run.sh" "$repo/$hinted" "$repo/$unhinted"
-  (cd "$repo" && bin/fm-test-run.sh --jobs 1 "$hinted" "$unhinted") \
-    >"$tmp/out" 2>"$tmp/err" \
-    || fail "weight-marker fixture run failed: $(cat "$tmp/err")"
-  out=$(cat "$tmp/out")
-  assert_contains "$out" \
-    "$hinted family=unclassified expected_gate_skip=none weight_ms=123456" \
-    "BEGIN marker must carry the seeded modeled hint as weight_ms"
-  assert_contains "$out" \
-    "$unhinted family=unclassified expected_gate_skip=none weight_ms=45000" \
-    "BEGIN marker must fall back to the default weight when unhinted"
-  rm -rf "$tmp"
-  pass "FM_TEST_BEGIN stamps the modeled weight for the cap-kill tripwire"
 }
 
 test_aggregate_exit_behavior() {
@@ -1052,6 +990,21 @@ test_exclude_family() {
   printf '%s\n' "$listed" | grep -Fq 'tests/fm-backend-herdr-smoke.test.sh' \
     || fail "family real-herdr-gated must list smoke test"
   pass "exclude-family drops the named primary family after selection"
+}
+
+test_tern_family_selection() {
+  local listed families
+  families=$("$RUNNER" --list-families)
+  printf '%s\n' "$families" | grep -qx tern || fail "--list-families must name the tern family"
+  listed=$("$RUNNER" --list --family tern)
+  assert_contains "$listed" "tests/fm-backend-tern.test.sh" "family tern must select the fake-CLI suite"
+  assert_contains "$listed" "tests/fm-backend-tern-smoke.test.sh" "family tern must select the real-binary smoke test"
+  assert_not_contains "$listed" "tests/tern-test-safety.sh" "the safety helper is a shared library, not a runnable suite"
+  assert_not_contains "$listed" "tests/fm-backend-cmux.test.sh" "family tern must not absorb the cmux suite"
+  # The scripts are real members of the portable lanes, so the coverage guard
+  # (every tests/*.test.sh belongs to exactly one lane) sees them.
+  "$RUNNER" --list-lanes >/dev/null || fail "--list-lanes failed with the tern scripts present"
+  pass "fm-test-run: family tern selects the tern suite and smoke test, and the lane coverage guard accepts them"
 }
 
 test_list_scheduled_proven_isolated_uses_serial_weights() {
@@ -1258,7 +1211,8 @@ test_portable_serial_packing_budget_boundary() {
   repo="$tmp/repo"
   mkdir -p "$repo/bin" "$repo/tests"
   # Preserve the real inventory and packing policy without executing suites.
-  # Only the fixture's measured timing input changes at the boundary.
+  # Give every inventory member a fixture hint so an unmeasured real script
+  # cannot take the default weight and join the at-budget shard.
   while IFS= read -r script; do
     printf '#!/usr/bin/env bash\nexit 0\n' >"$repo/$script"
   done < <("$RUNNER" --list --all)
@@ -1270,11 +1224,30 @@ test_portable_serial_packing_budget_boundary() {
 from pathlib import Path
 import re, sys
 runner = Path(sys.argv[1])
-runner.write_text(re.sub(
-    r"(?m)^tests/fm-watch-triage\.test\.sh [0-9]+$",
-    f"tests/fm-watch-triage.test.sh {sys.argv[2]}",
-    runner.read_text(),
-))
+weight = sys.argv[2]
+text = runner.read_text()
+scripts = sorted(
+    f"tests/{path.name}" for path in (runner.parent.parent / "tests").glob("*.test.sh")
+)
+if "tests/fm-watch-triage.test.sh" not in scripts:
+    sys.exit("fixture inventory lost tests/fm-watch-triage.test.sh")
+# Longest real serial member stays at the budget boundary; every other script
+# gets 1ms so longest-processing-time packing cannot fill that shard.
+lines = [
+    f"{script} {weight if script == 'tests/fm-watch-triage.test.sh' else '1'}"
+    for script in scripts
+]
+table = "\n".join(lines)
+new, n = re.subn(
+    r"(portable_serial_weight_hints\(\) \{\n  cat <<'EOF'\n).*?(\nEOF\n)",
+    lambda match: match.group(1) + table + match.group(2),
+    text,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    sys.exit("serial hint table not found")
+runner.write_text(new)
 PY
     out=$(bash "$repo/bin/fm-test-run.sh" --check-coverage 2>&1) && rc=0 || rc=$?
     if [ "$weight" -eq 1200000 ]; then
@@ -1442,7 +1415,7 @@ test_unmapped_new_test_never_inherits_family_concurrency() {
   set -e
   [ "$rc" -eq 0 ] \
     || fail "an unclassified test must still run serially, got $rc: $(cat "$tmp/serial.err")"
-  grep -Eq '^FM_TEST_BEGIN .+ family=unclassified expected_gate_skip=none weight_ms=[0-9]+$' "$tmp/serial.out" \
+  grep -Eq '^FM_TEST_BEGIN .+ family=unclassified expected_gate_skip=none$' "$tmp/serial.out" \
     || fail "the unmapped fixture did not land in the catch-all family: $(cat "$tmp/serial.out")"
   rm -rf "$tmp"
   pass "an unclassified new test stays serial while the proven residual family runs concurrently"
@@ -1486,6 +1459,39 @@ test_changed_shared_fixture_selects_its_readers() {
 
   rm -rf "$tmp"
   pass "a changed shared test fixture selects its readers while an unread tests/ path still refuses"
+}
+
+# Suites outside backend-dispatch source the T3 fake and the T3 adapter, so a
+# change to either selects the suites that read them as well.
+test_changed_t3_sources_select_their_readers() {
+  local tmp repo listed
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/fm-test-run-t3.XXXXXX")
+  repo="$tmp/repo"
+  init_changed_fixture_repo "$repo"
+  mkdir -p "$repo/bin/backends"
+  : >"$repo/bin/backends/t3code.sh"
+  : >"$repo/tests/t3-fake-lib.sh"
+  printf '#!/usr/bin/env bash\n# tests/lib.sh\n. tests/t3-fake-lib.sh\n' >"$repo/tests/fm-secondmate-restart.test.sh"
+  chmod +x "$repo/tests/fm-secondmate-restart.test.sh"
+  printf '# bin/backends/t3code.sh\n' >>"$repo/bin/fm-supervisor-target-lib.sh"
+  git -C "$repo" add .
+  git -C "$repo" -c user.name=test -c user.email=test@example.invalid commit -qm t3
+
+  printf '\n' >>"$repo/tests/t3-fake-lib.sh"
+  listed=$(cd "$repo" && bin/fm-test-run.sh --list --changed --base HEAD)
+  assert_contains "$listed" "tests/fm-secondmate-restart.test.sh" \
+    "a changed T3 fake selects the suite that sources it"
+  git -C "$repo" checkout -q -- tests/t3-fake-lib.sh
+
+  printf '\n' >>"$repo/bin/backends/t3code.sh"
+  listed=$(cd "$repo" && bin/fm-test-run.sh --list --changed --base HEAD)
+  assert_contains "$listed" "tests/fm-backend.test.sh" \
+    "a changed T3 adapter still selects backend-dispatch"
+  assert_contains "$listed" "tests/fm-daemon.test.sh" \
+    "a changed T3 adapter selects the curated family of a script that consumes it"
+
+  rm -rf "$tmp"
+  pass "a changed T3 fake or adapter selects the suites that read it beyond backend-dispatch"
 }
 
 # Workers are handed scripts in order, so the slowest script must start first or
@@ -1903,7 +1909,6 @@ test_script_list_uses_bounded_automatic_concurrency
 test_family_proofs_run_in_separate_concurrent_phases
 test_empty_selection_emits_summary
 test_timing_markers_and_json
-test_begin_marker_carries_modeled_weight
 test_aggregate_exit_behavior
 test_gate_skip_accounting
 test_gate_skip_reason_is_recorded
@@ -1911,6 +1916,7 @@ test_a_run_that_ran_records_no_skip_reason
 test_live_guards_expect_a_capability_skip_class
 test_fail_on_gate_skip_token
 test_exclude_family
+test_tern_family_selection
 test_list_scheduled_proven_isolated_uses_serial_weights
 test_list_scheduled_non_lane_selections_use_serial_weights
 test_portable_shard_union_and_coverage_guard
@@ -1923,6 +1929,7 @@ test_jobs_requires_proven_isolated
 test_jobs_admits_a_concurrent_safe_family
 test_unmapped_new_test_never_inherits_family_concurrency
 test_changed_shared_fixture_selects_its_readers
+test_changed_t3_sources_select_their_readers
 test_concurrent_runs_are_ordered_longest_first
 test_per_script_timeout_bounds_a_hang
 test_changed_bound_gives_slow_watcher_suites_headroom

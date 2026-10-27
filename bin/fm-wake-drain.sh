@@ -211,7 +211,7 @@ require_branch_eligible_rows() {
 # unseen. 0 when nothing is on record.
 presented_max_row() { # <rows-file>
   if rows_file_valid "$1" 2>/dev/null; then
-    awk '$1 ~ /^[0-9]+$/ && $1 > max { max=$1 } END { print max + 0 }' "$1"
+    awk '$1 ~ /^[0-9]+$/ && $1 > max { max=$1 } END { print (max == "" ? 0 : max) }' "$1"
   else
     printf '0\n'
   fi
@@ -325,61 +325,6 @@ EOF
   BRANCH_OUTCOME_INDEX_IDENT=$ident
 }
 
-# Relay one captain-relevant presented item to the Discord outbound tap. The
-# class, logical event key, sanitized text, and decision key come from
-# bin/fm-branch-outcome.sh notify-event, the same derivation the branch append
-# tap uses, so a re-presentation claims the same dedup marker and cannot
-# double-ping, and a failed append-time send retries here because the tap
-# released its marker. The network send runs detached and logs one result line
-# to $STATE/.wake-drain-notify.log, so drain latency never depends on Discord.
-# <source> is store for a row that is itself the durable branch record, whose
-# derived key is therefore exactly the append path's, and derived for a
-# fold/backstop sighting with no covering row: there only a decision-class
-# event key is provably identical to what the branch append would compute, so
-# every other derived sighting is skipped and logged as a residual gap rather
-# than pinged under a second, incompatible key.
-relay_notify_outcome() {  # <task> <summary> <source:store|derived>
-  local task=$1 summary=$2 source=$3 plan class event text dkey
-  [ "$ACTOR" = main ] || return 0
-  plan=$("$SCRIPT_DIR/fm-branch-outcome.sh" notify-event --task "$task" --summary "$summary" 2>/dev/null) || return 0
-  IFS=$(printf '\t') read -r class event text dkey <<EOF
-$plan
-EOF
-  case "$class" in decision|completion|blocker) ;; *) return 0 ;; esac
-  case "$event" in ''|.*|*[!A-Za-z0-9._-]*) return 0 ;; esac
-  # notify-event encodes a rendered multi-line decision body as a literal
-  # \n so it survives the one-line tab-separated relay protocol; decode it
-  # back to real line breaks before the tap sends.
-  text=$(printf '%s' "$text" | awk '{ out=""; i=1; n=length($0); while (i <= n) { c=substr($0, i, 1); if (c == "\\" && i < n) { nx=substr($0, i + 1, 1); if (nx == "\\") { out=out "\\"; i+=2; continue } ; if (nx == "n") { out=out "\n"; i+=2; continue } } ; out=out c; i++ } ; printf "%s", out }')
-  if [ "$source" != store ]; then
-    case "$event" in
-      decision-*) ;;
-      *)
-        printf 'discord-relay: %s: not sent (%s sighting has no event identity shared with the branch record; residual gap)\n' \
-          "$task" "$class" >> "$STATE/.wake-drain-notify.log"
-        return 0
-        ;;
-    esac
-    # The decision text is already a rendered, task-id-free decision message;
-    # prefixing the task id here would reintroduce the internal identifier the
-    # presentation contract forbids. Only non-decision derived rows keep the
-    # task prefix that names which work the update concerns.
-    case "$class" in
-      decision) ;;
-      *) [ -n "$text" ] && text="$task: $text" ;;
-    esac
-  fi
-  [ -n "$text" ] || text="update on $task"
-  {
-    printf 'discord-relay: %s [%s] %s\n' "$event" "$class" "$task"
-    if [ -n "$dkey" ]; then
-      "$SCRIPT_DIR/fm-discord-notify.sh" --event "$event" --class "$class" --text "$text" --decision-key "$dkey"
-    else
-      "$SCRIPT_DIR/fm-discord-notify.sh" --event "$event" --class "$class" --text "$text"
-    fi
-  } >> "$STATE/.wake-drain-notify.log" 2>&1 </dev/null &
-}
-
 print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
   local snapshot=$1 task endpoint ident event event_endpoint line verb key receipt store lock ready
   local output='' used=0 shown=0 omitted=0 bytes item_bytes=220 global_bytes=4000 rc=0
@@ -450,7 +395,6 @@ print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
     fi
     output="$output$line
 "
-    relay_notify_outcome "$task" "$event" derived
     STATUS_OUTCOME_BACKSTOP_ACKNOWLEDGED="$STATUS_OUTCOME_BACKSTOP_ACKNOWLEDGED$task$(printf '\t')$event_endpoint
 "
     used=$((used + bytes))
@@ -549,11 +493,6 @@ print_open_decisions_section() {
     fi
     output="$output$line
 "
-    if [ "$key" = default ]; then
-      relay_notify_outcome "$task" "$verb: $note" derived
-    else
-      relay_notify_outcome "$task" "[key=$key] $verb: $note" derived
-    fi
     used=$((used + bytes))
     shown=$((shown + 1))
   done <<EOF
@@ -678,7 +617,6 @@ print_branch_outcomes_section() {
   local text='' used=0 shown=0 held=0 bytes item_bytes=600 captain_bytes=4000 routine_bytes=2000
   local routine_lines='' routine_count=0 routine_shown=0
   local -a captain_tasks=() captain_lines=() captain_line_bytes=()
-  local relay_rows rtask rsummary
   [ "$ACTOR" = main ] || return 0
   config=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}
   fm_supervision_host_outcomes_drained "$config" || return 0
@@ -732,19 +670,6 @@ print_branch_outcomes_section() {
   done <<ROWS
 $captain
 ROWS
-  if [ "$target" -gt 0 ]; then
-    relay_rows=$(printf '%s\n' "$rows" | jq -rs --argjson target "$target" '
-      map(select(.verdict == "captain" and (.seq <= $target)))
-      | sort_by(.seq)
-      | .[] | "\(.task)\t\(.summary | gsub("[\t\n\r]"; " "))"' 2>/dev/null) || relay_rows=
-    while IFS=$(printf '\t') read -r rtask rsummary; do
-      [ -n "$rtask" ] || continue
-      [ -n "$rsummary" ] || continue
-      relay_notify_outcome "$rtask" "$rsummary" store
-    done <<ROWS
-$relay_rows
-ROWS
-  fi
   if [ "$shown" -gt 0 ]; then
     text="BRANCH OUTCOMES (captain outcomes the supervision session recorded for you, one line per task, oldest first; each says what was true when it was recorded, so check the task's current state first, including its still-open decisions listed above under OPEN DECISIONS, and sort them into still open and already settled, such as a decision since answered, a PR since merged, or a task since finished - process the still-open ones as firstmate: tell the captain, land or merge what is ready, answer or escalate a decision, or act on a blocker; your reply to the captain covers only those, as if the settled ones had never been listed, and a settled one needs only the acknowledgement):
 "
@@ -989,6 +914,14 @@ if [ -n "$ACK_THROUGH" ]; then
       exit 1
     }
   fi
+  HANDOFF_ACK=
+  if [ "$ACTOR" = main ] && [ -f "$STATE/.supervision-handoff-pending" ]; then
+    HANDOFF_TOKEN=$(cat "$STATE/.supervision-handoff-pending") || exit 1
+    if awk -F '\t' -v key="supervision-handoff:$HANDOFF_TOKEN" '$3 == "check" && $4 == key { found=1 } END { exit !found }' "$FM_WAKE_QUEUE" \
+      && ! awk -F '\t' -v key="supervision-handoff:$HANDOFF_TOKEN" '$3 == "check" && $4 == key { found=1 } END { exit !found }' "$DRAIN_TMP"; then
+      HANDOFF_ACK=$HANDOFF_TOKEN
+    fi
+  fi
   ACK_REMOVED=$(( $(awk 'END { print NR }' "$FM_WAKE_QUEUE") - $(awk 'END { print NR }' "$DRAIN_TMP") ))
   if [ ! -s "$DRAIN_TMP" ]; then
     fm_recovery_marker_ack "$RECOVERY_MARKER" "$ACK_GENERATION"
@@ -1013,6 +946,9 @@ if [ -n "$ACK_THROUGH" ]; then
     exit 1
   fi
   DRAIN_TMP=
+  if [ -n "$HANDOFF_ACK" ] && [ "$(cat "$STATE/.supervision-handoff-pending" 2>/dev/null)" = "$HANDOFF_ACK" ]; then
+    rm -f "$STATE/.supervision-handoff-pending" || exit 1
+  fi
   if [ "$ACTOR" = branch ]; then
     consume_actor_rows_locked "$ELIGIBLE_ROWS_FILE" "$ACK_THROUGH" || exit 1
   else
@@ -1127,7 +1063,7 @@ awk -F '\t' -v seqs="$ACTOR_ROWS_FILE" '
 RAW_ROWS=$(fm_wake_print_deduped "$DRAIN_VIEW_TMP") || exit "$?"
 rm -f -- "$DRAIN_VIEW_TMP" || exit 1
 DRAIN_VIEW_TMP=
-ACK_THROUGH=$(printf '%s\n' "$RAW_ROWS" | awk -F '\t' '$2 ~ /^[0-9]+$/ && $2 > max { max=$2 } END { print max + 0 }') || exit 1
+ACK_THROUGH=$(printf '%s\n' "$RAW_ROWS" | awk -F '\t' '$2 ~ /^[0-9]+$/ && $2 > max { max=$2 } END { print (max == "" ? 0 : max) }') || exit 1
 case "${FM_WAKE_DRAIN_TEST_DELAY_BEFORE_COMMIT:-0}" in
   0) ;;
   ''|*[!0-9]*) ;;

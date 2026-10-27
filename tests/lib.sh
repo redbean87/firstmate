@@ -37,10 +37,6 @@ umask 022
 # header owns the invariant and the layers it deliberately leaves in force.
 # shellcheck source=tests/git-config-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/git-config-helpers.sh"
-# The consultation-gate fixture lives in its own file because suites with a
-# standalone spawn world source it directly without pulling in this library.
-# shellcheck source=tests/consult-gate-fixture.sh
-. "$(dirname "${BASH_SOURCE[0]}")/consult-gate-fixture.sh"
 
 # Exempt firstmate's own test suite from the gate-lifecycle refusal
 # (bin/fm-gate-refuse-lib.sh). The no-mistakes gate runs this suite FROM a gate
@@ -55,13 +51,6 @@ export FM_GATE_REFUSE_BYPASS=1
 # FM_TEST_HARNESS harness pin). Normal primary launches do not arm it, so a
 # leaked harness pin alone stays inert outside a suite.
 export FM_TEST_SEAM=1
-
-# Keeps the ChatGPT consultation bridge probe out of every suite that runs
-# bootstrap: without this, a developer machine with a live bridge (or an
-# exported CHATGPT_WEB_BRIDGE_URL) would answer or fail probe cases that are
-# meant to be hermetic. Cases that pin the probe set FM_CHATGPT_HEALTH_PROBE=1
-# themselves, which overrides this default.
-export FM_CHATGPT_HEALTH_PROBE=0
 
 # Clear the task-worker marker bin/fm-spawn.sh exports into ship and scout
 # panes. This suite builds git-init fixture repositories whose primary checkout
@@ -78,6 +67,13 @@ unset FM_TASK_ID
 # explicit --file, or bin/fm-tasks-axi.sh; a case that verifies the wrapper
 # against an ambient override sets TASKS_AXI_FILE itself.
 unset TASKS_AXI_FILE TASKS_AXI_BACKEND
+
+# Clear the Rex block identity an operator's terminal exports. Run directly
+# inside a Rex block, the suite would otherwise auto-detect the rex backend
+# (bin/fm-backend.sh's fm_backend_detect) and place fixture tasks into the
+# operator's live Rex session. REX_BIN_DIR stays so the real-server smoke test
+# can find the CLI; a case that verifies detection sets these itself.
+unset REX_SESSION REX_BLOCK
 
 # Write the tracked default backlog configuration into a fixture home. Never copy
 # "$ROOT/.tasks.toml": an operator's primary checkout keeps a gitignored override
@@ -109,6 +105,33 @@ fail() {
 
 pass() {
   printf 'ok - %s\n' "$1"
+}
+
+# Harness argument assertions reuse the emitted prefix rather than duplicating
+# its per-spawn env-file path. The dispatch suite executes it separately to prove
+# credential preservation, hooks-path selection and invalid-count refusal.
+fm_test_launch_git_prefix() {  # <launch>
+  local launch=$1 helper tail end=' || return 1 2>/dev/null || exit 1; '
+  case "$launch" in
+    *' env-file '*"$end"*) ;;
+    *) fail "launch has no complete Git configuration prefix" ;;
+  esac
+  helper=${launch%%' env-file '*}
+  helper=${helper##*; }
+  tail=${launch#*' env-file '}
+  tail=${tail%%"$end"*}
+  printf '%s env-file %s%s' "$helper" "$tail" "$end"
+}
+
+# The command a pane runs after the launch's Git configuration prefix and its
+# leading export statements, for suites that split it into arguments.
+fm_test_launch_command() {  # <launch>
+  local command=$1 end=' || return 1 2>/dev/null || exit 1; '
+  case "$command" in *"$end"*) command=${command#*"$end"} ;; esac
+  while [[ "$command" == export\ *\;* ]]; do
+    command=${command#*; }
+  done
+  printf '%s' "$command"
 }
 
 # --- self-cleaning temp root ------------------------------------------------
@@ -266,6 +289,11 @@ fm_test_reap_watchers() {
 # its owner's guard reaps it.
 FM_TEST_STUB_MAX_BLOCK_SECONDS=${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}
 export FM_TEST_STUB_MAX_BLOCK_SECONDS
+# The suite's own pid, for a polling fixture to stop once its suite is gone
+# (`kill -0 "$FM_TEST_SUITE_PID"` in its loop condition), which bounds it to one
+# poll past a runner killed too hard for any cleanup to run.
+FM_TEST_SUITE_PID=$$
+export FM_TEST_SUITE_PID
 
 # Remove a fixture tree even when it holds a read-only directory, such as the
 # spawn-owned state/<id>.git-hooks strip directory.
@@ -277,6 +305,40 @@ fm_test_remove_tree() {
   rm -rf "$dir"
 }
 
+# --- fixture-root process reaping -------------------------------------------
+#
+# A fixture process whose command line names a fixture root - a stub, a script
+# run from a fixture checkout whose bin links back here, or a fake harness
+# session - can reparent to init and keep polling after its test ends, and
+# removing the root only turns its wait into one that can never finish. Before a
+# root is removed, every process naming that exact mktemp root is signalled,
+# TERM and then KILL, each followed by a bounded 2s wait. The match is the
+# unique per-run root path, never a script or process name, so it cannot reach
+# another home's processes; this shell and its ancestors are never signalled.
+fm_test_reap_root_processes() {  # <root>
+  local root=${1%/} chain pid pids signal i
+  [ -n "$root" ] && [ "$root" != / ] || return 0
+  chain=" "
+  pid=$$
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null; do
+    chain="$chain$pid "
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+  done
+  for signal in TERM KILL; do
+    i=0
+    while [ "$i" -lt 20 ]; do
+      pids=$(ps -ww -eo pid=,args= 2>/dev/null \
+        | FM_TEST_REAP_ROOT="$root/" awk -v chain="$chain" \
+          'index($0, ENVIRON["FM_TEST_REAP_ROOT"]) && index(chain, " " $1 " ") == 0 { print $1 }')
+      [ -n "$pids" ] || return 0
+      # shellcheck disable=SC2086 # one argument per pid
+      [ "$i" -gt 0 ] || kill -s "$signal" $pids 2>/dev/null
+      sleep 0.1
+      i=$((i + 1))
+    done
+  done
+}
+
 fm_test_cleanup() {
   local d
   fm_test_reap_watchers
@@ -286,7 +348,9 @@ fm_test_cleanup() {
   done
   if [ -f "$FM_TEST_CLEANUP_REGISTRY" ]; then
     while IFS= read -r d; do
-      [ -n "$d" ] && fm_test_remove_tree "$d"
+      [ -n "$d" ] || continue
+      fm_test_reap_root_processes "$d"
+      fm_test_remove_tree "$d"
     done < "$FM_TEST_CLEANUP_REGISTRY"
     rm -f "$FM_TEST_CLEANUP_REGISTRY"
   fi
@@ -340,6 +404,7 @@ fm_test_reap_orphans() {
     mtime=$(stat -c %Y "$marker" 2>/dev/null || stat -f %m "$marker" 2>/dev/null) || continue
     [ $((now - mtime)) -ge "$FM_TEST_ORPHAN_MAX_AGE_SECONDS" ] || continue
     dir=$(dirname "$marker")
+    fm_test_reap_root_processes "$dir"
     fm_test_remove_tree "$dir"
   done
 }

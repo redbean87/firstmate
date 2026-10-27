@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# fm-fork-sync - import an upstream firstmate commit into the fork in an
+# isolated worktree, classify any conflict by ownership, and run the fork's
+# checks. The procedure around it is fork/README "Upstream sync procedure".
+#
+# Usage:
+#   fm-fork-sync prepare <upstream-commit> [--from <branch>] [--worktree <dir>]
+#   fm-fork-sync check   <upstream-commit> [--root <dir>] [--from <branch>]
+#   fm-fork-sync lint    [--root <dir>]
+#
+# prepare  needs <upstream-commit> already present locally (fetch it first; this
+#          script never contacts a remote). It records the feature branch tip
+#          (--from, default fork/stage1-enforcement) as
+#          refs/backup/<branch-name>-pre-sync-<short>, creates branch
+#          fork/sync-<short> in a new worktree (default
+#          <repo parent>/firstmate-sync-<short>) and merges the commit there
+#          with --no-ff. The active checkout, its branch, and its working tree
+#          are never touched. Refuses if the backup ref, branch, or worktree
+#          path already exists. On a conflict the merge is left in progress in
+#          the worktree and every conflicted path is listed with its owner:
+#            fork-owned  fork/ or the fork CI workflow: upstream now writes a
+#                        path the fork owns; stop and decide by hand
+#            hook file   bin/fm-spawn.sh or bin/fm-control.sh: take upstream's
+#                        side, then re-insert the block from fork/hooks/
+#            upstream    any other path: the fork has edited an upstream file,
+#                        a boundary violation; stop and remove that edit
+#          Exit 0 merged cleanly, 3 conflicts, 1/2 refused.
+# check    runs, in <root> (default: this script's tree), the boundary check
+#          (fm-fork-hook-check --base <upstream-commit>), lint, and
+#          fork/tests/run, and prints the upstream commits not yet in --from
+#          (default fork/stage1-enforcement) and the upstream-owned diffstat
+#          against <upstream-commit>, for review. Exit 0 only if all pass.
+# lint     the fork's ShellCheck set, shared with .github/workflows/fork-ci.yml.
+#
+# Nothing here fast-forwards, pushes, deletes a branch or worktree, aborts a
+# merge, or resolves a conflict; those steps stay manual (fork/README).
+set -u
+
+SELF_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+die() { printf 'fm-fork-sync: %s\n' "$*" >&2; exit "${2:-1}"; }
+usage() { sed -n '6,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+owner_of() {  # <path>: fork-owned | hook file | upstream
+  case "$1" in
+    fork/*|.github/workflows/fork-ci.yml) echo fork-owned ;;
+    bin/fm-spawn.sh|bin/fm-control.sh) echo "hook file" ;;
+    *) echo upstream ;;
+  esac
+}
+
+cmd_prepare() {
+  local commit=${1:-} from=fork/stage1-enforcement wt='' short sha branch backup out rc conflicts f
+  [ -n "$commit" ] || usage
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) from=${2:?--from needs a branch}; shift 2 ;;
+      --worktree) wt=${2:?--worktree needs a path}; shift 2 ;;
+      *) die "unknown argument $1" 2 ;;
+    esac
+  done
+  sha=$(git -C "$SELF_ROOT" rev-parse --verify --quiet "$commit^{commit}") \
+    || die "$commit is not a commit here; fetch it first: git fetch --no-tags upstream <ref-or-sha>"
+  git -C "$SELF_ROOT" rev-parse --verify --quiet "refs/heads/$from" >/dev/null || die "no local branch $from"
+  short=${sha:0:8}
+  branch="fork/sync-$short"
+  backup="refs/backup/${from##*/}-pre-sync-$short"
+  [ -n "$wt" ] || wt="$(dirname "$SELF_ROOT")/firstmate-sync-$short"
+  git -C "$SELF_ROOT" rev-parse --verify --quiet "$backup" >/dev/null && die "backup ref $backup already exists"
+  git -C "$SELF_ROOT" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
+  [ ! -e "$wt" ] || die "worktree path $wt already exists"
+  if git -C "$SELF_ROOT" merge-base --is-ancestor "$sha" "refs/heads/$from"; then
+    die "$short is already in $from; nothing to import" 0
+  fi
+  git -C "$SELF_ROOT" update-ref "$backup" "refs/heads/$from" "" || die "could not write $backup"
+  printf 'backup: %s -> %s\n' "$backup" "$(git -C "$SELF_ROOT" rev-parse --short "$backup")"
+  git -C "$SELF_ROOT" worktree add -q -b "$branch" "$wt" "refs/heads/$from" || die "could not create worktree $wt"
+  printf 'worktree: %s on %s\n' "$wt" "$branch"
+  out=$(git -C "$wt" merge --no-ff --no-edit -m "Merge upstream $short into $from" "$sha" 2>&1); rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf 'merged: upstream %s into %s cleanly\n' "$short" "$branch"
+    printf 'next: fork/bin/fm-fork-sync check %s --root %s\n' "$sha" "$wt"
+    return 0
+  fi
+  conflicts=$(git -C "$wt" diff --name-only --diff-filter=U)
+  [ -n "$conflicts" ] || { printf '%s\n' "$out" >&2; die "merge failed without conflicts in $wt"; }
+  printf 'CONFLICT: merge left in progress in %s\n' "$wt"
+  while IFS= read -r f; do printf '  %-10s %s\n' "$(owner_of "$f")" "$f"; done <<EOF
+$conflicts
+EOF
+  printf 'resolve by hand (fork/README "Resolving conflicts"), commit, then run check\n'
+  exit 3
+}
+
+cmd_lint() {
+  local root=$SELF_ROOT rc=0
+  [ "${1:-}" = --root ] && root=$(cd "${2:?--root needs a path}" && pwd)
+  command -v shellcheck >/dev/null 2>&1 || die "shellcheck is not installed (bin/fm-install-shellcheck.sh)"
+  (cd "$root" && shellcheck -x fork/bin/fm-launch-policy fork/bin/fm-fork-hook-check fork/bin/fm-fork-sync \
+    fork/bin/fm-discord-release fork/chatgpt/*.sh fork/discord/*.sh fork/discord/fm-discord-service \
+    fork/tests/run fork/tests/*.sh) || rc=1
+  (cd "$root" && shellcheck -x -S warning bin/fm-spawn.sh bin/fm-control.sh) || rc=1
+  [ "$rc" -eq 0 ] && echo "ok: lint"
+  return "$rc"
+}
+
+cmd_check() {
+  local commit=${1:-} root=$SELF_ROOT from=fork/stage1-enforcement sha failed=0
+  [ -n "$commit" ] || usage
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --root) root=$(cd "${2:?--root needs a path}" && pwd) || exit 2; shift 2 ;;
+      --from) from=${2:?--from needs a branch}; shift 2 ;;
+      *) die "unknown argument $1" 2 ;;
+    esac
+  done
+  sha=$(git -C "$root" rev-parse --verify --quiet "$commit^{commit}") || die "$commit is not a commit in $root"
+  git -C "$root" merge-base --is-ancestor "$sha" HEAD || die "$root HEAD does not contain $commit; merge it first"
+  [ -z "$(git -C "$root" diff --name-only --diff-filter=U)" ] || die "$root has unresolved conflicts"
+  echo "== boundary"; "$root/fork/bin/fm-fork-hook-check" --root "$root" --base "$sha" || failed=1
+  echo "== lint"; cmd_lint --root "$root" || failed=1
+  echo "== fork tests"; "$root/fork/tests/run" || failed=1
+  echo "== review: commits this import brings"
+  git -C "$root" log --oneline --no-merges "refs/heads/$from..$sha" | head -50
+  echo "== review: upstream-owned delta vs the imported commit (expect only the two hook files)"
+  git -C "$root" diff --stat "$sha" HEAD -- . ':(exclude)fork' ':(exclude).github/workflows/fork-ci.yml'
+  [ "$failed" -eq 0 ] && echo "check: all passed" || echo "check: FAILED"
+  return "$failed"
+}
+
+case "${1:-}" in
+  prepare) shift; cmd_prepare "$@" ;;
+  check) shift; cmd_check "$@" ;;
+  lint) shift; cmd_lint "$@" ;;
+  -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) usage ;;
+esac

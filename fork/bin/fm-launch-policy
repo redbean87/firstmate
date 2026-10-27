@@ -1,0 +1,517 @@
+#!/usr/bin/env bash
+# fm-launch-policy - the Firstmate fork's single launch-policy entry point.
+#
+# Called only by the two allowlisted hook blocks (fork/hooks/*.block):
+#   HK1 bin/fm-spawn.sh, after project capacity admission and before the brief
+#       render, endpoint, worktree, or task record (fresh spawn and --relaunch);
+#   HK2 bin/fm-control.sh relaunch, before the running agent is stopped.
+# Both blocks call this script only when the home has config/fork-policies, so
+# a home without that file keeps upstream behaviour exactly.
+#
+# Contract (environment, set by the hook blocks):
+#   FM_LP_PHASE    spawn | relaunch | relaunch-preflight
+#   FM_LP_TASK     task id            FM_LP_KIND     ship | scout | secondmate
+#   FM_LP_PROJECT  project directory  FM_LP_HARNESS  harness name (may be empty)
+#   FM_LP_MODEL    model, "default", or empty
+#   FM_LP_EFFORT   effort, "default", or empty
+#   FM_LP_RAW_LAUNCH  the raw launch command, only for a raw launch
+#   FM_LP_HOME, FM_LP_STATE, FM_LP_DATA, FM_LP_CONFIG  the home's directories
+#   FM_LP_OWNER_PID  the launching fm-spawn's process id (HK1 only); owner of
+#                    any resource reservation this launch writes
+# Exit 0 allows the launch. Every other outcome refuses it: 1 for a policy
+# refusal, 2 for unusable configuration or input. The hook blocks treat any
+# non-zero exit (including a missing or unexecutable script) as a refusal.
+#
+# Policies, enabled by name in config/fork-policies (one per line, # comments):
+#   consult-gate  ship/scout launches need a stored ChatGPT stage prompt
+#                 (data/<id>/chatgpt-loop.json) or a local recorded waiver
+#                 (data/<id>/fork-consult-waiver.json, origin "local"); a
+#                 relaunch also accepts delivery proof
+#                 (data/<id>/fork-consult-delivered.json). A waiver of any
+#                 other origin, Discord included, refuses. A per-task plan
+#                 worker passes only by its launch grant
+#                 (data/<id>/fork-consult-grant.json, consult_grant below),
+#                 and a loop running its plan task by task refuses its own id.
+#   project-pin   config/fork-project-pins.json:
+#                 {"projects": {"<project dir name>": {"harness": "...", "model": "..."}}}
+#                 A pinned project refuses a different harness or model and any
+#                 raw launch.
+#   resource      config/fork-resources.json:
+#                 {"<name>": {"capacity": N, "match": {"model_prefix": "..."}}}
+#                 A launch whose model matches refuses while N other tasks on a
+#                 matching model hold a place, across every local home; it is
+#                 otherwise admitted and reserves its place under a machine-wide
+#                 lock. See "resource policy" below for holders, reservations,
+#                 and expiry. Secondmates are not exempt.
+#   claude-subscription  a Claude launch (including a raw claude command)
+#                 needs upstream's Claude account pin (config/claude-account)
+#                 and a claude.ai login for the pinned root, asked of the claude
+#                 that both this process and the worker's login shell resolve.
+#                 Secondmates are not exempt.
+# Unknown policy names, unreadable or malformed files, and an empty policy list
+# all refuse.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORK_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+refuse() { printf 'error: fork launch policy refused %s: %s\n' "${FM_LP_TASK:-<unknown task>}" "$*" >&2; exit 1; }
+unusable() { printf 'error: fork launch policy cannot evaluate %s: %s\n' "${FM_LP_TASK:-<unknown task>}" "$*" >&2; exit 2; }
+
+command -v jq >/dev/null 2>&1 || unusable "jq is required"
+
+for var in FM_LP_PHASE FM_LP_TASK FM_LP_KIND FM_LP_HOME FM_LP_STATE FM_LP_DATA FM_LP_CONFIG; do
+  [ -n "${!var:-}" ] || unusable "hook contract value $var is empty"
+done
+case "$FM_LP_PHASE" in spawn|relaunch|relaunch-preflight) ;; *) unusable "unknown phase '$FM_LP_PHASE'" ;; esac
+case "$FM_LP_KIND" in ship|scout|secondmate) ;; *) unusable "unknown task kind '$FM_LP_KIND'" ;; esac
+case "$FM_LP_TASK" in .*|*[!A-Za-z0-9._-]*) unusable "task id is not a firstmate task id" ;; esac
+
+CONFIG=$FM_LP_CONFIG
+POLICY_FILE="$CONFIG/fork-policies"
+[ -f "$POLICY_FILE" ] && [ -r "$POLICY_FILE" ] || unusable "config/fork-policies is not a readable file"
+POLICIES=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$POLICY_FILE" | grep -v '^$') || true
+[ -n "$POLICIES" ] || unusable "config/fork-policies enables no policy; delete the file to disable fork policy"
+while IFS= read -r policy; do
+  case "$policy" in consult-gate|project-pin|resource|claude-subscription) ;; *) unusable "config/fork-policies names unknown policy '$policy'" ;; esac
+done <<EOF
+$POLICIES
+EOF
+enabled() { printf '%s\n' "$POLICIES" | grep -Fxq "$1"; }
+
+# Test seam: record the received contract values, one file per phase.
+if [ -n "${FM_FORK_POLICY_TRACE:-}" ]; then
+  { env | grep '^FM_LP_'; printf 'POLICY_PARENT_PID=%s\n' "$PPID"; } | sort > "$FM_FORK_POLICY_TRACE.$FM_LP_PHASE"
+fi
+
+# The model the launch will run: an explicit --model, else the raw launch's own.
+effective_model() {
+  local model=${FM_LP_MODEL:-} raw=${FM_LP_RAW_LAUNCH:-} prev='' word
+  [ "$model" = default ] && model=
+  if [ -z "$model" ] && [ -n "$raw" ]; then
+    for word in $raw; do
+      case "$prev" in --model) model=$word; break ;; esac
+      case "$word" in --model=*) model=${word#--model=}; break ;; esac
+      prev=$word
+    done
+  fi
+  printf '%s' "$model"
+}
+MODEL=$(effective_model)
+
+json_ok() { local f=$1; shift; jq -e "$@" "$f" >/dev/null 2>&1; }
+
+# plan_sha <loop record>: SHA-256 of its stored plan text, as
+# fork/chatgpt/fm-chatgpt-breakdown.sh computes it for a grant.
+plan_sha() {
+  if command -v sha256sum >/dev/null 2>&1; then jq -j '.plan' "$1" | sha256sum | cut -d' ' -f1
+  else jq -j '.plan' "$1" | shasum -a 256 | cut -d' ' -f1; fi
+}
+
+# consult_grant <grant file>: a per-task breakdown worker's launch grant
+# (fork/chatgpt/fm-chatgpt-breakdown.sh). It admits only the worker it names,
+# for its loop's open breakdown, at the attempt and plan it was issued for.
+consult_grant() {
+  local grant=$1 l bd lp want
+  json_ok "$grant" 'type == "object" and ((keys | sort) == ["attempt", "loop", "plan_sha256", "plan_task", "v", "worker"])
+      and .v == 1 and (.loop | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
+      and (.plan_task | type == "string" and test("^T[1-9][0-9]?$")) and (.worker | type == "string")
+      and (.attempt | type == "number" and . >= 1 and floor == .) and (.plan_sha256 | type == "string" and test("^[0-9a-f]{64}$"))' \
+    || unusable "launch grant $grant is malformed"
+  # shellcheck disable=SC2016 # jq program, not shell expansion
+  json_ok "$grant" --arg w "$FM_LP_TASK" '.worker == $w' || refuse "its launch grant names a different worker"
+  l=$(jq -r '.loop' "$grant")
+  [ "$l" != "$FM_LP_TASK" ] || refuse "a launch grant cannot name its own loop"
+  bd="$FM_LP_DATA/$l/chatgpt-breakdown.json"
+  lp="$FM_LP_DATA/$l/chatgpt-loop.json"
+  [ -f "$bd" ] && [ -f "$lp" ] || refuse "its launch grant names loop $l, which has no breakdown record"
+  case "$FM_LP_PHASE" in spawn) want='["dispatching"]' ;; *) want='["dispatching", "running"]' ;; esac
+  # shellcheck disable=SC2016 # jq program, not shell expansion
+  json_ok "$bd" --slurpfile g "$grant" --argjson want "$want" '$g[0] as $g | .state == "open" and .loop == $g.loop
+      and .plan_sha256 == $g.plan_sha256 and (.tasks[$g.plan_task] | type == "object" and .worker == $g.worker
+        and .attempts == $g.attempt and (.status as $s | $want | index($s) != null))' \
+    || refuse "its launch grant is not the current one for that loop's plan task (closed breakdown, other worker or attempt, or task not being dispatched)"
+  json_ok "$lp" '.phase == "plan-worker"' || refuse "its launch grant's loop $l is not running its plan"
+  [ "$(plan_sha "$lp")" = "$(jq -r '.plan_sha256' "$grant")" ] || refuse "loop $l's plan changed since its launch grant was issued"
+}
+
+policy_consult_gate() {
+  local dir="$FM_LP_DATA/$FM_LP_TASK" waiver loop delivered grant
+  [ "$FM_LP_KIND" = secondmate ] && return 0
+  waiver="$dir/fork-consult-waiver.json"
+  loop="$dir/chatgpt-loop.json"
+  delivered="$dir/fork-consult-delivered.json"
+  grant="$dir/fork-consult-grant.json"
+  if [ -e "$grant" ]; then
+    consult_grant "$grant"
+    return 0
+  fi
+  if [ -e "$waiver" ]; then
+    json_ok "$waiver" 'type == "object"' || unusable "consultation waiver $waiver is not a JSON object"
+    json_ok "$waiver" '.origin == "local"' || refuse "its consultation waiver did not originate locally; only a local waiver counts (a Discord-origin waiver never does)"
+    json_ok "$waiver" '(.reason | type) == "string" and (.reason | test("\\S")) and (.reason | test("\n") | not)' \
+      || refuse "its local consultation waiver needs a one-line reason"
+    return 0
+  fi
+  if [ "$FM_LP_PHASE" != spawn ] && [ -e "$delivered" ]; then
+    json_ok "$delivered" 'type == "object" and ((.stage // "") | IN("audit", "plan"))' \
+      || unusable "consultation delivery proof $delivered is malformed"
+    return 0
+  fi
+  [ -e "$loop" ] || refuse "no stored ChatGPT prompt for this task (data/$FM_LP_TASK/chatgpt-loop.json) and no local waiver"
+  json_ok "$loop" 'type == "object"' || unusable "consultation record $loop is not a JSON object"
+  if [ -f "$dir/chatgpt-breakdown.json" ] && json_ok "$dir/chatgpt-breakdown.json" '.state != "closed"'; then
+    refuse "its plan is running task by task; only granted per-task workers may launch"
+  fi
+  # shellcheck disable=SC2016 # jq program, not shell expansion
+  json_ok "$loop" '(.phase as $p | {"audit-dispatch": "audit_prompt", "audit-worker": "audit_prompt", "plan-dispatch": "plan", "plan-worker": "plan", "complete": "plan"}[$p]) as $f | $f != null and ((.[$f] // "") | type == "string" and test("\\S"))' \
+    || refuse "its ChatGPT record holds no prompt for the stage its phase puts in play"
+}
+
+policy_project_pin() {
+  local pins="$CONFIG/fork-project-pins.json" name pin want_harness want_model
+  [ "$FM_LP_KIND" = secondmate ] && return 0
+  [ -e "$pins" ] || return 0
+  json_ok "$pins" 'type == "object" and ((.projects // {}) | type == "object") and ([.projects[]? | type == "object" and ((.harness // "") | type == "string") and ((.model // "") | type == "string")] | all)' \
+    || unusable "config/fork-project-pins.json is malformed"
+  name=$(basename "${FM_LP_PROJECT:-}")
+  pin=$(jq -c --arg n "$name" '.projects[$n] // empty' "$pins")
+  [ -n "$pin" ] || return 0
+  [ -z "${FM_LP_RAW_LAUNCH:-}" ] || refuse "project $name is pinned, and a raw launch command cannot be checked against its pin"
+  want_harness=$(jq -r '.harness // ""' <<<"$pin")
+  want_model=$(jq -r '.model // ""' <<<"$pin")
+  [ -z "$want_harness" ] || [ "${FM_LP_HARNESS:-}" = "$want_harness" ] \
+    || refuse "project $name is pinned to harness $want_harness, not '${FM_LP_HARNESS:-}'"
+  [ -z "$want_model" ] || [ "$MODEL" = "$want_model" ] \
+    || refuse "project $name is pinned to model $want_model, not '${MODEL:-default}'"
+}
+
+# real_path <path>: the path with every symlink resolved, or nothing.
+real_path() { perl -MCwd=realpath -e 'my $p = realpath($ARGV[0]); print $p if defined $p' -- "$1"; }
+
+# claude-subscription. Upstream's Claude account pin (bin/fm-worker-account-lib.sh)
+# runs first, at both hooks' callers, and sheds the API credentials Claude ranks
+# above a stored login; this policy needs that pin and adds that the pinned login
+# is a claude.ai subscription. It also refuses unless the claude on this
+# process's PATH and the one the worker's login shell resolves are the same file,
+# because the worker types a bare `claude` into that shell; the sign-in check
+# then runs exactly that file.
+policy_claude_subscription() {
+  local mate='' pin_config token err declared root here shell probe from_shell out verdict name secs
+  [ "${FM_LP_HARNESS:-}" = claude ] || return 0
+  # shellcheck source=bin/fm-worker-account-lib.sh
+  . "$FORK_ROOT/bin/fm-worker-account-lib.sh" 2>/dev/null \
+    || unusable "claude-subscription cannot load upstream bin/fm-worker-account-lib.sh"
+  for name in fm_worker_account_config fm_worker_account_resolve fm_run_timed; do
+    declare -F "$name" >/dev/null || unusable "claude-subscription needs upstream $name, which is missing"
+  done
+  secs=${FM_WORKER_ACCOUNT_CHECK_SECONDS:-30}
+
+  [ "$FM_LP_KIND" = secondmate ] && mate=$FM_LP_TASK
+  pin_config=$(fm_worker_account_config claude "$CONFIG" "$mate") \
+    || unusable "the Claude account pin cannot be inspected"
+  err=$(mktemp "${TMPDIR:-/tmp}/fm-fork-claude.XXXXXX") || unusable "cannot create a temporary file"
+  token=$(fm_worker_account_resolve claude "$pin_config" "config/claude-account" 2>"$err") \
+    || { out=$(cat "$err"); rm -f "$err"; unusable "the Claude account pin is invalid: ${out#error: }"; }
+  rm -f "$err"
+  [ -n "$token" ] || refuse "claude-subscription needs a Claude account pin (config/claude-account holding 'ordinary' or a config root), so the launch sheds API credentials"
+  declared=${token%%$'\t'*}
+  root=${token#*$'\t'}
+  root=${root%%$'\t'*}
+
+  here=$(command -v claude 2>/dev/null) || here=
+  case "$here" in /*) [ -f "$here" ] && [ -x "$here" ] || here= ;; *) here= ;; esac
+  [ -n "$here" ] || refuse "no claude executable is on PATH to check"
+  shell=${SHELL:-}
+  case "$shell" in /*) [ -x "$shell" ] || shell= ;; *) shell= ;; esac
+  [ -n "$shell" ] || refuse "SHELL does not name the executable login shell the worker types its launch into, so the claude it will run cannot be checked"
+  probe=$(cd "${FM_LP_PROJECT:-}" 2>/dev/null || cd "${HOME:-/}" || exit 1
+          fm_run_timed "$secs" "$shell" -lic 'command -v claude' </dev/null 2>/dev/null) || probe=
+  from_shell=$(printf '%s\n' "$probe" | grep '^/' | tail -n 1)
+  [ -n "$from_shell" ] || refuse "the worker's login shell ($shell -lic) did not resolve a claude executable within ${secs}s"
+  [ "$(real_path "$here")" = "$(real_path "$from_shell")" ] && [ -n "$(real_path "$here")" ] \
+    || refuse "the worker's login shell runs $from_shell, but this process resolves $here; make both PATHs reach the same claude"
+
+  local -a clean=(env -i "HOME=${HOME:-}" "PATH=${PATH:-}" "USER=${USER:-$(id -un)}")
+  clean+=("LOGNAME=${LOGNAME:-${USER:-$(id -un)}}")
+  [ -z "${TMPDIR:-}" ] || clean+=("TMPDIR=$TMPDIR")
+  [ -z "$root" ] || clean+=("CLAUDE_CONFIG_DIR=$root")
+  out=$(fm_run_timed "$secs" "${clean[@]}" "$here" auth status 2>/dev/null </dev/null) || true
+  # shellcheck disable=SC2016 # jq program, not shell expansion
+  verdict=$(printf '%s\n' "$out" | jq -r 'if type != "object" or (has("loggedIn") | not) then "unreadable"
+    elif .loggedIn != true then "signed-out" else (.authMethod // "unknown") end' 2>/dev/null) || verdict=
+  case "${verdict:-unreadable}" in
+  claude.ai) return 0 ;;
+  signed-out) refuse "claude-subscription requires a claude.ai login for $declared, but $here reports it signed out" ;;
+  unreadable) refuse "claude-subscription could not read the account type from $here auth status; refusing rather than risk API billing" ;;
+  *) refuse "claude-subscription requires a claude.ai login, but $declared is signed in with $verdict; sign in with a Claude subscription or remove claude-subscription from config/fork-policies" ;;
+  esac
+}
+
+# --- resource policy ---------------------------------------------------------
+#
+# Holders. A task holds a place on a resource when its model matches and either
+#   - its endpoint does not read as dead or missing through upstream's
+#     recovery-grade fm_backend_agent_state (alive, ambiguous, unreadable,
+#     unverified, any other answer, or an unreadable record all hold), or
+#   - it is on Herdr, reads dead, and upstream's process view of its pane is
+#     not exactly `shell` (herdr_process_state below), or
+#   - it has a valid reservation (below).
+# Records are counted across every local Firstmate home on this machine
+# (upstream fm_local_firstmate_state_dirs), so secondmate homes count too.
+#
+# Reservations close the window between this check and the moment the new
+# task's record and agent exist. Under a machine-wide lock per resource
+# (<root home>/state/.fork-resource-<name>.lock, upstream's lock primitive),
+# the policy counts holders and, when a place is free, atomically writes
+# <root home>/state/fork-reservations/<name>/<task>.<home hash>.json naming the
+# launching fm-spawn (FM_LP_OWNER_PID from HK1) by PID and process start time.
+# A reservation stops counting only when its owner is confirmed gone - no such
+# process, or the PID now belongs to a process with a different start time
+# (PID reuse) - AND the startup grace has passed; it is then deleted under the
+# lock. An owner that cannot be confirmed either way keeps the reservation
+# valid. Age alone never frees a place: a reservation older than the stale
+# threshold is only named in refusals for reconciliation. Upstream publishes a
+# task's record before its agent is launched, so any running agent is also
+# counted through its record whatever happens to its reservation.
+FORK_RESOURCE_GRACE=120          # seconds a reservation outlives a confirmed-gone owner
+FORK_RESOURCE_STALE_NOTICE=1800  # reservations older than this are reported as stale
+FORK_RESOURCE_LOCK_WAIT=10       # seconds to wait for a resource's admission lock
+
+RESOURCE_LOCK_HELD=
+RESOURCE_WRITTEN=()
+
+# shellcheck disable=SC2329 # invoked through the EXIT trap
+resource_exit() {
+  local rc=$? f
+  if [ -n "$RESOURCE_LOCK_HELD" ]; then
+    fm_lock_release "$RESOURCE_LOCK_HELD" || true
+    RESOURCE_LOCK_HELD=
+  fi
+  # A refused launch must not leave its own reservations holding places.
+  if [ "$rc" -ne 0 ]; then
+    for f in "${RESOURCE_WRITTEN[@]}"; do
+      rm -f -- "$f"
+    done
+  fi
+  exit "$rc"
+}
+
+canonical_dir() { (CDPATH='' cd -- "$1" 2>/dev/null && pwd -P); }
+
+process_start() {  # <pid>: the process start time as ps reports it (trimmed)
+  local out
+  out=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null) || return $?
+  out=${out#"${out%%[![:space:]]*}"}
+  printf '%s' "${out%"${out##*[![:space:]]}"}"
+}
+
+owner_state() {  # <pid> <recorded start> -> alive | gone | uncertain
+  local pid=$1 want=$2 now rc
+  case "$pid" in ''|*[!0-9]*|0) printf uncertain; return 0 ;; esac
+  now=$(process_start "$pid"); rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$now" ]; then
+    if [ "$now" = "$want" ]; then printf alive; else printf gone; fi
+  elif [ "$rc" -eq 1 ] && [ -z "$now" ]; then
+    printf gone
+  else
+    printf uncertain
+  fi
+}
+
+# herdr_process_state <target>: upstream's process-level view of a Herdr pane
+# (bin/backends/herdr.sh fm_backend_herdr_pane_process_state), printed only
+# when it is exactly one of agent|shell|other|unreadable; anything else -
+# a backend that will not load, an unparseable target, a missing helper, a
+# failed call, or unexpected output - prints nothing.
+#
+# Why: upstream's recovery-grade fm_backend_herdr_agent_state reads a pane
+# with NO registered agent as `dead` without looking at its processes, so a Pi
+# that is running but has not yet registered with Herdr reads exactly like an
+# empty pane. The process view is the same proof upstream already demands
+# before trusting a registration: `shell` means every foreground process is a
+# recognized shell AND no harness descends from the pane shell in the real
+# process table. Only that positive proof lets a Herdr `dead` free a place.
+herdr_process_state() {
+  local out
+  out=$(
+    fm_backend_source herdr >/dev/null 2>&1 || exit 1
+    declare -F fm_backend_herdr_parse_target fm_backend_herdr_pane_process_state >/dev/null || exit 1
+    fm_backend_herdr_parse_target "$1" || exit 1
+    fm_backend_herdr_pane_process_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE" 2>/dev/null
+  ) || return 0
+  case "$out" in agent|shell|other|unreadable) printf '%s' "$out" ;; esac
+}
+
+# resource_admit <name> <capacity> <prefix>: count holders under the resource
+# lock, refuse at capacity, otherwise reserve (except in relaunch-preflight).
+resource_admit() {
+  local name=$1 capacity=$2 prefix=$3 lock dir now held=0 live=0 unconfirmed='' starting='' stale=''
+  local s meta id key model state backend target pstate f row task home pid start created age ostate file tmp
+  local -A counted=()
+  lock="$ROOT_HOME/state/.fork-resource-$name.lock"
+  dir="$ROOT_HOME/state/fork-reservations/$name"
+  fm_lock_acquire_wait_max "$lock" "$FORK_RESOURCE_LOCK_WAIT" \
+    || refuse "machine resource $name is busy: another launch held its admission lock for ${FORK_RESOURCE_LOCK_WAIT}s; dispatch again shortly"
+  RESOURCE_LOCK_HELD=$lock
+  mkdir -p -- "$dir" 2>/dev/null && [ -d "$dir" ] && [ -w "$dir" ] && [ -r "$dir" ] \
+    || unusable "reservation directory $dir cannot be written"
+
+  for s in "${LOCAL_STATES[@]}"; do
+    for meta in "$s"/*.meta; do
+      [ -e "$meta" ] || [ -L "$meta" ] || continue
+      id=$(basename "$meta" .meta)
+      [ "$s" = "$OWN_STATE" ] && [ "$id" = "$FM_LP_TASK" ] && continue
+      key="$s|$id"
+      if ! [ -f "$meta" ] || ! [ -r "$meta" ]; then
+        held=$((held + 1)); counted[$key]=1
+        unconfirmed="$unconfirmed $id(record unreadable)"
+        continue
+      fi
+      model=$(fm_meta_get "$meta" model)
+      case "$model" in "$prefix"*) ;; *) continue ;; esac
+      backend=$(fm_backend_of_meta "$meta")
+      target=$(fm_backend_target_of_meta "$meta")
+      state=$(fm_backend_agent_state "$backend" "$target" 2>/dev/null) || state=unreadable
+      if [ "$state" = dead ] && [ "$backend" = herdr ]; then
+        pstate=$(herdr_process_state "$target")
+        if [ "$pstate" != shell ]; then
+          held=$((held + 1)); counted[$key]=1
+          unconfirmed="$unconfirmed $id(herdr pane has no registered agent but its processes read ${pstate:-unavailable})"
+          continue
+        fi
+      fi
+      case "$state" in
+        dead|missing) ;;
+        alive) held=$((held + 1)); live=$((live + 1)); counted[$key]=1 ;;
+        *) held=$((held + 1)); counted[$key]=1; unconfirmed="$unconfirmed $id(${state:-no answer})" ;;
+      esac
+    done
+  done
+
+  now=$(date +%s)
+  for f in "$dir"/*.json; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    [ -f "$f" ] && [ -r "$f" ] || unusable "reservation $f cannot be read"
+    row=$(jq -er 'select(type == "object" and .v == 1 and (.task | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))
+        and (.home_state | type == "string" and startswith("/")) and (.owner_pid | type == "number" and . > 0 and . == floor)
+        and (.owner_start | type == "string" and length > 0) and (.created | type == "number" and . > 0 and . == floor))
+      | [.task, .home_state, (.owner_pid | tostring), .owner_start, (.created | tostring)] | @tsv' "$f" 2>/dev/null) \
+      || unusable "reservation $f is malformed"
+    IFS=$'\t' read -r task home pid start created <<<"$row"
+    [ "$home" = "$OWN_STATE" ] && [ "$task" = "$FM_LP_TASK" ] && continue
+    age=$((now - created))
+    ostate=$(owner_state "$pid" "$start")
+    if [ "$ostate" = gone ] && [ "$age" -ge "$FORK_RESOURCE_GRACE" ]; then
+      rm -f -- "$f" || unusable "expired reservation $f could not be removed"
+      continue
+    fi
+    key="$home|$task"
+    [ -z "${counted[$key]:-}" ] || continue
+    held=$((held + 1)); counted[$key]=1
+    case "$ostate" in
+      alive) starting="$starting $task(launch in progress)" ;;
+      gone) starting="$starting $task(starting, ${age}s of ${FORK_RESOURCE_GRACE}s grace)" ;;
+      *) starting="$starting $task(launch owner unconfirmed)" ;;
+    esac
+    [ "$age" -lt "$FORK_RESOURCE_STALE_NOTICE" ] || stale="$stale $task(reserved ${age}s ago)"
+  done
+
+  if [ "$held" -ge "$capacity" ]; then
+    local detail=
+    [ -z "$unconfirmed" ] || detail="$detail; liveness could not be confirmed for:$unconfirmed - a holder counts until its agent is proven gone (reconcile or clean up that task first)"
+    [ -z "$starting" ] || detail="$detail; reserved by launches not yet confirmed running:$starting"
+    [ -z "$stale" ] || detail="$detail; STALE reservations need reconciliation (age never frees a place):$stale"
+    if [ -z "$detail" ]; then
+      refuse "machine resource $name is at capacity ($held of $capacity live) for model $MODEL; dispatch again after a holder finishes"
+    fi
+    refuse "machine resource $name is at capacity ($held of $capacity held) for model $MODEL$detail"
+  fi
+
+  if [ "$FM_LP_PHASE" != relaunch-preflight ]; then
+    file="$dir/$FM_LP_TASK.$OWN_HASH.json"
+    tmp="$dir/.$FM_LP_TASK.$OWN_HASH.$$.tmp"
+    if ! jq -n --arg task "$FM_LP_TASK" --arg home "$OWN_STATE" --arg resource "$name" --arg model "$MODEL" \
+        --arg phase "$FM_LP_PHASE" --arg start "$OWNER_START" --argjson pid "$FM_LP_OWNER_PID" --argjson created "$now" \
+        '{v: 1, task: $task, home_state: $home, resource: $resource, model: $model, phase: $phase,
+          owner_pid: $pid, owner_start: $start, created: $created}' > "$tmp" 2>/dev/null ||
+      ! mv -f -- "$tmp" "$file" 2>/dev/null; then
+      rm -f -- "$tmp"
+      unusable "reservation for resource $name could not be written"
+    fi
+    RESOURCE_WRITTEN+=("$file")
+  fi
+  fm_lock_release "$lock" || true
+  RESOURCE_LOCK_HELD=
+}
+
+policy_resource() {
+  local res="$CONFIG/fork-resources.json" rows matching='' name capacity prefix s c known existing fn
+  [ -e "$res" ] || return 0
+  json_ok "$res" 'type == "object" and (keys | all(test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))) and ([.[] | type == "object" and (.capacity | type == "number" and . >= 1 and . == floor) and ((.match.model_prefix // "") | type == "string" and length > 0)] | all)' \
+    || unusable "config/fork-resources.json is malformed"
+  if [ -z "$MODEL" ] && [ -n "${FM_LP_RAW_LAUNCH:-}" ]; then
+    refuse "a raw launch command must name its --model so machine resource limits can be checked"
+  fi
+  [ -n "$MODEL" ] || return 0
+  rows=$(jq -r 'to_entries[] | [.key, (.value.capacity | tostring), .value.match.model_prefix] | @tsv' "$res")
+  while IFS=$'\t' read -r name capacity prefix; do
+    [ -n "$name" ] || continue
+    case "$MODEL" in "$prefix"*) matching="$matching$name"$'\t'"$capacity"$'\t'"$prefix"$'\n' ;; esac
+  done <<EOF
+$rows
+EOF
+  [ -n "$matching" ] || return 0
+
+  if [ "$FM_LP_PHASE" != relaunch-preflight ]; then
+    case "${FM_LP_OWNER_PID:-}" in
+      ''|*[!0-9]*|0) unusable "hook contract value FM_LP_OWNER_PID (the launching fm-spawn) is missing or not a process id" ;;
+    esac
+    OWNER_START=$(process_start "$FM_LP_OWNER_PID") && [ -n "$OWNER_START" ] \
+      || unusable "the launching process $FM_LP_OWNER_PID cannot be identified (no start time)"
+  fi
+
+  [ -d "$FM_LP_STATE" ] && [ -r "$FM_LP_STATE" ] && [ -x "$FM_LP_STATE" ] \
+    || unusable "the home's state directory cannot be read to count resource holders"
+  export FM_HOME=$FM_LP_HOME STATE=$FM_LP_STATE
+  # shellcheck source=bin/fm-wake-lib.sh
+  . "$FORK_ROOT/bin/fm-wake-lib.sh" || unusable "upstream bin/fm-wake-lib.sh could not be loaded"
+  # shellcheck source=bin/fm-secondmate-registry-lib.sh
+  . "$FORK_ROOT/bin/fm-secondmate-registry-lib.sh" || unusable "upstream bin/fm-secondmate-registry-lib.sh could not be loaded"
+  # shellcheck source=bin/fm-backend.sh
+  . "$FORK_ROOT/bin/fm-backend.sh" || unusable "upstream bin/fm-backend.sh could not be loaded"
+  for fn in fm_lock_acquire_wait_max fm_lock_release fm_firstmate_root_home fm_local_firstmate_state_dirs \
+    fm_meta_get fm_backend_of_meta fm_backend_target_of_meta fm_backend_agent_state; do
+    declare -F "$fn" >/dev/null || unusable "upstream helper $fn is missing"
+  done
+
+  OWN_STATE=$(canonical_dir "$FM_LP_STATE") || unusable "the home's state directory cannot be resolved"
+  OWN_HASH=$(printf '%s' "$OWN_STATE" | cksum | cut -d' ' -f1)
+  ROOT_HOME=$(fm_firstmate_root_home "$FM_LP_HOME") \
+    || unusable "cannot resolve the root Firstmate home that anchors machine resource locks"
+  [ -d "$ROOT_HOME/state" ] && [ -w "$ROOT_HOME/state" ] \
+    || unusable "the root Firstmate home's state directory $ROOT_HOME/state cannot be written"
+  fm_local_firstmate_state_dirs "$OWN_STATE" \
+    || unusable "cannot enumerate this machine's Firstmate homes to count resource holders (${FM_LOCAL_FIRSTMATE_ERROR:-unknown error})"
+  LOCAL_STATES=()
+  for s in "${FM_LOCAL_FIRSTMATE_STATES[@]}"; do
+    c=$(canonical_dir "$s") && [ -r "$c" ] && [ -x "$c" ] || unusable "local Firstmate state directory $s cannot be read"
+    known=0
+    for existing in "${LOCAL_STATES[@]}"; do [ "$existing" != "$c" ] || known=1; done
+    [ "$known" = 1 ] || LOCAL_STATES+=("$c")
+  done
+
+  trap resource_exit EXIT
+  while IFS=$'\t' read -r name capacity prefix; do
+    [ -n "$name" ] || continue
+    resource_admit "$name" "$capacity" "$prefix"
+  done <<EOF
+$matching
+EOF
+}
+
+enabled consult-gate && policy_consult_gate
+enabled project-pin && policy_project_pin
+enabled claude-subscription && policy_claude_subscription
+enabled resource && policy_resource
+exit 0

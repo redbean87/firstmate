@@ -1,9 +1,7 @@
 ---
 name: firstmate-coding-guidelines
 description: >-
-  Agent-only reference for changing firstmate's shared, tracked material per AGENTS.md section 1.
-  Use before editing any of that material, whether working as firstmate directly or as a crewmate briefed on a firstmate-repo task.
-  Covers the knowledge-placement decision tree, the one-owner rule for contracts, the inline-stub pattern for content moved into a skill, AGENTS.md size discipline, trigger hygiene for new skills, and repo style rules (one sentence per line, plain dash, no agent co-author, shellcheck-clean bin scripts, colocated tests, and maintainer-verification evidence).
+  Load before editing firstmate's shared, tracked material as defined by AGENTS.md section 1, whether working as firstmate directly or as a crewmate briefed on a firstmate-repo task.
 user-invocable: false
 metadata:
   internal: true
@@ -45,7 +43,6 @@ Every other mention of it is a one-line cross-reference, never a restatement.
 A single deliberate one-line reinforcement at a genuine risk point is allowed, for example a "don't forget X" placed exactly where forgetting X is costly.
 Restating the contract's substance a second time is not allowed: the two copies will drift the moment only one is edited.
 When you touch a contract, patch, replace, or prune the owner's existing language rather than appending a new clause or paragraph wherever possible, then grep the repo for its other mentions and update the cross-references, not duplicate the change into a second full copy.
-Every step in a skill or brief ends on completion criteria that are both checkable, so a reader can verify each criterion, and exhaustive, so the criteria together cover the step's whole done state.
 
 ## Inline-stub pattern
 
@@ -70,11 +67,9 @@ A new skill is dead weight if nothing loads it.
 Every new skill needs its load trigger declared in its description, which is the always-loaded trigger index; add an inline `AGENTS.md` pointer only in the operating section whose always-loaded rule must name it.
 State the trigger as a condition ("load before X", "load on Y wake"), never as a vague pointer.
 Briefs for tasks that touch firstmate's own tracked material should tell the crewmate to load this skill.
-`bin/fm-brief.sh`'s `REPO` argument is a caller-supplied string with no reliable signal that it names firstmate's own repo, unlike a project registered in `data/projects.md`, so there is no clean point inside the scaffold to detect this case automatically.
-Firstmate adds this skill's load instruction to firstmate-repo briefs by hand instead.
+`bin/fm-brief.sh`'s `REPO` argument is a caller-supplied string, while its optional `--project` directory enables lineage-based self-repository detection for the publication gate (`bin/fm-role-lib.sh`).
+The scaffold does not add this skill's load instruction; firstmate adds it to firstmate-repo briefs by hand.
 `CONTRIBUTING.md`'s "Development" section carries the same instruction as a durable reminder.
-A context pointer - the wording that pulls material into an agent's window - gets three moves: front-load the leading word that names the load condition, keep one trigger per branch so each pointer names exactly one condition, and cut identity the body already carries.
-Sharpen weak wording on a must-have target before resorting to inlining the material.
 
 ## Compatibility and enforcement
 
@@ -136,5 +131,3 @@ Firstmate PR #3644 demonstrated the cost: pinning a 75-162-script walk took 32.7
 - A maintainer-verification record under `docs/verification/` records active empirical facts, not assumptions or task chronology.
 - Include the date, version, exact commands run, and exact output needed to support the current guarantee.
 - Keep incident chronology and delivery evidence in private task reports or PR evidence unless a concise rationale is required to maintain a current safety boundary.
-- Apply the no-op test when pruning: a line that does not change behaviour versus the model's default comes out whole.
-- Prompt the positive target rather than the prohibition in new prose, because steering by prohibition drags the forbidden behaviour into context and makes it more available; prohibition-phrased hard guardrails are the deliberate exception, and the existing ones stay as written.

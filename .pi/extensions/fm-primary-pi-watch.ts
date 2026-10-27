@@ -19,10 +19,11 @@
 // queued while main is streaming joins the running run without ever raising
 // before_agent_start, so waiting on that event stalls every later close.
 // Consumption is tracked only so a replacement can replay a follow-up Pi had
-// not consumed. An idle main consumes at before_agent_start; a streaming main
-// consumes at the user message_start carrying the exact wake text; either
-// event finishes the pending record, and a still-unconsumed record rides the
-// replacement handoff.
+// not consumed. An idle main consumes at a prompt-bearing before_agent_start;
+// a streaming main consumes at the user message_start carrying the exact wake
+// text. A no-prompt custom trigger cannot consume it, even with equal content.
+// Either user boundary finishes the pending record, and a still-unconsumed
+// record rides the replacement handoff.
 //
 // Postures (stated once here; docs/pi-supervision-branch.md "Postures"):
 // the away-posture record state/.afk-contract is read as a file at every
@@ -35,7 +36,7 @@
 // consumption changes.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
@@ -208,131 +209,6 @@ const retiringGenerations = new Set<SessionGeneration>();
 const armRetired = new WeakSet<ChildProcess>();
 const armRecovery = new WeakMap<ChildProcess, { generation: string; watcherPid: string }>();
 const armPendingActionable = new WeakMap<ChildProcess, PendingActionableClose>();
-// The watcher pid every established arm child announced on its own status line,
-// recorded whether or not the line carried a recovery generation, so a reuse
-// link can always name the verified successor it points at.
-const armWatcherPid = new WeakMap<ChildProcess, string>();
-
-// Reused-successor cycle-ledger link (docs/watcher-continuity.md "Cycle exit
-// log"): when a restored pending finds an already-live verified successor,
-// startArm returns unchanged-ok without a new arm, so the arm layer never runs
-// its in-place predecessor mark and the predecessor's close record would keep
-// successor=none beside a successor that is genuinely running. This emits one
-// reason=reused-successor ledger record naming the predecessor arm and the
-// reused watcher instead, so overlapping-arm convergence stays explicit and can
-// never be mistaken for a supervision gap. Bounded and best-effort like every
-// lifecycle write: the duplicate check and the append run as ONE critical
-// section under the existing ledger lock, so concurrent extension processes
-// racing the same predecessor serialize and at most one record exists; the
-// in-memory set below is only this process's fast path and provides no
-// cross-process safety; the lock protocol is sourced from bin/fm-wake-lib.sh
-// rather than copied; and a missing verified successor identity is a silent
-// skip.
-const reuseLinkedPredecessors = new Set<string>();
-const cycleLedgerPath = `${state}/.watch-cycle-exits.log`;
-const cycleLedgerAppendScript = [
-  `. '${`${fmRoot}/bin/fm-wake-lib.sh`.replace(/'/g, `'"'"'`)}' || exit 0`,
-  'lock="$STATE/.watch-cycle-exits.lock"',
-  'i=0',
-  'while ! fm_lock_try_acquire "$lock"; do',
-  '  i=$((i + 1))',
-  '  [ "$i" -lt 150 ] || exit 0',
-  '  sleep 0.02',
-  'done',
-  '# The duplicate check and the append are one critical section: two extension',
-  '# processes racing the same predecessor serialize on this lock, and whichever',
-  '# record is first is the only one written. A held lock must outlast a blocked',
-  '# racer rather than making it skip, so this bounded wait is longer than the',
-  '# arm layer\'s own append spin; the caller never waits on this process.',
-  "if ! awk -F'\\t' -v target=\"arm_pid=$FM_CYCLE_REUSE_PREDECESSOR\" '",
-  '  $1 == target { for (i = 1; i <= NF; i += 1) if ($i == "reason=reused-successor") found = 1 }',
-  '  END { exit found ? 0 : 1 }',
-  `' "$STATE/.watch-cycle-exits.log" 2>/dev/null; then`,
-  "  printf '%s\\n' \"$FM_CYCLE_REUSE_ROW\" >> \"$STATE/.watch-cycle-exits.log\"",
-  'fi',
-  'fm_lock_release "$lock"',
-].join("\n");
-
-function cycleLedgerField(value: string): string {
-  return value.replace(/[\t\r\n]/g, " ").slice(0, 512);
-}
-
-// The arm layer's lock_snapshot shape, read from the live watcher lock so the
-// reuse record names the holder that convergence actually left in place.
-function cycleLedgerLockSnapshot(): string {
-  const read = (file: string): string => {
-    try {
-      return readFileSync(file, "utf8").trim();
-    } catch {
-      return "";
-    }
-  };
-  const pid = read(`${state}/.watch.lock/pid`) || "none";
-  const identity = read(`${state}/.watch.lock/pid-identity`) || "none";
-  return `pid:${cycleLedgerField(pid)}|identity:${cycleLedgerField(identity)}`;
-}
-
-function cycleLedgerBeaconAge(): string {
-  try {
-    const beat = Math.floor(statSync(`${state}/.last-watcher-beat`).mtimeMs / 1000);
-    return String(Math.floor(Date.now() / 1000) - beat);
-  } catch {
-    return "unknown";
-  }
-}
-
-function recordReusedSuccessor(predecessorArmPid: string, watcherPid: string): void {
-  if (!/^[0-9]+$/.test(predecessorArmPid) || !/^[0-9]+$/.test(watcherPid)) return;
-  // This process's fast path only: the persisted duplicate check lives inside
-  // the held ledger lock in cycleLedgerAppendScript, where it is atomic across
-  // concurrent extension processes.
-  if (reuseLinkedPredecessors.has(predecessorArmPid)) return;
-  // Read the predecessor's own close record for the watcher identity and start
-  // time the link copies; appending is decided under the lock, never here.
-  let rows: string[] = [];
-  try {
-    rows = readFileSync(cycleLedgerPath, "utf8").split("\n").filter((row) => row.length > 0);
-  } catch {
-    rows = [];
-  }
-  const prefix = `arm_pid=${predecessorArmPid}\t`;
-  const predecessorRow = rows.filter((row) => row.startsWith(prefix)).pop() || "";
-  const watcher = /(?:^|\t)watcher_pid=([^\t]*)/.exec(predecessorRow)?.[1] || "unknown";
-  const startedAt = /(?:^|\t)started_at=([^\t]*)/.exec(predecessorRow)?.[1] || String(Math.floor(Date.now() / 1000));
-  const lock = cycleLedgerLockSnapshot();
-  const row = [
-    `arm_pid=${cycleLedgerField(predecessorArmPid)}`,
-    `watcher_pid=${cycleLedgerField(watcher)}`,
-    "origin=reused",
-    `started_at=${cycleLedgerField(startedAt)}`,
-    `ended_at=${Math.floor(Date.now() / 1000)}`,
-    "exit_code=none",
-    "signal=none",
-    "reason=reused-successor",
-    `beacon_age=${cycleLedgerBeaconAge()}`,
-    `lock_before=${lock}`,
-    `lock_after=${lock}`,
-    `successor=reused:${cycleLedgerField(watcherPid)}`,
-  ].join("\t");
-  try {
-    reuseLinkedPredecessors.add(predecessorArmPid);
-    const child = spawn("bash", ["-c", cycleLedgerAppendScript], {
-      cwd: fmRoot,
-      env: {
-        ...process.env,
-        FM_HOME: fmHome,
-        FM_STATE_OVERRIDE: state,
-        FM_CYCLE_REUSE_ROW: row,
-        FM_CYCLE_REUSE_PREDECESSOR: predecessorArmPid,
-      },
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-    child.on("error", () => {});
-  } catch {
-    // Observability only: a link that cannot be written must never stall the
-    // live successor the record would have described.
-  }
-}
 
 function positiveInteger(name: string, fallback: number): number {
   const value = Number(process.env[name]);
@@ -382,6 +258,16 @@ function liveArmChild(owner: SessionGeneration): ChildProcess | null {
   return child;
 }
 
+// The session lock names a local pid or, on Windows, a tagged `win:<pid>`
+// (fm_session_pid_valid in bin/fm-session-lock-lib.sh owns that shape). Native
+// Node on Windows sees Windows pids directly, so a tagged holder is compared
+// and probed by its digits. Any other value is no usable identity, "".
+function lockHolderPid(lockPid: string): string {
+  const tagged = process.platform === "win32" ? /^win:([0-9]+)$/.exec(lockPid) : null;
+  const pid = tagged ? tagged[1] : lockPid;
+  return /^[0-9]+$/.test(pid) && pid !== "1" ? pid : "";
+}
+
 function lockOwnership(): LockOwnership {
   let lockPid = "";
   try {
@@ -389,18 +275,44 @@ function lockOwnership(): LockOwnership {
   } catch {
     return "missing";
   }
-  if (!/^[0-9]+$/.test(lockPid) || lockPid === "1") return "other";
+  const holderPid = lockHolderPid(lockPid);
+  if (!holderPid) return "other";
   let pid = String(process.pid);
   for (let i = 0; i < 8; i += 1) {
-    if (pid === lockPid) return "owned";
+    if (pid === holderPid) return "owned";
     pid = parentPid(pid);
     if (!pid || pid === "1") break;
   }
-  return pidAlive(lockPid) ? "other" : "missing";
+  return pidAlive(holderPid) ? "other" : "missing";
+}
+
+// A Pi command started from inside the live session, such as the `pi --help`
+// capability probe in bin/fm-spawn.sh, auto-loads this extension too and passes
+// lockOwnership() through the same ancestor walk. Its pid dies at once, so the
+// marker must keep naming the live session above it (#5202). Pid equality with
+// the lock is not required because a wrapper such as pi-signed may hold the lock
+// while the extension host runs as its child.
+function markerNamesLiveAncestor(): boolean {
+  let markerPid = "";
+  try {
+    markerPid = readFileSync(marker, "utf8").split(/\r?\n/)[1] ?? "";
+  } catch {
+    return false;
+  }
+  if (!/^[0-9]+$/.test(markerPid) || markerPid === String(process.pid) || !pidAlive(markerPid)) {
+    return false;
+  }
+  let pid = String(process.pid);
+  for (let i = 0; i < 8; i += 1) {
+    pid = parentPid(pid);
+    if (!pid || pid === "1") return false;
+    if (pid === markerPid) return true;
+  }
+  return false;
 }
 
 function publishGenerationOwner(generation: SessionGeneration, phase: "active" | "handoff"): void {
-  if (lockOwnership() === "other") return;
+  if (lockOwnership() === "other" || markerNamesLiveAncestor()) return;
   mkdirSync(state, { recursive: true });
   const temporary = `${marker}.tmp-${process.pid}-${generation.id}`;
   writeFileSync(
@@ -1177,13 +1089,6 @@ export default function (pi: ExtensionAPI) {
     }
     publishGenerationOwner(owner, "active");
     if (liveArmChild(owner)) {
-      // A pending restored against an already-live verified child reuses that
-      // child instead of starting a successor, so record the predecessor to
-      // reused-successor link the arm layer would otherwise have written.
-      if (predecessorArmPid && owner.child) {
-        const successorWatcher = armWatcherPid.get(owner.child);
-        if (successorWatcher) recordReusedSuccessor(predecessorArmPid, successorWatcher);
-      }
       return {
         ok: true,
         message: `watcher: unchanged - Pi extension already owns an arm child; no manual re-arm needed; ${repairOnlyHint}`,
@@ -1233,8 +1138,6 @@ export default function (pi: ExtensionAPI) {
     };
     const observeEstablishedArm = (): void => {
       const combined = `${stdout}\n${stderr}`;
-      const established = [...combined.matchAll(/^watcher: (?:started|attached) pid=([0-9]+)/gm)].pop();
-      if (established) armWatcherPid.set(armChild, established[1]);
       const recovery = combined.match(/^watcher: started pid=([0-9]+).* recovery-generation=([A-Za-z0-9._-]+)$/m);
       if (recovery) armRecovery.set(armChild, { watcherPid: recovery[1], generation: recovery[2] });
       if (/^watcher: (?:started|attached)\b/m.test(combined)) {
@@ -1334,10 +1237,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on?.("before_agent_start", (event) => {
-    // Pi 1.2 also fires this event for idle custom-message runs, which carry a
-    // starting message and no user prompt. A wake is always a user follow-up,
-    // so only a user run can consume one.
-    if ("messageType" in event && event.messageType !== "user") return;
+    // A custom message cannot consume a pending user wake, even with equal text.
+    if (!("prompt" in event)) return;
     consumeWake(generation, event.prompt);
   });
   pi.on?.("message_start", (event) => {

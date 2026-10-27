@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Self-update a running firstmate and its secondmates to the latest update source.
+# Self-update a running firstmate and its secondmates to the latest origin.
 #
 # Mechanical half of the /updatefirstmate skill. Fast-forwards the running
-# firstmate repo's default branch from `upstream` (the official repository;
-# `origin` is this fleet's fork), falling back to `origin` when no upstream
-# remote exists or its fetch fails, then fast-forwards every
+# firstmate repo's default branch from origin, then fast-forwards every
 # registered secondmate home. Local homes are treehouse worktrees or standalone
 # clones; remote routes update their configured code root on that host and then
 # fast-forward the persistent home to that root. FAST-FORWARD ONLY, exactly like
@@ -20,10 +18,7 @@
 # default branch, so a fast-forward there advances HEAD only and never touches
 # any other worktree's checkout or the shared `main` branch.
 #
-# The fast-forward mechanics live in bin/fm-ff-lib.sh (commit-ish base
-# `upstream/<default>` on the preferred path and the lib's origin fetch mode
-# on the fallback path; that same origin mode serves secondmate homes, whose
-# own `origin` remote is their source);
+# The fast-forward mechanics live in bin/fm-ff-lib.sh (base_mode "origin" here);
 # the same library drives local and remote parent-targeted secondmate sync, so
 # there is one ff implementation, not several.
 #
@@ -93,29 +88,7 @@ fi
 # --- main firstmate repo ---------------------------------------------------
 
 reread_firstmate="no"
-# Fork layout: `upstream` is the official repository and `origin` is this
-# fleet's fork; the primary PREFERS upstream over the fork whenever it can.
-# ff_target's fetch special-case is origin-only, so the upstream path fetches
-# upstream here and hands the fetched upstream/<default> ref as its commit-ish
-# base. Same guards as every other target: never force, merge, stash, or
-# discard.
-#
-# Not every host has an upstream remote. A normally cloned checkout - for
-# example a remote secondmate host's Firstmate code root, which is created by
-# the operator and never given a second remote - carries only `origin`, and its
-# own origin is its documented update source. So an absent upstream, or an
-# upstream fetch that fails (offline, moved, refused), falls back to the
-# documented origin path: ff_target's origin base mode fetches `origin` and
-# advances to origin/<default> under the identical guards. A successful
-# fallback therefore reports the same `firstmate: updated` / `firstmate:
-# already current` vocabulary as the preferred path, and only a genuinely
-# unresolvable remote reports a skip.
-if git -C "$FM_ROOT" remote get-url upstream >/dev/null 2>&1 \
-  && git -C "$FM_ROOT" fetch upstream --prune --quiet 2>/dev/null; then
-  ff_target "$FM_ROOT" "firstmate" "upstream/$(default_branch "$FM_ROOT")" no no
-else
-  ff_target "$FM_ROOT" "firstmate" origin no no
-fi
+ff_target "$FM_ROOT" "firstmate" origin no no
 if [ "$FF_STATUS" = "updated" ]; then
   if [ -n "$FF_INSTR" ]; then
     reread_firstmate="yes"

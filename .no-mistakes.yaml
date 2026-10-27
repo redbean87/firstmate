@@ -29,9 +29,11 @@ document:
 # Invocation wiring is asserted by `tests/fm-lint.test.sh` and
 # `tests/fm-lint-workflows.test.sh`.
 #
+# Strict dual-SDK compilation belongs to this compiler-owning phase, not Test.
+# The existing type-regression owner also runs in the required portable CI lane.
 # Keep commands.test absent; the firstmate-coding-guidelines skill owns this policy.
 commands:
-  lint: 'bin/fm-lint.sh'
+  lint: 'bin/fm-lint.sh && bash tests/fm-pi-primary-types.test.sh'
 
 # Publish each run's test evidence to the orphan no-mistakes/evidence branch linked from the PR.
 # The evidence is not committed to the feature or default branch.
@@ -47,10 +49,3 @@ test:
     Ship or scout briefs that will drive Herdr lifecycle still require --herdr-lab at scaffold time; these Test-agent instructions are not a substitute for that brief flag.
   evidence:
     store_in_repo: true
-
-# Iteration cost: the full behavior matrix runs in CI, which stays the
-# full-rigor gate, so pipeline Test rounds should select with
-# `bin/fm-test-run.sh --changed` (adding `--exclude-family real-herdr-gated`
-# only when the change cannot affect Herdr paths) instead of re-running the
-# whole matrix every round. Never narrow the pipeline's own lint, document,
-# review, or CI steps themselves.

@@ -1,0 +1,41 @@
+# Fork CI: tests the Firstmate fork's own code and its two upstream
+# integration points. It never runs upstream's test suite; upstream's own
+# workflow (ci.yml) is unchanged and owns upstream regression. See fork/README
+# "Testing ownership".
+name: Fork CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'fork/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fork:
+    name: Fork policy and hooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install pinned ShellCheck
+        run: |
+          bin/fm-install-shellcheck.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Lint fork code and the two hooked upstream files
+        run: fork/bin/fm-fork-sync lint
+      - name: Upstream-owned files differ only by the two hook blocks
+        run: |
+          git fetch --no-tags --quiet https://github.com/kunchenguid/firstmate main
+          fork/bin/fm-fork-hook-check --base "$(git merge-base HEAD FETCH_HEAD)"
+      - name: Fork test suite
+        run: fork/tests/run

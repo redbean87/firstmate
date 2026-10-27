@@ -16,11 +16,23 @@ make_fakebin() {  # <dir>
   fakebin=$(fm_fakebin "$1")
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+window_file="$(dirname "$0")/.spawn-window"
 case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
 case "${1:-}" in
   display-message) printf 'firstmate\n' ;;
+  list-windows) [ ! -s "$window_file" ] || cat "$window_file" ;;
+  new-window)
+    name=
+    previous=
+    for arg in "$@"; do
+      [ "$previous" = -n ] && name=$arg
+      previous=$arg
+    done
+    printf '%s\n' "$name" > "$window_file"
+    ;;
+  kill-window) : > "$window_file" ;;
 esac
 exit 0
 SH
@@ -42,7 +54,6 @@ make_case() {  # <name> <on|off>
   touch "$HOME_DIR/state/.last-watcher-beat"
   [ "$2" = off ] || : > "$HOME_DIR/config/fleet-ledger"
   fm_git_worktree "$PROJ_DIR" "$WT_DIR" "fm/$TASK"
-  fm_test_seed_consult_record "$HOME_DIR" "$TASK"
   cat > "$HOME_DIR/data/$TASK/brief.md" <<EOF
 # Task
 ## Captain's intent

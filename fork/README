@@ -1,0 +1,417 @@
+Firstmate fork layer
+====================
+
+This directory holds everything the Firstmate fork adds on top of upstream
+firstmate (https://github.com/kunchenguid/firstmate). Upstream code stays
+byte-identical except for two small hook blocks. This file is plain text with
+no extension on purpose: upstream's documentation-audience check requires every
+tracked *.md, *.mdx, *.rst, and *.txt file to be registered in an upstream-owned
+inventory, and the fork does not edit that inventory.
+
+
+Ownership boundary
+------------------
+
+  Upstream core       everything outside fork/ and .github/workflows/fork-ci.yml,
+                      unchanged except the two hook blocks below.
+  Hook blocks (2)     HK1 in bin/fm-spawn.sh and HK2 in bin/fm-control.sh.
+                      Canonical copies: fork/hooks/*.block. They are the only
+                      fork edits to upstream files.
+  Fork policy         fork/bin/fm-launch-policy: consult gate, project pins,
+                      machine/model resource capacity, Claude subscription.
+  ChatGPT channel     fork/chatgpt/: consultation client, loop, plan
+                      validator, audit/plan/result contract templates.
+  Discord bridge      fork/discord/: gateway and outbox process, sender,
+                      inbound process-event extension, optional reply hook.
+  Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
+                      fork/tests/.
+  Fork CI             .github/workflows/fork-ci.yml.
+  Home configuration  config/fork-policies, config/fork-project-pins.json,
+                      config/fork-resources.json (gitignored, per home).
+
+ChatGPT consultation channel: fork/chatgpt/ (see fork/chatgpt/README); it
+writes the consult gate's relaunch delivery proof and needs no upstream edits.
+
+Discord bridge: fork/discord/ (see fork/discord/README). It reaches Firstmate
+through upstream's documented extension points - an external process-event
+adapter, the reply mirror, and the fleet ledger - and needs no upstream edits.
+
+Plan breakdown (the worker-construction step) is part of the ChatGPT channel,
+not the bridge: the bridge (codex-chatgpt-web, fm-chatgpt-bridge-lib.sh,
+fm-chatgpt-consult.sh) only carries one consultation turn, while the plan
+contract and validator make ChatGPT return a dependency-ordered task list
+T1..Tn. By default the loop hands that whole list to ONE plan worker.
+fork/chatgpt/fm-chatgpt-breakdown.sh instead runs one worker per plan task in
+dependency order under consult-gate launch grants; it is disabled unless the
+home has config/chatgpt-breakdown, and stays off until a real multi-task run
+has passed (fork/chatgpt/README "Plan breakdown"). Exclusive-area
+enforcement is not built. Both live under fork/ and need no upstream edits.
+
+
+The two hook points
+-------------------
+
+  HK1  bin/fm-spawn.sh, directly after upstream's project-capacity admission
+       and before the brief checks, launch-brief render, endpoint, worktree, and
+       task record. Runs for fresh spawns and for fm-spawn --relaunch. A
+       refusal leaves nothing behind, like upstream's own capacity deferral.
+  HK2  bin/fm-control.sh, inside do_relaunch() after resolve_relaunch_profile
+       and before safe_checkpoint/do_exit. A refused relaunch never stops the
+       running agent; upstream stops the old agent before calling
+       fm-spawn --relaunch, which is why HK1 alone cannot cover relaunch.
+
+Both blocks call fork/bin/fm-launch-policy only when the home has
+config/fork-policies. A home without that file behaves exactly as upstream.
+With the file present, any non-zero exit refuses - including a missing or
+unexecutable policy script.
+
+Hook contract (environment the blocks pass; see the policy script header):
+FM_LP_PHASE, FM_LP_TASK, FM_LP_KIND, FM_LP_PROJECT, FM_LP_HARNESS, FM_LP_MODEL,
+FM_LP_EFFORT, FM_LP_RAW_LAUNCH, FM_LP_HOME, FM_LP_STATE, FM_LP_DATA,
+FM_LP_CONFIG, and from HK1 only FM_LP_OWNER_PID ($$, the launching fm-spawn).
+The blocks read these upstream names: in fm-spawn.sh ID KIND PROJ_ABS HARNESS
+MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG FM_HOME FM_ROOT; in
+fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT META KIND STATE DATA
+FM_HOME FM_ROOT, fm_meta_get, die. fm-fork-hook-check verifies these hook
+inputs and the integration boundary (below).
+
+Upstream helper dependencies of claude-subscription: it sources
+bin/fm-worker-account-lib.sh (which sources bin/fm-timeout-lib.sh) and uses
+fm_worker_account_config, fm_worker_account_resolve, and fm_run_timed; a
+missing library or function refuses the launch (exit 2).
+
+Upstream helper dependencies of the resource policy (the consult gate and
+pins use none). The policy sources bin/fm-wake-lib.sh,
+bin/fm-secondmate-registry-lib.sh, and bin/fm-backend.sh, and refuses the
+launch if any of them cannot be loaded. It then uses:
+  agent state       fm_backend_agent_state, fm_backend_of_meta,
+                    fm_backend_target_of_meta, fm_meta_get (bin/fm-backend.sh)
+  backend loading   fm_backend_source (bin/fm-backend.sh), which loads
+                    bin/backends/<name>.sh
+  locking           fm_lock_acquire_wait_max, fm_lock_release (bin/fm-wake-lib.sh)
+  root home         fm_firstmate_root_home (bin/fm-wake-lib.sh)
+  local homes       fm_local_firstmate_state_dirs (bin/fm-wake-lib.sh), which
+                    parses registries with secondmate_registry_parse_line
+                    (bin/fm-secondmate-registry-lib.sh)
+  Herdr processes   fm_backend_herdr_parse_target,
+                    fm_backend_herdr_pane_process_state (bin/backends/herdr.sh)
+What a missing or failing helper does - always toward refusal or holding:
+  - the locking, root-home, local-home, meta, and agent-state helpers above
+    are checked when the policy starts; a missing one refuses the launch;
+  - fm_backend_source failing makes upstream's fm_backend_agent_state answer
+    "unverified", and makes the Herdr re-check print nothing; both hold;
+  - a missing Herdr helper makes the Herdr re-check print nothing, which holds;
+  - a failing registry parse makes local-home enumeration fail, which refuses.
+fm-fork-hook-check --base does NOT verify these helpers: it covers the hook
+blocks, their positions and inputs, and the upstream-file boundary. Their
+availability is enforced at run time by the policy and exercised by
+fork/tests (resource, reservation, and Herdr suites) after every upstream sync.
+
+
+Policies and configuration
+--------------------------
+
+config/fork-policies - one policy name per line (# comments allowed):
+  consult-gate | project-pin | resource | claude-subscription
+An empty list, an unknown name, or an unreadable file refuses every launch.
+Delete the file to turn fork policy off for a home.
+
+consult-gate - ship and scout launches need one of:
+  data/<id>/chatgpt-loop.json        a prompt for the stage its phase puts in
+                                     play (audit_prompt at audit-dispatch or
+                                     audit-worker; plan at plan-dispatch,
+                                     plan-worker, or complete)
+  data/<id>/fork-consult-waiver.json {"origin": "local", "reason": "<one line>"}
+                                     any other origin, Discord included, refuses
+  data/<id>/fork-consult-delivered.json  {"stage": "audit"|"plan"}
+                                     relaunch only, never a fresh spawn
+  data/<id>/fork-consult-grant.json  a per-task plan worker's launch grant
+                                     (fork/chatgpt/fm-chatgpt-breakdown.sh);
+                                     checked first, and when present it alone
+                                     decides; a loop whose plan runs task by
+                                     task refuses a fresh spawn of its own id
+
+project-pin - config/fork-project-pins.json:
+  {"projects": {"<project directory name>": {"harness": "pi", "model": "..."}}}
+A pinned project refuses another harness or model, and any raw launch command.
+
+claude-subscription - no file of its own. A Claude launch (harness claude,
+including a raw claude command), fresh or relaunch, secondmates included:
+  - needs upstream's Claude account pin: config/claude-account, or
+    config/secondmate-accounts/<id>/claude-account for a secondmate, holding
+    'ordinary' or a config root on ONE line. Upstream resolves and checks that
+    pin before either hook and sheds the API credentials Claude ranks above a
+    stored login; no pin refuses, because without it nothing sheds them;
+  - resolves `claude` on this process's PATH and in the worker's login shell
+    ($SHELL -lic 'command -v claude', run from the project directory, bounded
+    by FM_WORKER_ACCOUNT_CHECK_SECONDS, default 30s) and refuses unless both
+    are the same file after symlinks, because the worker types a bare
+    `claude` into its pane shell;
+  - runs that file's `claude auth status` with only HOME, PATH, TMPDIR, USER,
+    LOGNAME (both derived from `id -un` when unset; the macOS keychain login
+    reads as signed out without them) and the pinned root, and allows only
+    loggedIn with authMethod claude.ai. Signed out, another method (console,
+    apiKey, ...), or an unreadable answer refuses.
+  It replaces the earlier core edit that added a `subscription` line to
+  config/claude-account; upstream's parser refuses that second line.
+  Residual gap: a PATH change the pane shell picks up only inside the new
+  worktree (direnv, per-directory shims) is not seen; the probe runs from the
+  project directory instead.
+
+resource - config/fork-resources.json:
+  {"strata": {"capacity": 1, "match": {"model_prefix": "strata-local/"}}}
+Resource names match ^[A-Za-z0-9][A-Za-z0-9._-]*$. A launch whose model
+matches is refused while <capacity> other tasks on a matching model hold a
+place, across every project and every local Firstmate home on this machine
+(secondmate homes included); secondmates are not exempt. A raw launch is
+judged by its own --model and refused if it names none.
+
+A task holds a place when either:
+  - its record's endpoint does not read "dead" or "missing" through upstream's
+    recovery-grade fm_backend_agent_state ("alive", "ambiguous", "unreadable",
+    "unverified", any other answer, or an unreadable record all hold), or
+  - it is on Herdr, reads "dead", and its pane is not proven shell-only (below), or
+  - it has a valid reservation.
+
+Herdr re-check. Upstream reads a Herdr pane with no registered agent as "dead"
+without looking at its processes, so a Pi that is running but has not yet
+registered reads like an empty pane. For every Herdr holder that reads "dead",
+the policy therefore asks upstream's fm_backend_herdr_pane_process_state
+(bin/backends/herdr.sh) for the pane's process view. Only its exact "shell"
+verdict - every foreground process is a recognized shell AND no harness
+descends from the pane shell in the real process table - frees the place.
+"agent" (a harness in the foreground or beneath the shell), "other" (any
+non-shell foreground, after upstream's bounded resample), "unreadable"
+(process-info failed or was malformed, the shell pid is not in the process
+table, or ps is unavailable), and empty or unexpected output (the backend or
+helper could not run) all hold it. This blocks conservatively: a pane left with
+a stray non-shell process, or whose processes cannot be read, holds the
+resource until that task is reconciled. "missing" (pane gone, or the server
+positively stopped) still frees without a process check.
+
+Reservations. Admission runs under a machine-wide lock per resource,
+<root home>/state/.fork-resource-<name>.lock, taken with upstream's lock
+primitive (bounded wait of 10s, then refuse). Under it the policy counts
+holders and, when a place is free, atomically writes
+<root home>/state/fork-reservations/<name>/<task>.<home hash>.json naming the
+launching fm-spawn (FM_LP_OWNER_PID from HK1) by PID and process start time.
+The relaunch preflight (HK2) checks without reserving; a relaunch reserves in
+HK1. A refused launch removes any reservation it wrote in that run.
+
+Expiry. A reservation stops counting only when its owner is confirmed gone -
+ps reports no such process, or the PID now has a different start time (PID
+reuse) - AND 120s of startup grace have passed since it was written; it is
+then deleted under the lock. An owner that cannot be confirmed either way keeps
+the reservation. Age alone never frees a place: a reservation older than 30
+minutes is only named in refusals as STALE for reconciliation. Upstream
+publishes a task's record before launching its agent, so a running agent always
+counts through its record, whatever happens to its reservation.
+
+Recovery needs no manual lock removal: a lock whose owner died is reclaimed by
+upstream's stale-owner recovery, and reservations expire as above. A task whose
+liveness stays unreadable or ambiguous, or a reservation whose owner cannot be
+confirmed, keeps holding until that task is reconciled or cleaned up.
+Malformed or unreadable reservations, an unresolvable root home or local home
+registry, or an unwritable reservation directory refuse the launch.
+
+Malformed JSON or schema in any of these files refuses the launch.
+
+
+Manual reservation recovery
+---------------------------
+
+Reservations normally need no attention: they expire on their own once their
+owner is confirmed gone and the grace has passed. Act only when a refusal keeps
+naming the same reservation. Never delete a reservation because it is old - a
+STALE label only says that something needs reconciling.
+
+1. Identify it. The refusal names the resource and each holder with a label.
+   The reservation file is
+     <root home>/state/fork-reservations/<resource>/<task>.<home hash>.json
+   and records task, home_state, owner_pid, owner_start, and created. The task
+   record, if any, is <home_state>/<task>.meta.
+
+2. Read the label.
+   "(launch in progress)"   The launching fm-spawn is still running. Wait. If
+                            it is hung, deal with that process through the
+                            normal path; never touch the reservation while it
+                            lives.
+   "(starting, Ns of 120s grace)"  The owner is gone and the agent is not yet
+                            visible. Wait out the grace; it expires by itself.
+   "(launch owner unconfirmed)"    ps could not confirm the owner. Check:
+                              LC_ALL=C ps -o lstart= -p <owner_pid>
+                            Exit 1 with no output: owner gone. Output equal to
+                            owner_start: still running - wait. Different output:
+                            the PID was reused - owner gone. If ps itself fails,
+                            fix that first; do not delete anything.
+   "STALE reservations need reconciliation (age never frees a place):
+    <task>(reserved Ns ago)"
+                            Added for any reservation that still holds and is
+                            older than 30 minutes; the same task also appears
+                            under one of the labels above, which decides what
+                            to do. STALE alone is never a reason to remove it.
+   A holder named "(ambiguous)", "(unreadable)", "(unverified)", "(no answer)",
+   or "(record unreadable)" is a task record, not a reservation: reconcile that
+   task through the normal upstream recovery (fm-crew-state.sh, fm-control.sh,
+   fm-teardown.sh). Deleting a reservation does not help and is not needed.
+   "(herdr pane has no registered agent but its processes read <verdict>)"
+                            Also a task record: a Herdr pane with no
+                            registration whose processes were not proven
+                            shell-only. <verdict> "agent" or "other": a
+                            process is still running there - stop or reconcile
+                            that task. "unreadable" or "unavailable": the
+                            pane's processes could not be read - restore that
+                            visibility (Herdr process-info, ps) and recheck
+                            with step 3. Deleting a reservation does not help.
+
+3. Confirm the task's agent is gone. The task record must be absent, or its
+   endpoint must read dead or missing through upstream's own check:
+     FM_HOME=<home> bash -c '. bin/fm-backend.sh; m=<home_state>/<task>.meta;
+       fm_backend_agent_state "$(fm_backend_of_meta "$m")" "$(fm_backend_target_of_meta "$m")"'
+   and no harness process for that task may be running (ps). On Herdr a
+   "dead" pane must also be proven shell-only:
+     FM_HOME=<home> bash -c '. bin/fm-backend.sh; fm_backend_source herdr;
+       fm_backend_herdr_parse_target "<window>";
+       fm_backend_herdr_pane_process_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE"'
+   must print exactly "shell"; anything else means a process may still run.
+
+4. Remove only when the owner is confirmed gone (step 2) AND the agent is
+   confirmed gone (step 3). Remove exactly that one file, under the resource
+   lock so no admission is mid-count:
+     FM_HOME=<root home> STATE=<root home>/state bash -c '
+       . bin/fm-wake-lib.sh
+       lock=<root home>/state/.fork-resource-<resource>.lock
+       fm_lock_acquire_wait_max "$lock" 10 || { echo "resource busy; retry"; exit 1; }
+       rm -f -- "<reservation file>"
+       fm_lock_release "$lock"'
+
+5. A malformed or unreadable reservation refuses every launch on its resource,
+   which is the safe state. Fix permissions if that is the cause. Otherwise
+   take the task from the file name and apply steps 2-4; if the owner or agent
+   cannot be established, leave the file in place and investigate.
+
+6. Never remove the lock path by hand. Upstream reclaims a lock whose owner
+   died; a lock that stays busy belongs to a live process, named by the pid
+   file in the owner directory its symlink points to.
+
+
+Known limits
+------------
+
+- Startup grace is measured from when the reservation is written, so the
+  grace left after fm-spawn exits is 120s minus fm-spawn's own runtime. For pi,
+  codex, and claude workers fm-spawn does not wait for the agent: it sends the
+  launch, presses Enter, and exits (bin/fm-spawn.sh around the launch send).
+- tmux: liveness is read from the pane's processes, so a worker is visible as
+  soon as its harness process runs; the launch runs only a local brief-encode
+  step before it. The residual window is a launch line that stalls for most of
+  the grace before the harness starts.
+- Herdr: upstream reads a pane with nothing registered as dead without
+  checking its processes (characterised by
+  fork/tests/fm-fork-resource-herdr.test.sh). The policy closes that gap with
+  the Herdr re-check above, so a running but unregistered Pi keeps holding
+  after its reservation's grace. What remains: the re-check trusts Herdr's
+  `pane process-info` to name the pane's shell pid and foreground, and the
+  window before the harness process starts (the brief-encode step) reads
+  shell-only, as on tmux. It has not been run against a real Herdr.
+- A refusal by upstream after HK1 leaves the reservation in place. HK1 runs
+  before the brief checks, launch-brief render, endpoint, and task record, so
+  a launch admitted by the policy can still be refused by upstream afterwards
+  (an invalid brief, for example). The policy has already exited, so its
+  reservation stays; its owner (that fm-spawn) is then gone, and it expires
+  once 120s have passed since it was written - longer only if the owner cannot
+  be confirmed gone. Retrying the same task is not blocked by it (a task's own
+  reservation is replaced); a different task waits out the grace.
+- Relaunch failure window. HK2 checks capacity before the old agent is
+  stopped but does not reserve. Upstream then stops the old agent, whose place
+  frees, and only reserves again when the replacement reaches HK1 inside
+  fm-spawn --relaunch. If another launch takes the place in between (seconds),
+  HK1 refuses the replacement: capacity is never exceeded, but the task is left
+  stopped - upstream keeps its record, worktree, and progress note and reports
+  that the replacement did not launch - until a later relaunch succeeds.
+- Only this machine's homes are counted; remote homes and models launched by
+  hand outside fm-spawn are not.
+
+
+Testing ownership
+-----------------
+
+Fork CI tests the fork's code and its integration with upstream, not upstream:
+
+  fork/tests/run      runs fm-fork-hook-check and every fork/tests/*.test.sh.
+                      It never calls bin/fm-test-run.sh, and fork tests live
+                      outside tests/, so upstream's selector, lanes, and
+                      coverage guard never see them.
+  Hook wiring         fm-fork-hook-check verifies both blocks are present once,
+                      identical to fork/hooks/*.block, and at their lifecycle
+                      positions, that the upstream names they read exist, and
+                      that no other upstream bin/ file references the fork;
+                      with --base it verifies nothing else upstream-owned
+                      differs from upstream. It does not check the policy's
+                      upstream helper dependencies (see "The two hook
+                      points"); the fork test suites exercise those.
+  Behaviour           spawn and relaunch tests drive the REAL upstream scripts
+                      through upstream's shared test libraries (tests/lib.sh,
+                      tests/fixtures.sh); the relaunch tests also lift four
+                      fixture functions from tests/fm-control-relaunch.test.sh
+                      and stop with FIXTURE-DRIFT if those disappear.
+
+Upstream tests are never modified for the fork. Routine fork CI does not run
+the upstream suite. Run targeted upstream tests only for a named compatibility
+risk, and record the reason.
+
+
+Upstream sync procedure
+-----------------------
+
+fork/bin/fm-fork-sync (its header owns exact behaviour) does the
+non-destructive steps; fetching, resolving, fast-forwarding, pushing, and any
+cleanup stay manual. Commands run from the active checkout
+(~/Projects/firstmate-next); C is the upstream commit to import.
+
+  1. Fetch the commit (the only network step besides the push):
+       git fetch --no-tags upstream <sha or main>
+       C=$(git rev-parse FETCH_HEAD)          # or the exact sha you named
+  2. Prepare an isolated integration (backup ref, branch, worktree, merge):
+       fork/bin/fm-fork-sync prepare "$C"
+     It writes refs/backup/stage1-enforcement-pre-sync-<short>, creates branch
+     fork/sync-<short> in ../firstmate-sync-<short>, and merges there. The
+     active checkout, its branch, its untracked notes, and the running
+     session are not touched. W below is that worktree.
+  3. Exit 3 means conflicts, listed by owner. Resolve in W only:
+       hook file   take upstream's version, then re-insert the block from
+                   fork/hooks/*.block verbatim at the anchor the README names
+                   (git -C "$W" checkout --theirs -- <file>, then edit);
+       fork-owned  upstream now writes a fork path: stop, decide by hand;
+       upstream    the fork edited an upstream file: a boundary violation.
+                   Stop; remove the fork edit (take --theirs) and move the
+                   behaviour under fork/ before continuing.
+     Then git -C "$W" add <files> && git -C "$W" commit --no-edit.
+  4. Check (boundary vs C, ShellCheck, fork tests, review listing):
+       "$W"/fork/bin/fm-fork-sync check "$C" --root "$W"
+     A lost anchor or contract variable change: re-anchor the block from
+     fork/hooks/*.block (never edit the block in place) and rerun. Run extra
+     upstream tests only for a named risk, and record why.
+  5. Review before landing:
+       git -C "$W" log --oneline fork/stage1-enforcement..HEAD
+       git -C "$W" diff "$C" HEAD -- bin/          # only the two hook blocks
+       git -C "$W" diff fork/stage1-enforcement HEAD --stat
+  6. Land and publish (needs the captain's go; this updates the code the
+     running session executes, as any self-update does):
+       git merge --ff-only fork/sync-<short>      # in the active checkout
+       fork/bin/fm-fork-hook-check --base "$C"
+       git push origin fork/stage1-enforcement
+     --ff-only refuses if the branch moved or if the import would overwrite
+     an untracked file; resolve that rather than forcing.
+
+Recovery (nothing here discards landed or pushed work):
+  - Abandon an unfinished import: git -C "$W" merge --abort, then
+    git worktree remove "$W"; branch fork/sync-<short> and the backup ref
+    stay until you delete them deliberately.
+  - Undo a local fast-forward that was not pushed, in the active checkout:
+       git reset --keep refs/backup/stage1-enforcement-pre-sync-<short>
+    (--keep refuses rather than lose uncommitted changes to tracked files).
+  - After a push, do not rewrite the branch; fix forward with a new commit.
+  - prepare refuses when its backup ref, branch, or worktree already exists:
+    finish or deliberately remove the earlier attempt first (--worktree
+    only changes the worktree path, not the branch or backup ref names).
