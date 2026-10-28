@@ -10,7 +10,9 @@ through one durable outbox:
   replies     state/.host-mirror.jsonl `main` entries (upstream
               bin/fm-host-mirror.sh; capped at 4000 characters), or the
               full-length spool written by fork/discord/fm-discord-reply-hook.sh
-              when DISCORD_REPLIES_SOURCE=hook
+              when DISCORD_REPLIES_SOURCE=hook; plus, in both modes, the
+              Pi extension's state/discord-bridge/pi-replies/ spool
+              (fork/discord/fm-pi-reply-mirror.ts)
   operations  state/fleet-ledger.jsonl (docs/fleet-ledger.md), the watcher
               beat state/.last-watcher-beat, gateway connectivity, and the
               bridge's own delivery failures
@@ -228,6 +230,7 @@ class Paths:
         self.events = os.path.join(b, "events")
         self.cursors = os.path.join(b, "cursors")
         self.spool = os.path.join(b, "replies-spool")
+        self.pi_spool = os.path.join(b, "pi-replies")
         self.log = os.path.join(b, "bridge.log")
         self.lock = os.path.join(b, "bridge.lock")
         self.mirror = os.path.join(self.state, ".host-mirror.jsonl")
@@ -237,7 +240,7 @@ class Paths:
     def ensure(self, cfg):
         os.umask(0o077)
         dirs = [self.base, self.pending, self.batches, self.captured, self.claimed, self.seen,
-                self.failed, self.events, self.cursors] + list(self.outbox.values())
+                self.failed, self.events, self.cursors, self.pi_spool] + list(self.outbox.values())
         if cfg.replies_source == "hook":
             dirs.append(self.spool)
         for d in dirs:
@@ -821,22 +824,33 @@ class Sources:
                     return
             self.save_cursor("mirror", {"seq": e["seq"]})
 
-    def poll_spool(self):
-        for name in sorted(n for n in os.listdir(self.paths.spool) if n.endswith(".json")):
-            path = os.path.join(self.paths.spool, name)
+    def poll_spool_dir(self, spool, prefix, failed_prefix):
+        """Consume one firstmate.discord-reply-event.v1 spool directory
+        (the Claude Stop hook's replies-spool, or the Pi extension's
+        pi-replies): valid events go through queue_reply's existing
+        pairing/outbox path, invalid files move to failed/, and a file
+        leaves the spool only once the outbox durably holds its event."""
+        for name in sorted(n for n in os.listdir(spool) if n.endswith(".json")):
+            path = os.path.join(spool, name)
             event = read_json(path)
             if (not isinstance(event, dict) or event.get("schema") != "firstmate.discord-reply-event.v1"
                     or not isinstance(event.get("text"), str) or not isinstance(event.get("seq"), int)):
-                os.replace(path, os.path.join(self.paths.failed, "spool-" + name))
-                self.log("spool-invalid", file=name)
+                os.replace(path, os.path.join(self.paths.failed, failed_prefix + name))
+                self.log("spool-invalid", feed=prefix, file=name)
                 continue
             if event["text"].strip():
-                event_id = "hook-%s-%d" % (sha(str(event.get("session_id", "")))[:12], event["seq"])
+                event_id = "%s-%s-%d" % (prefix, sha(str(event.get("session_id", "")))[:12], event["seq"])
                 r = self.queue_reply(event_id, event["text"], float(event.get("captured_at", now())),
                                      continuation=bool(event.get("continuation")))
                 if r == "full":
                     return
             os.unlink(path)
+
+    def poll_spool(self):
+        self.poll_spool_dir(self.paths.spool, "hook", "spool-")
+
+    def poll_pi_spool(self):
+        self.poll_spool_dir(self.paths.pi_spool, "pi", "pi-spool-")
 
     # operations --------------------------------------------------------------
     def ledger_message(self, rec):
@@ -1330,6 +1344,10 @@ def tick(cfg, paths, log, outbox, sources, gw=None):
         sources.poll_spool()
     else:
         sources.poll_mirror()
+    # The Pi extension's spool is a separate fork-owned feed, polled on
+    # every pass regardless of DISCORD_REPLIES_SOURCE, so Pi replies flow
+    # in either mode without changing Claude/Cursor mirror or hook delivery.
+    sources.poll_pi_spool()
     sources.poll_ledger()
     sources.flush_ledger_rate()
     sources.check_watcher()

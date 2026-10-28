@@ -1,0 +1,75 @@
+#!/usr/bin/env node
+// Offline driver for fork/discord/fm-pi-reply-mirror.ts (fork tests only).
+//
+// Imports the REAL extension, registers its handlers on a fake pi API, and
+// replays a scenario of session_start/agent_settled steps against a
+// transcript fixture, exactly the shape Pi delivers (entries with
+// {type: "message", message: {role, content}}). The environment must set
+// FM_HOME (and usually FM_ROOT_OVERRIDE) so the extension's gates resolve
+// against the fixture home; the caller owns making this process's ancestry
+// match the fixture's state/.lock.
+//
+// Usage: discord-pi-ext-driver <extension.ts> <scenario.json>
+// Scenario: {"session_file": "<path>", "steps": [
+//   {"event": "session_start", "entries": [...]},
+//   {"event": "agent_settled", "entries": [...], "aborted": true|false}
+// ]}
+// Always exits 0 and prints nothing: like the extension it drives, a driver
+// failure must never mask or fake a turn outcome; the test asserts on the
+// fixture home's spool, never on this process's output.
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const [, , extensionPath, scenarioPath] = process.argv;
+if (!extensionPath || !scenarioPath) process.exit(0);
+
+let scenario;
+try {
+  scenario = JSON.parse(readFileSync(scenarioPath, "utf8"));
+} catch {
+  process.exit(0);
+}
+
+const handlers = new Map();
+const pi = {
+  on(event, handler) {
+    handlers.set(event, handler);
+  },
+  registerCommand() {},
+  registerTool() {},
+  registerShortcut() {},
+  registerFlag() {},
+};
+
+try {
+  const extension = await import(pathToFileURL(extensionPath).href);
+  extension.default(pi);
+} catch {
+  process.exit(0);
+}
+
+const sessionFile = typeof scenario.session_file === "string" ? scenario.session_file : "";
+const steps = Array.isArray(scenario.steps) ? scenario.steps : [];
+
+for (const step of steps) {
+  const handler = handlers.get(step.event);
+  if (!handler) continue;
+  const entries = Array.isArray(step.entries) ? step.entries : [];
+  const ctx = {
+    sessionManager: {
+      getEntries() {
+        return entries;
+      },
+      getSessionFile() {
+        return sessionFile;
+      },
+    },
+  };
+  try {
+    await handler({ type: step.event, aborted: step.aborted === true }, ctx);
+  } catch {
+    // A handler throw would break a real turn; the extension must not have
+    // one. Swallow so the test fails on the missing spool event instead.
+  }
+}
+process.exit(0);

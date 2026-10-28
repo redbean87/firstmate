@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Outbound half of the fork Discord bridge: replies from the REAL upstream
-# mirror writer and from the fork's full-length Stop hook, operational events
-# from the REAL fleet-ledger writer, the watcher-health notices, and the
-# durable outbox's ordering, splitting, retry, permanent-failure, crash, and
-# deduplication behavior, all against a fake Discord REST API.
+# mirror writer, from the fork's full-length Stop hook, and from the fork's
+# Pi settled-reply extension (fm-pi-reply-mirror.ts driven through
+# discord-pi-ext-driver), operational events from the REAL fleet-ledger
+# writer, the watcher-health notices, and the durable outbox's ordering,
+# splitting, retry, permanent-failure, crash, and deduplication behavior, all
+# against a fake Discord REST API. The Pi extension cases need node; they
+# skip individually without it.
 set -u
 # shellcheck source=fork/tests/discord-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/discord-lib.sh"
@@ -11,6 +14,44 @@ command -v jq >/dev/null 2>&1 || { printf 'skip: jq absent\n'; exit 0; }
 command -v python3 >/dev/null 2>&1 || { printf 'skip: python3 absent\n'; exit 0; }
 
 QUIET_HEALTH=(DISCORD_WATCHER_STALE_SECS=999999999)
+
+# lock_owned_by_test: state/.lock names this test shell, an ancestor of the
+# node driver pi_scenario spawns - the same lock-owning-session shape the
+# Claude hook's as_session fixture produces.
+lock_owned_by_test() {
+  printf '%s\n' "$$" > "$W_HOME/state/.lock"
+}
+
+# scenario <steps-json> [session-file]: the JSON the driver replays.
+scenario() {
+  jq -cn --arg sf "${2:-/tmp/pi-session-1.jsonl}" --argjson steps "$1" \
+    '{session_file: $sf, steps: $steps}'
+}
+
+user_entry() { jq -cn --arg t "$1" '{type: "message", message: {role: "user", content: [{type: "text", text: $t}]}}'; }
+assistant_entry() {  # <text> [toolcall] - a toolCall part makes it a loop step
+  jq -cn --arg t "$1" --argjson tc "${2:-false}" \
+    '{type: "message", message: {role: "assistant",
+      content: (if $tc then [{type: "text", text: $t}, {type: "toolCall", toolName: "bash", args: {}}]
+               else [{type: "text", text: $t}] end)}}'
+}
+tool_result_entry() { jq -cn '{type: "message", message: {role: "toolResult", content: [{type: "text", text: "ok"}]}}'; }
+custom_entry() { jq -cn --arg t "$1" '{type: "message", message: {role: "custom", customType: "fm-processing", content: $t}}'; }
+
+spool_files() { find "$(pi_spool)" -name '[0-9]*.json' 2>/dev/null | sort; }
+spool_count() { spool_files | grep -c . || true; }
+spool_text() { jq -r .text "$(spool_files | sed -n "$1p")"; }
+
+
+# Pi extension cases replay transcript fixtures through the real extension in
+# node; without node the bridge-driven Pi cases (straight spool events) still
+# run, and only the extension-driver cases are skipped.
+pi_driver_available() {
+  command -v node >/dev/null 2>&1 || { pass "extension-driver case skipped: node absent"; return 1; }
+  return 0
+}
+
+
 
 # chunk_body <content>: a chunk without its " (k/n)" suffix.
 chunk_body() { printf '%s' "$1" | sed -E 's/ \([0-9]+\/[0-9]+\)$//'; }
@@ -355,6 +396,353 @@ test_configuration_refuses_closed() {
   [ "$(post_count)" = 0 ] || fail "a refused configuration sends nothing"
   assert_absent "$W_HOME/state/discord-bridge" "a refused configuration creates no bridge state"
   pass "configuration: missing, shared, or malformed channels, operations as a command channel, and a missing owner refuse before anything runs"
+}
+
+test_settled_extraction_final_reply_only() {
+  pi_driver_available || return 0
+  pi_world piextract
+  lock_owned_by_test
+  # A plain reply, then a tool-loop turn whose final assistant text must win.
+  pi_scenario "$(scenario '[
+    {"event": "session_start", "entries": []},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "first question")"',
+      '"$(assistant_entry "the first reply")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 1 ] || fail "one settled reply must record exactly one event: $(ls "$(pi_spool)")"
+  [ "$(spool_text 1)" = "the first reply" ] || fail "the settled reply text must be complete"
+  [ "$(jq -r .schema "$(spool_files | sed -n 1p)")" = firstmate.discord-reply-event.v1 ] \
+    || fail "the event carries the existing schema"
+  [ "$(jq -r .session_id "$(spool_files | sed -n 1p)")" = "pi-session-1.jsonl" ] \
+    || fail "session_id is the session file basename"
+  [ "$(jq -r .continuation "$(spool_files | sed -n 1p)")" = false ] || fail "a first reply is not a continuation"
+
+  pi_scenario "$(scenario '[
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "a tool question")"',
+      '"$(assistant_entry "working on it" true)"',
+      '"$(tool_result_entry)"',
+      '"$(assistant_entry "the final answer")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 2 ] || fail "a tool-loop turn records only its final reply: $(ls "$(pi_spool)")"
+  [ "$(spool_text 2)" = "the final answer" ] || fail "the final text after a tool loop wins"
+  [ "$(jq -r .seq "$(spool_files | sed -n 2p)")" = 2 ] \
+    || fail "the per-feed seq counter rises monotonically"
+
+  pi_scenario "$(scenario '[
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "tool only")"',
+      '"$(assistant_entry "loop step" true)"'
+    ]}
+  ]')" || fail "driver failed"
+  pi_scenario "$(scenario '[
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "blank")"',
+      '"$(assistant_entry "   ")"'
+    ]}
+  ]')" || fail "driver failed"
+  pi_scenario "$(scenario '[
+    {"event": "agent_settled", "aborted": true, "entries": [
+      '"$(user_entry "aborted")"',
+      '"$(assistant_entry "half a reply")"'
+    ]}
+  ]')" || fail "driver failed"
+  pi_scenario "$(scenario '[
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "with custom")"',
+      '"$(custom_entry "{\"seq\":1}")"',
+      '"$(assistant_entry "the reply anyway")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 3 ] || fail "toolCall-only, blank, and aborted settles must record nothing: $(ls "$(pi_spool)")"
+  [ "$(spool_text 3)" = "the reply anyway" ] || fail "a branch-processing custom entry is not mistaken for MAIN text"
+  assert_absent "$W_HOME/state/.host-mirror.jsonl" "the Pi extension never writes the upstream host mirror"
+  # Over the hook's 100000-char ceiling: capped with a stated note, and
+  # text_length keeps the ORIGINAL size so the cap cannot hide the true one.
+  local huge
+  huge=$(python3 -c 'print("word " * 30000)')
+  pi_scenario "$(scenario '[
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "huge")"',
+      '"$(assistant_entry "$huge")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 4 ] || fail "the long reply must still record"
+  [ "$(jq -r .text_length "$(spool_files | sed -n 4p)")" = "${#huge}" ] \
+    || fail "text_length must keep the original length"
+  assert_contains "$(jq -r .text "$(spool_files | sed -n 4p)")" "characters not shown" "the cap states what it removed"
+  assert_contains "$(jq -r .text "$(spool_files | sed -n 4p)")" "$(printf '%s' "$huge" | tail -c 50 | sed 's/["\\]/\\&/g')" "the cap keeps the reply's tail"
+  pass "extraction: only the settled final assistant text records, full length, one event per settle, toolCall-only/blank/aborted skipped, custom entries ignored, long replies capped with original text_length, no host-mirror write"
+}
+
+test_operational_and_background_replies_are_preserved() {
+  pi_driver_available || return 0
+  pi_world piop
+  lock_owned_by_test
+  # Captain parity decision: replies to operational and background wakes are
+  # MAIN replies too and must reach Discord unfiltered.
+  pi_scenario "$(scenario '[
+    {"event": "session_start", "entries": []},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "FIRSTMATE wake: fm-task-7 is blocked on credentials")"',
+      '"$(assistant_entry "Captain, the worker needs the API token; see the report.")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 1 ] || fail "an operational-wake reply must be recorded"
+  assert_contains "$(spool_text 1)" "needs the API token" "the operational reply's text is preserved"
+  pi_scenario "$(scenario '[
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "<task-notification> task fm-x done")"',
+      '"$(assistant_entry "The fix landed; PR is up for review.")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 2 ] || fail "a background-notification reply must be recorded"
+  bridge tick || fail "delivery pass failed"
+  [ "$(post_count "$W_REPLIES")" = 2 ] || fail "both operational replies must reach the replies channel: $(posts)"
+  assert_contains "$(posts "$W_REPLIES" | sed -n 1p | jq -r .content)" "needs the API token" "the wake reply is delivered verbatim"
+  pass "parity: replies to operational wakes and background notifications are captured and delivered unfiltered"
+}
+
+test_continuation_marks_second_settle_of_one_turn() {
+  pi_driver_available || return 0
+  pi_world picont
+  lock_owned_by_test
+  # One driver run = one Pi process: the extension's instance state persists
+  # across settles exactly as inside a live session.
+  pi_scenario "$(scenario '[
+    {"event": "session_start", "entries": []},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "blocked stop")"',
+      '"$(assistant_entry "first part")"'
+    ]},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "blocked stop")"',
+      '"$(assistant_entry "first part")"',
+      '"$(assistant_entry "second part")"'
+    ]},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "blocked stop")"',
+      '"$(assistant_entry "first part")"',
+      '"$(assistant_entry "second part")"',
+      '"$(user_entry "and now something else")"',
+      '"$(assistant_entry "a fresh reply")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 3 ] || fail "three settles record three events: $(ls "$(pi_spool)")"
+  # No new user message: the second settle continues the same turn (the
+  # hook's stop_hook_active case); a new user message starts a fresh reply.
+  [ "$(jq -r .continuation "$(spool_files | sed -n 2p)")" = true ] \
+    || fail "a second settle with no new user message is a continuation"
+  [ "$(jq -r .continuation "$(spool_files | sed -n 3p)")" = false ] || fail "a new user message is a fresh reply"
+  bridge tick || fail "delivery pass failed"
+  [ "$(posts "$W_REPLIES" | sed -n 2p | jq -r .content)" = $'(continued)\nsecond part' ] \
+    || fail "a continuation is delivered marked (continued): $(posts "$W_REPLIES")"
+  pass "continuation: a second settle of one turn is marked (continued), a new user message starts fresh"
+}
+
+test_session_start_replaces_stale_state() {
+  pi_driver_available || return 0
+  pi_world pistate
+  lock_owned_by_test
+  pi_scenario "$(scenario '[
+    {"event": "session_start", "entries": []},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "old session question")"',
+      '"$(assistant_entry "old session reply")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 1 ] || fail "the first session's reply must be recorded"
+  # A /resume restores the transcript; the new generation must treat it as
+  # already recorded and never replay it, and a stale continuation anchor
+  # must not survive into the new session.
+  pi_scenario "$(scenario '[
+    {"event": "session_start", "entries": [
+      '"$(user_entry "old session question")"',
+      '"$(assistant_entry "old session reply")"'
+    ]},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "old session question")"',
+      '"$(assistant_entry "old session reply")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 1 ] || fail "a restored transcript must not replay old replies: $(ls "$(pi_spool)")"
+  pi_scenario "$(scenario '[
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "old session question")"',
+      '"$(assistant_entry "old session reply")"',
+      '"$(user_entry "new question after resume")"',
+      '"$(assistant_entry "new reply after resume")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 2 ] || fail "a post-resume reply must be recorded"
+  [ "$(jq -r .continuation "$(spool_files | sed -n 2p)")" = false ] \
+    || fail "the new generation must not treat the post-resume reply as a continuation of the old session"
+  [ "$(spool_text 2)" = "new reply after resume" ] || fail "the post-resume text is complete"
+  pass "lifecycle: session_start re-derives state; a restored transcript is never replayed and stale continuation anchors do not survive"
+}
+
+test_gates_block_foreign_and_worktree_writes() {
+  pi_driver_available || return 0
+  pi_world pigate
+  local wt_steps
+  wt_steps="$(scenario '[
+    {"event": "session_start", "entries": []},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "question")"',
+      '"$(assistant_entry "must not be recorded")"'
+    ]}
+  ]')"
+  # No lock at all: a session that never acquired the fleet lock writes nothing.
+  pi_scenario "$wt_steps" || fail "driver failed"
+  [ "$(spool_count)" = 0 ] || fail "without the fleet lock the extension must be inert"
+  # A lock held by another live process: not this session's ancestry.
+  sh -c "exec sleep 30" & local other=$!
+  printf '%s\n' "$other" > "$W_HOME/state/.lock"
+  pi_scenario "$wt_steps" || fail "driver failed"
+  [ "$(spool_count)" = 0 ] || fail "a lock owned by another process must refuse the write"
+  kill "$other" 2>/dev/null || true
+  wait "$other" 2>/dev/null || true
+  # A linked task worktree is never a primary checkout.
+  git -C "$PRIMARY_ROOT" worktree add --quiet -b fm/pi-gate "$DTMP/pi-gate-wt" 2>/dev/null \
+    || fail "fixture worktree creation failed"
+  lock_owned_by_test
+  printf '%s' "$wt_steps" > "$DTMP/pi-gate-scenario.json"
+  FM_HOME="$W_HOME" FM_ROOT_OVERRIDE="$DTMP/pi-gate-wt" \
+    node "$PI_EXT_DRIVER" "$PI_REPLY_MIRROR" "$DTMP/pi-gate-scenario.json" || fail "driver failed"
+  [ "$(spool_count)" = 0 ] || fail "a worktree checkout must refuse the write"
+  git -C "$PRIMARY_ROOT" worktree remove --force "$DTMP/pi-gate-wt" 2>/dev/null || true
+  # The genuine primary checkout with the lock-owning session records again.
+  pi_scenario "$wt_steps" || fail "driver failed"
+  [ "$(spool_count)" = 1 ] || fail "the lock-owning session in a primary checkout must record"
+  pass "gates: no lock, a foreign lock holder, and a linked worktree all refuse spool writes; the primary session records"
+}
+
+test_bridge_delivers_pi_replies_in_both_modes() {
+  pi_driver_available || return 0
+  local mode spool
+  for mode in mirror hook; do
+    pi_world "pi-$mode"
+    D_EXTRA_ENV=("${QUIET_HEALTH[@]}")
+    [ "$mode" = hook ] && D_EXTRA_ENV+=("DISCORD_REPLIES_SOURCE=hook")
+    fresh_beat
+    lock_owned_by_test
+    pi_scenario "$(scenario '[
+      {"event": "session_start", "entries": []},
+      {"event": "agent_settled", "entries": [
+        '"$(user_entry "q1")"',
+        '"$(assistant_entry "a complete reply")"'
+      ]}
+    ]')" || fail "driver failed"
+    bridge tick || fail "$mode delivery pass failed"
+    [ "$(post_count "$W_REPLIES")" = 1 ] || fail "the Pi reply must reach the replies channel in $mode mode: $(posts)"
+    [ "$(posts "$W_REPLIES" | jq -r .content)" = "a complete reply" ] || fail "the $mode reply text is intact"
+    [ -z "$(spool_files)" ] || fail "a delivered Pi spool event is removed"
+    bridge tick
+    [ "$(post_count)" = 1 ] || fail "a delivered Pi reply is never sent again in $mode mode"
+    if [ -f "$W_HOME/state/.host-mirror.jsonl" ]; then
+      fail "Pi delivery must never touch the host mirror in $mode mode"
+    fi
+    spool="$W_HOME/state/discord-bridge/replies-spool"
+    if [ "$mode" = mirror ]; then
+      [ ! -d "$spool" ] || [ -z "$(find "$spool" -name '*.json' 2>/dev/null)" ] \
+        || fail "mirror mode must not route Pi events through the hook spool"
+    fi
+  done
+  pass "bridge: Pi spool events deliver in both mirror and hook mode, once, without touching the host mirror or the hook spool"
+}
+
+test_pi_and_mirror_sources_interleave_without_duplicates() {
+  local before
+  pi_world piinter
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}")
+  fresh_beat
+  lock_owned_by_test
+  bridge tick
+  pi_text_event 1 "pi reply one"
+  mirror_say "mirror reply one"
+  pi_text_event 2 "pi reply two"
+  bridge tick
+  [ "$(post_count "$W_REPLIES")" = 3 ] || fail "both sources must deliver once each: $(posts)"
+  [ "$(posts "$W_REPLIES" | jq -r .content | sort | tr '\n' '|')" = "mirror reply one|pi reply one|pi reply two|" ] \
+    || fail "each source's text arrives exactly once: $(posts)"
+  before=$(post_count)
+  # Replaying a Pi event the outbox already knows must not double-post.
+  pi_text_event 2 "pi reply two"
+  bridge tick
+  [ "$(post_count)" = "$before" ] || fail "a replayed Pi event the outbox knows must be suppressed: $(posts)"
+  # The mirror cursor must be untouched by Pi traffic.
+  [ "$(jq -r .seq "$W_HOME/state/discord-bridge/cursors/mirror.json")" = 1 ] \
+    || fail "Pi events must not move the mirror cursor"
+  pass "interleave: Pi and mirror sources deliver once each in per-source order; replay is suppressed by the durable outbox; the mirror cursor is untouched"
+}
+
+test_restart_resumes_half_consumed_spool() {
+  pi_world pirestart
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}")
+  fresh_beat
+  pi_text_event 1 "first pi reply"
+  pi_text_event 2 "second pi reply"
+  # Saturate the replies outbox so the second event stays in the spool, as
+  # after a crash between enqueue and unlink.
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}" DISCORD_OUTBOX_MAX=1 FM_DISCORD_BRIDGE_NOW=1000)
+  printf '429 600\n' > "$W_FAKE/responses"
+  bridge tick
+  [ "$(spool_count)" = 1 ] || fail "an event the full outbox cannot accept must stay in the spool"
+  assert_contains "$(posts "$D_OPS" | jq -r .content)" "backlog is full" "the full episode is reported once"
+  # A fresh bridge process (each `bridge tick` is one stateless pass) drains
+  # the held event once capacity returns: the pass that frees the outbox
+  # delivers the held head, and the next pass picks up the freed spool file.
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}" DISCORD_OUTBOX_MAX=1 FM_DISCORD_BRIDGE_NOW=1700)
+  bridge tick
+  [ "$(spool_count)" = 1 ] || fail "the retry pass delivers the held head first"
+  bridge tick
+  [ "$(spool_count)" = 0 ] || fail "the held event must drain once capacity returns"
+  [ "$(post_count "$W_REPLIES")" = 3 ] || fail "one 429 attempt plus two sends: $(posts)"
+  [ "$(posts "$W_REPLIES" | tail -n 2 | jq -r .content | tr '\n' '|')" = "first pi reply|second pi reply|" ] \
+    || fail "the drained events arrive in order"
+  [ -z "$(ls "$W_HOME/state/discord-bridge/outbox/replies")" ] || fail "the outbox empties after delivery"
+  bridge tick
+  [ "$(post_count "$W_REPLIES")" = 3 ] || fail "a restart never re-sends delivered Pi replies: $(posts "$W_REPLIES")"
+  pass "restart: a spool held by a full outbox survives, drains in order after capacity returns, and is never double-sent"
+}
+
+test_invalid_pi_events_are_quarantined() {
+  pi_world piinvalid
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}")
+  fresh_beat
+  pi_text_event 1 "the good reply"
+  mkdir -p "$(pi_spool)"
+  printf '{"schema":"other.v1","seq":2,"text":"bad"}\n' > "$(pi_spool)/000000000002.json"
+  printf 'not json at all\n' > "$(pi_spool)/000000000003.json"
+  bridge tick || fail "malformed events must not break the pass"
+  [ "$(post_count "$W_REPLIES")" = 1 ] || fail "only the valid event is delivered: $(posts)"
+  [ "$(posts "$W_REPLIES" | jq -r .content)" = "the good reply" ] || fail "the valid event's text is intact"
+  [ "$(find "$W_HOME/state/discord-bridge/failed" -name 'pi-spool-*.json' | wc -l | tr -d ' ')" = 2 ] \
+    || fail "both invalid events are kept for diagnosis with the pi-spool- prefix"
+  assert_grep '"feed": "pi"' "$W_HOME/state/discord-bridge/bridge.log" "the pi feed names itself in the log"
+  pass "quarantine: malformed Pi events move to failed/ with the pi-spool- prefix; the valid event still delivers"
+}
+
+test_fake_transport_has_no_network_path() {
+  # Every post in this suite lands in the fake's requests.jsonl because
+  # bridge_env puts the fake curl first on PATH and points DISCORD_API_BASE
+  # at https://discord.test; assert that invariant holds for this file's own
+  # worlds and that no case here starts the live gateway.
+  pi_world pitransport
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}")
+  fresh_beat
+  pi_text_event 1 "transport proof"
+  bridge tick || fail "delivery pass failed"
+  [ "$(post_count)" = 1 ] || fail "the post must land in the fake log"
+  assert_grep '"path": "/channels/' "$W_FAKE/requests.jsonl" "the fake REST log recorded the post"
+  case "$(bridge_env env | grep '^DISCORD_API_BASE=' || true)" in
+    *discord.test*) : ;;
+    *) fail "the fixture must point the API base at the fake host" ;;
+  esac
+  grep -q 'FAKE_DISCORD_DIR' "$D_FAKEBIN/curl" || fail "the fake curl must be the one PATH resolves"
+  pass "transport: every case posts only through the fake REST log; the fake host is pinned and no gateway runs"
 }
 
 fork_run_tests
