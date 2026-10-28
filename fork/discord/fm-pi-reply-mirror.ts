@@ -38,15 +38,18 @@
 // from the in-process Pi runtime, not from a delivered hook payload.
 //
 // Continuation semantics follow the hook where the mapping is sound: the hook
-// marks a re-fired Stop for the same prompt; here a settle with NO new user
-// message since the previous settle is marked "(continued)" - a new user
-// message (captain prompt, wake, or operational injection) starts a fresh
-// reply. The distinction lives in the exported settleReply helper so tests
-// pin it. Remaining uncertainty (documented, non-blocking): whether a
-// compaction summary can ever present as an assistant text entry.
+// marks a re-fired Stop for the same prompt; here a settle with NO new
+// turn-starting entry since the previous settle is marked "(continued)". A
+// turn starts with any entry that is neither the assistant's own message nor
+// a tool result: a captain prompt, an operational injection, and also the
+// custom_message entry Pi uses for background deliveries (which Claude
+// receives as a user prompt), so both harnesses treat a wake reply the same
+// way. The distinction lives in the exported settleReply helper so tests pin
+// it. Remaining uncertainty (documented, non-blocking): whether a compaction
+// summary can ever present as an assistant text entry.
 //
 // State is instance-scoped and re-derived per settle; session_start clears
-// it, so /new, /resume, /fork, or reload never reuse a stale anchor.
+// it, so /new, /resume, /fork, or reload never reuse stale turn state.
 // The handler always succeeds silently: like the Claude hook it can never
 // steer, block, or break a turn.
 import { spawnSync } from "node:child_process";
@@ -124,34 +127,38 @@ export function lastReplyFrom(
   return null;
 }
 
-// Index of the newest user-role message, -1 when none. This is the whole
-// continuation signal: a settle whose newest user message is the SAME one the
-// previous settle answered re-continues that turn (the hook's
-// stop_hook_active case), anything else is a fresh reply.
-export function lastUserIndexFrom(entries: readonly unknown[]): number {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
+// Whether a new turn started between the previous settle and this reply: any
+// entry that is neither the assistant's own message nor a tool result, so a
+// user prompt, a custom_message background delivery, or any other transcript
+// event all count. A re-fired settle of the SAME turn adds only assistant and
+// toolResult entries, which is the hook's stop_hook_active case.
+export function newTurnSince(
+  entries: readonly unknown[],
+  sinceIndex: number,
+  beforeIndex: number,
+): boolean {
+  for (let index = sinceIndex + 1; index < beforeIndex; index += 1) {
     const entry = entries[index] as TranscriptEntry | undefined;
-    if (entry?.type === "message" && entry.message?.role === "user") return index;
+    const role = entry?.type === "message" ? entry.message?.role : undefined;
+    if (role === "assistant" || role === "toolResult") continue;
+    return true;
   }
-  return -1;
+  return false;
 }
 
-// One settle's decision, pure for testability. previousAnchor is the
-// lastUserIndexFrom() answer recorded by the previous settle (null before the
-// first one, so a first reply is never a continuation).
+// One settle's decision, pure for testability. previousSettled is false before
+// the generation's first settle, so a first reply is never a continuation.
 export function settleReply(
   entries: readonly unknown[],
   sinceIndex: number,
-  previousAnchor: number | null,
-): { index: number; text: string; continuation: boolean; anchor: number } | null {
+  previousSettled: boolean,
+): { index: number; text: string; continuation: boolean } | null {
   const reply = lastReplyFrom(entries, sinceIndex);
   if (!reply) return null;
-  const anchor = lastUserIndexFrom(entries);
   return {
     index: reply.index,
     text: reply.text,
-    continuation: previousAnchor !== null && anchor === previousAnchor,
-    anchor,
+    continuation: previousSettled && !newTurnSince(entries, sinceIndex, reply.index),
   };
 }
 
@@ -304,19 +311,19 @@ export default function (pi: ExtensionAPI) {
   // Instance-scoped per settle; session_start re-derives the recorded
   // boundary from the session the new generation actually has, so a
   // replaced session (/new, /resume, /fork, reload) never reuses the
-  // previous generation's anchors: a restored /resume transcript treats
+  // previous generation's turn state: a restored /resume transcript treats
   // every already-present entry as recorded (no replay of old replies after
-  // a restart), and a fresh /new transcript starts empty. The continuation
-  // anchor is cleared, not restored, because no settle has yet happened in
-  // this generation: a prompt persisted before a reply existed must not make
-  // the first reply a continuation.
+  // a restart), and a fresh /new transcript starts empty. The settle flag is
+  // cleared, not restored, because no settle has yet happened in this
+  // generation: a prompt persisted before a reply existed must not make the
+  // first reply a continuation.
   let lastRecordedIndex = -1;
-  let userAnchor: number | null = null;
+  let settledInGeneration = false;
 
   pi.on?.("session_start", (_event, ctx) => {
     const entries = ctx?.sessionManager?.getEntries() ?? [];
     lastRecordedIndex = entries.length - 1;
-    userAnchor = null;
+    settledInGeneration = false;
   });
 
   pi.on?.("agent_settled", (event: AgentSettledEvent, ctx: ExtensionContext) => {
@@ -325,7 +332,7 @@ export default function (pi: ExtensionAPI) {
       const sessionManager = ctx?.sessionManager;
       if (!sessionManager) return;
       const entries = sessionManager.getEntries();
-      const decision = settleReply(entries, lastRecordedIndex, userAnchor);
+      const decision = settleReply(entries, lastRecordedIndex, settledInGeneration);
       if (!decision) return;
       recordReply(
         decision.text,
@@ -333,7 +340,7 @@ export default function (pi: ExtensionAPI) {
         decision.continuation,
       );
       lastRecordedIndex = decision.index;
-      userAnchor = decision.anchor;
+      settledInGeneration = true;
     } catch {
       // Never surface an error into the session: a lost Discord reply is
       // degraded delivery, a broken turn is not.

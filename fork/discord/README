@@ -392,10 +392,13 @@ branch-processing custom entries record nothing. Gates mirror the Claude
 Stop hook: inert until the bridge has created pi-replies/, a genuine primary
 checkout (never a linked task worktree) whose state dir exists, and state/.lock
 naming a pid in this process's ancestry - re-evaluated at every settle. A
-second settle with no new user message since the previous one is delivered
-marked "(continued)", matching the hook's stop_hook_active semantics;
-session_start clears that anchor state, so a resumed or replaced session never replays old
-replies or mis-continues them.
+second settle with no new turn-starting entry since the previous one is
+delivered marked "(continued)", matching the hook's stop_hook_active
+semantics; every entry that is not the assistant's own message or a tool
+result (a captain prompt, an operational wake, or the custom_message entry Pi
+uses for background deliveries) starts a fresh turn. session_start clears
+that turn state, so a resumed or replaced session never replays old replies or
+mis-continues them.
 
 Offline verification: the Pi cases in
 fork/tests/fm-fork-discord-outbound.test.sh drive

@@ -37,6 +37,13 @@ assistant_entry() {  # <text> [toolcall] - a toolCall part makes it a loop step
 }
 tool_result_entry() { jq -cn '{type: "message", message: {role: "toolResult", content: [{type: "text", text: "ok"}]}}'; }
 custom_entry() { jq -cn --arg t "$1" '{type: "message", message: {role: "custom", customType: "fm-processing", content: $t}}'; }
+# Real Pi shape for an extension-injected turn (branch-supervision's
+# pi.sendMessage deliverAs followUp), which is how a Pi primary receives a
+# background notification: no message wrapper, unlike a user prompt.
+custom_message_entry() {  # <customType> <text>
+  jq -cn --arg ct "$1" --arg t "$2" \
+    '{type: "custom_message", customType: $ct, content: [{type: "text", text: $t}], display: true}'
+}
 
 spool_files() { find "$(pi_spool)" -name '[0-9]*.json' 2>/dev/null | sort; }
 spool_count() { spool_files | grep -c . || true; }
@@ -482,27 +489,62 @@ test_operational_and_background_replies_are_preserved() {
   pi_world piop
   lock_owned_by_test
   # Captain parity decision: replies to operational and background wakes are
-  # MAIN replies too and must reach Discord unfiltered.
+  # MAIN replies too and must reach Discord unfiltered, and a background
+  # delivery arrives as a custom_message entry that starts a fresh turn.
   pi_scenario "$(scenario '[
     {"event": "session_start", "entries": []},
     {"event": "agent_settled", "entries": [
       '"$(user_entry "FIRSTMATE wake: fm-task-7 is blocked on credentials")"',
       '"$(assistant_entry "Captain, the worker needs the API token; see the report.")"'
-    ]}
-  ]')" || fail "driver failed"
-  [ "$(spool_count)" = 1 ] || fail "an operational-wake reply must be recorded"
-  assert_contains "$(spool_text 1)" "needs the API token" "the operational reply's text is preserved"
-  pi_scenario "$(scenario '[
+    ]},
     {"event": "agent_settled", "entries": [
-      '"$(user_entry "<task-notification> task fm-x done")"',
+      '"$(user_entry "FIRSTMATE wake: fm-task-7 is blocked on credentials")"',
+      '"$(assistant_entry "Captain, the worker needs the API token; see the report.")"',
+      '"$(custom_message_entry "fm-branch-process" "<task-notification> task fm-x done")"',
       '"$(assistant_entry "The fix landed; PR is up for review.")"'
     ]}
   ]')" || fail "driver failed"
-  [ "$(spool_count)" = 2 ] || fail "a background-notification reply must be recorded"
+  [ "$(spool_count)" = 2 ] || fail "an operational-wake reply and a background-notification reply must both be recorded: $(ls "$(pi_spool)")"
+  assert_contains "$(spool_text 1)" "needs the API token" "the operational reply's text is preserved"
+  [ "$(jq -r .continuation "$(spool_files | sed -n 2p)")" = false ] \
+    || fail "a custom_message background delivery starts a fresh turn, not a continuation"
   bridge tick || fail "delivery pass failed"
   [ "$(post_count "$W_REPLIES")" = 2 ] || fail "both operational replies must reach the replies channel: $(posts)"
   assert_contains "$(posts "$W_REPLIES" | sed -n 1p | jq -r .content)" "needs the API token" "the wake reply is delivered verbatim"
-  pass "parity: replies to operational wakes and background notifications are captured and delivered unfiltered"
+  [ "$(posts "$W_REPLIES" | sed -n 2p | jq -r .content)" = "The fix landed; PR is up for review." ] \
+    || fail "the background-notification reply is delivered unmarked: $(posts)"
+  pass "parity: operational-wake and custom_message background replies are recorded and delivered fresh, unfiltered"
+}
+
+test_background_only_turns_are_never_continuations() {
+  pi_driver_available || return 0
+  pi_world pibg
+  lock_owned_by_test
+  # A transcript with no user entry at all must not compare equal turn state
+  # from one background delivery to the next.
+  pi_scenario "$(scenario '[
+    {"event": "session_start", "entries": []},
+    {"event": "agent_settled", "entries": [
+      '"$(custom_message_entry "fm-branch-process" "<task-notification> first")"',
+      '"$(assistant_entry "first background reply")"'
+    ]},
+    {"event": "agent_settled", "entries": [
+      '"$(custom_message_entry "fm-branch-process" "<task-notification> first")"',
+      '"$(assistant_entry "first background reply")"',
+      '"$(custom_message_entry "fm-branch-process" "<task-notification> second")"',
+      '"$(assistant_entry "second background reply")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 2 ] || fail "both background replies must be recorded: $(ls "$(pi_spool)")"
+  [ "$(jq -r .continuation "$(spool_files | sed -n 1p)")" = false ] \
+    || fail "the first background reply is fresh"
+  [ "$(jq -r .continuation "$(spool_files | sed -n 2p)")" = false ] \
+    || fail "a second background turn in a user-less transcript is fresh, never a continuation"
+  bridge tick || fail "delivery pass failed"
+  [ "$(post_count "$W_REPLIES")" = 2 ] || fail "both background replies must reach the replies channel: $(posts)"
+  [ "$(posts "$W_REPLIES" | sed -n 2p | jq -r .content)" = "second background reply" ] \
+    || fail "the second background reply is delivered unmarked: $(posts)"
+  pass "parity: background-only transcripts never mislabel a later background turn as a continuation"
 }
 
 test_continuation_marks_second_settle_of_one_turn() {
