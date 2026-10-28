@@ -123,6 +123,77 @@ fm_chatgpt_record_channel_use() {
   return 0
 }
 
+# fm_chatgpt_project_name_valid <name>
+# Returns 0 when <name> is a project name the bridge's project routing accepts:
+# the whole string is letters, digits, dot, underscore, or dash, starting with
+# a letter or digit. The check is anchored over the whole string, so a newline
+# or space in a name can never ride a per-line match.
+fm_chatgpt_project_name_valid() {
+  local name="${1:-}"
+  [ -n "$name" ] || return 1
+  case "$name" in
+    *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  case "$name" in
+    [!A-Za-z0-9]*) return 1 ;;
+  esac
+  return 0
+}
+
+# fm_chatgpt_project_fallback_reason <project> <since-epoch-ms>
+# Print the bridge's recorded routing-fallback reason for the newest project
+# routing outcome that names <project> and was recorded at or after
+# <since-epoch-ms>. The source is the codex-chatgpt-web fork's
+# fork-routes/<trace>.outcome.json. FM_CHATGPT_ROUTES_DIR, when set, is the
+# only directory scanned (the test seam and operator override); otherwise the
+# candidate bridge homes are scanned. Returns 1 with no output when no such
+# outcome is readable or the newest one is not a fallback: the routing
+# outcome is diagnostic evidence, so an unreadable one is silence, never an
+# error, and never a consultation failure.
+fm_chatgpt_project_fallback_reason() {
+  local project=$1 since=$2 dir f line at decision reason best="" best_at
+  # best_at is assigned after the local statement: every word of a `local`
+  # command expands before the builtin runs, so best_at=$since on the local
+  # line itself would read an outer (unset) since, not the one just declared.
+  best_at=$since
+  command -v jq >/dev/null 2>&1 || return 1
+  case "$since" in ''|*[!0-9]*) return 1 ;; esac
+  local -a dirs=()
+  if [ -n "${FM_CHATGPT_ROUTES_DIR:-}" ]; then
+    dirs=("$FM_CHATGPT_ROUTES_DIR")
+  else
+    dirs=(
+      ${CODEX_CHATGPT_WEB_HOME:+"$CODEX_CHATGPT_WEB_HOME/fork-routes"}
+      "${HOME:-}/.codex-chatgpt-web/fork-routes"
+      "${HOME:-}/tools/codex-chatgpt-web/home/fork-routes"
+    )
+  fi
+  for dir in "${dirs[@]}"; do
+    [ -d "$dir" ] || continue
+    for f in "$dir"/*.outcome.json; do
+      [ -f "$f" ] || continue
+      line=$(jq -r --arg p "$project" --argjson s "$since" \
+        'select(type == "object" and .project == $p and ((.at // 0) >= $s))
+         | [(.at // 0 | tostring), (.decision // ""), (.reason // "")] | join("|")' \
+        "$f" 2>/dev/null | head -n 1) || continue
+      [ -n "$line" ] || continue
+      at=${line%%|*}
+      case "$at" in ''|*[!0-9]*) continue ;; esac
+      if [ "$at" -ge "$best_at" ]; then
+        best_at=$at
+        best=$line
+      fi
+    done
+  done
+  [ -n "$best" ] || return 1
+  decision=${best#*|}
+  decision=${decision%%|*}
+  [ "$decision" = fallback ] || return 1
+  reason=${best##*|}
+  [ -n "$reason" ] || reason=unspecified
+  printf '%s\n' "$reason"
+}
+
 # fm_chatgpt_bridge_health
 # Bounded loopback-only health probe for the consultation bridge. It resolves
 # the bridge URL through fm_chatgpt_bridge_url (the same resolution every

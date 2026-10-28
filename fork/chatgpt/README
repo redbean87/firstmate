@@ -17,9 +17,12 @@ Files
 -----
 
   fm-chatgpt-bridge-lib.sh  bridge URL resolution (loopback only), model slug,
-                            Codex turn stamping, bounded health probe.
+                            Codex turn stamping, project-name validation and
+                            routing-outcome reading, bounded health probe.
   fm-chatgpt-consult.sh     one self-contained Responses turn per call; prints
-                            the answer, or fails with the bridge's diagnostic.
+                            the answer, or fails with the bridge's diagnostic;
+                            carries the x-fm-chatgpt-project routing header
+                            when --project is given.
   fm-chatgpt-loop.sh        per-task state machine, prompt building, worker
                             dispatch and handoff, result recording, bridge
                             start/stop.
@@ -139,7 +142,8 @@ Running a loop
 --------------
 
   L=<task id>
-  fork/chatgpt/fm-chatgpt-loop.sh init --task $L --objective-file F [--context-file F]
+  P=<project dir>            (the repository the task is about)
+  fork/chatgpt/fm-chatgpt-loop.sh init --task $L --objective-file F [--context-file F] --project $(basename $P)
   fork/chatgpt/fm-chatgpt-loop.sh consult --stage audit --task $L
   fork/chatgpt/fm-chatgpt-loop.sh dispatch --stage audit --task $L -- $L <project> --mode M --yolo Y
   fork/chatgpt/fm-chatgpt-loop.sh record-findings --task $L       (after the audit worker reports)
@@ -150,6 +154,17 @@ Running a loop
 State lives in data/<L>/chatgpt-loop.json. The arguments after -- are
 fm-spawn.sh arguments and must start with the worker's plain task id. Run
 with FM_HOME set to the home the worker belongs to.
+
+Project routing: init's --project NAME (validated ^[A-Za-z0-9][A-Za-z0-9._-]*$,
+refused at init when invalid) is stored in the loop record and carried by
+every consult as the codex-chatgpt-web fork's x-fm-chatgpt-project header, so
+the consultation opens inside that repository's ChatGPT project (fork/README
+in that fork owns the bridge side). Pass basename of the project directory.
+An absent --project sends no header and changes nothing. Routing can fall
+back to an ordinary chat (unmapped name, navigation failure); that is
+advisory: the consult prints one stderr notice (fm-chatgpt: project routing:
+fallback (<reason>)) when the bridge recorded the fallback, keeps exit 0,
+and leaves stdout unchanged. The health probe sends no project header.
 
 
 Bridge

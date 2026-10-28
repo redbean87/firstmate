@@ -554,6 +554,56 @@ test_worker_never_touches_bridge() {
   pass "bridge lifecycle stays Firstmate-owned: dispatch refuses a bridge-referencing arg before launch and reports the bridge itself"
 }
 
+test_init_project_field_and_consult_propagation() {
+  local dir out rc
+  dir="$TMP_ROOT/projprop"; mkdir -p "$dir"
+  new_task_files
+  # A consult stub records the loop's exact argv and answers the audit stage.
+  cat > "$dir/consult-stub.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$STUB_CONSULT_DIR/consult-argv.txt"
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--mode" ] && [ "$a" = "audit" ]; then
+    printf 'generated audit prompt\n'
+    exit 0
+  fi
+  prev=$a
+done
+exit 1
+SH
+  chmod +x "$dir/consult-stub.sh"
+  export FM_CHATGPT_LOOP_CONSULT="$dir/consult-stub.sh"
+  export STUB_CONSULT_DIR="$dir"
+
+  # init stores the project name in the record's project field.
+  bash "$LOOP" init --task projstore --objective-file "$TMP_ROOT/objective.txt" --project firstmate >/dev/null
+  [ "$(jq -r '.project' "$HOME_DIR/data/projstore/chatgpt-loop.json")" = firstmate ] \
+    || fail "init must store --project in the record's project field"
+  # Absent --project defaults the field to an empty string.
+  bash "$LOOP" init --task projabsent --objective-file "$TMP_ROOT/objective.txt" >/dev/null
+  [ "$(jq -r '.project' "$HOME_DIR/data/projabsent/chatgpt-loop.json")" = "" ] \
+    || fail "an init without --project must default the project field to an empty string"
+  # An invalid project name is refused at init with no state written.
+  out=$(bash "$LOOP" init --task projbad --objective-file "$TMP_ROOT/objective.txt" --project '../evil' 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "init must refuse an invalid --project name"
+  assert_contains "$out" "invalid --project" "the refusal must name the rejected flag"
+  [ ! -f "$HOME_DIR/data/projbad/chatgpt-loop.json" ] || fail "a refused init must write no loop record"
+
+  # consult propagates the stored project into the consultation command...
+  rm -f "$dir/consult-argv.txt"
+  bash "$LOOP" consult --stage audit --task projstore >/dev/null
+  assert_contains "$(cat "$dir/consult-argv.txt")" "--project firstmate" \
+    "consult must append --project with the stored repository name"
+  # ...and an absent project keeps the consultation command unchanged.
+  rm -f "$dir/consult-argv.txt"
+  bash "$LOOP" consult --stage audit --task projabsent >/dev/null
+  assert_no_grep "--project" "$dir/consult-argv.txt" \
+    "consult must append no --project when the record holds no project"
+  unset FM_CHATGPT_LOOP_CONSULT
+  pass "init stores the project name and consult propagates it into the consultation command"
+}
+
 test_task_id_validated_before_state_paths() {
   local dir=$TMP_ROOT/badid rc out
   mkdir -p "$dir"
@@ -1813,3 +1863,4 @@ test_init_never_overwrites_an_existing_record
 test_worker_failure_clears_the_delivery_proof
 test_forged_handoff_heading_never_becomes_dispatchable
 test_plan_retry_carries_a_correction_and_is_a_new_request
+test_init_project_field_and_consult_propagation
