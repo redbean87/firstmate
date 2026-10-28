@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # fm-chatgpt-bridge-lib.sh - the single owner of Firstmate's ChatGPT
 # consultation bridge contract: bridge URL resolution, model slug handling,
-# Codex turn-metadata stamping, and the bounded health probe.
+# Codex turn-metadata stamping, ChatGPT project routing (project-name
+# validation and the advisory routing-outcome reader), and the bounded health
+# probe.
 # Usage: . fork/chatgpt/fm-chatgpt-bridge-lib.sh
 #
 # The bridge is the already-installed codex-chatgpt-web daemon, loopback only.
 # Nothing here installs it, authenticates it, or touches its session state.
+# The one bridge-owned file it reads is the routing outcome the bridge wrote
+# for a turn, as advisory diagnostics that never gate a consultation.
 # Callers fail closed when the bridge is unreachable; setup stays external.
 #
 # This is a consultation channel, not a Pi provider.
