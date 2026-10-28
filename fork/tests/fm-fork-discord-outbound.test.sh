@@ -583,6 +583,30 @@ test_session_start_replaces_stale_state() {
   pass "lifecycle: session_start re-derives state; a restored transcript is never replayed and stale continuation anchors do not survive"
 }
 
+test_resumed_pending_prompt_is_not_a_continuation() {
+  pi_driver_available || return 0
+  pi_world pipending
+  lock_owned_by_test
+  # Pi persists the captain's prompt before a reply exists, so a kill or a
+  # reload mid-run leaves the transcript ending in that unanswered prompt.
+  pi_scenario "$(scenario '[
+    {"event": "session_start", "entries": [
+      '"$(user_entry "question before the restart")"'
+    ]},
+    {"event": "agent_settled", "entries": [
+      '"$(user_entry "question before the restart")"',
+      '"$(assistant_entry "reply after the restart")"'
+    ]}
+  ]')" || fail "driver failed"
+  [ "$(spool_count)" = 1 ] || fail "the resumed generation's first reply must be recorded: $(ls "$(pi_spool)")"
+  [ "$(jq -r .continuation "$(spool_files | sed -n 1p)")" = false ] \
+    || fail "the first settle of a new generation is never a continuation"
+  bridge tick || fail "delivery pass failed"
+  [ "$(posts "$W_REPLIES" | jq -r .content)" = "reply after the restart" ] \
+    || fail "the resumed reply is delivered unmarked: $(posts "$W_REPLIES")"
+  pass "lifecycle: a prompt persisted before a restart does not make the resumed generation's first reply a continuation"
+}
+
 test_gates_block_foreign_and_worktree_writes() {
   pi_driver_available || return 0
   pi_world pigate
@@ -607,6 +631,12 @@ test_gates_block_foreign_and_worktree_writes() {
   # A linked task worktree is never a primary checkout.
   git -C "$PRIMARY_ROOT" worktree add --quiet -b fm/pi-gate "$DTMP/pi-gate-wt" 2>/dev/null \
     || fail "fixture worktree creation failed"
+  # The fixture repo has no commit, so the new worktree is empty: give it the
+  # primary-scope artifacts so only the linked-worktree rule can refuse it.
+  : > "$DTMP/pi-gate-wt/AGENTS.md"
+  ln -s "$ROOT/bin" "$DTMP/pi-gate-wt/bin"
+  [ -f "$DTMP/pi-gate-wt/AGENTS.md" ] && [ -d "$DTMP/pi-gate-wt/bin" ] \
+    || fail "the worktree fixture must satisfy the non-worktree gates"
   lock_owned_by_test
   printf '%s' "$wt_steps" > "$DTMP/pi-gate-scenario.json"
   FM_HOME="$W_HOME" FM_ROOT_OVERRIDE="$DTMP/pi-gate-wt" \
@@ -741,7 +771,8 @@ test_fake_transport_has_no_network_path() {
     *discord.test*) : ;;
     *) fail "the fixture must point the API base at the fake host" ;;
   esac
-  grep -q 'FAKE_DISCORD_DIR' "$D_FAKEBIN/curl" || fail "the fake curl must be the one PATH resolves"
+  [ "$(bridge_env sh -c 'command -v curl')" = "$D_FAKEBIN/curl" ] \
+    || fail "the fake curl must be the one PATH resolves"
   pass "transport: every case posts only through the fake REST log; the fake host is pinned and no gateway runs"
 }
 

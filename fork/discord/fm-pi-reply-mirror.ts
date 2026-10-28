@@ -215,15 +215,6 @@ function lockHolderPid(lockPid: string): string {
   return /^[0-9]+$/.test(pid) && pid !== "1" ? pid : "";
 }
 
-function pidAlive(pid: string): boolean {
-  try {
-    process.kill(Number(pid), 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function parentPidSync(pid: string): string {
   const result = spawnSync("ps", ["-o", "ppid=", "-p", pid], { encoding: "utf8" });
   if (result.status !== 0) return "";
@@ -310,19 +301,22 @@ function recordReply(text: string, sessionId: string, continuation: boolean): vo
 }
 
 export default function (pi: ExtensionAPI) {
-  // Instance-scoped per settle; session_start re-derives both values from
-  // the session the new generation actually has, so a replaced session
-  // (/new, /resume, /fork, reload) never reuses the previous generation's
-  // anchors: a restored /resume transcript treats every already-present
-  // entry as recorded (no replay of old replies after a restart), and a
-  // fresh /new transcript starts empty.
+  // Instance-scoped per settle; session_start re-derives the recorded
+  // boundary from the session the new generation actually has, so a
+  // replaced session (/new, /resume, /fork, reload) never reuses the
+  // previous generation's anchors: a restored /resume transcript treats
+  // every already-present entry as recorded (no replay of old replies after
+  // a restart), and a fresh /new transcript starts empty. The continuation
+  // anchor is cleared, not restored, because no settle has yet happened in
+  // this generation: a prompt persisted before a reply existed must not make
+  // the first reply a continuation.
   let lastRecordedIndex = -1;
   let userAnchor: number | null = null;
 
   pi.on?.("session_start", (_event, ctx) => {
     const entries = ctx?.sessionManager?.getEntries() ?? [];
     lastRecordedIndex = entries.length - 1;
-    userAnchor = lastUserIndexFrom(entries);
+    userAnchor = null;
   });
 
   pi.on?.("agent_settled", (event: AgentSettledEvent, ctx: ExtensionContext) => {
