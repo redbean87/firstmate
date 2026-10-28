@@ -1,0 +1,82 @@
+ok - an audit consult refuses before contacting the bridge when the audit-brief template is missing
+ok - no --project sends no header, --project sends the exact name, invalid names refuse
+ok - project names are accepted up to the bridge's 64-character bound and refused beyond it
+ok - a trailing valueless option refuses with a usage error instead of hanging
+ok - a routing fallback prints one advisory stderr notice with exit 0 and unchanged stdout
+ok - an audit consult asks for a generated worker audit prompt with the prompt text and prints only the answer
+ok - a plan consult injects the version-1 plan contract and returns the reply text unvalidated for the loop
+ok - a plan consult refuses before contacting the bridge when the plan contract is missing
+ok - audit prompts are generated against a template that numbers every finding A1, A2, ...
+ok - consultation turns carry the Codex turn stamp and stable item ids
+ok - bare model ids ride the bridge slug and doubled selectors refuse
+ok - supplied thread ids propagate and a missing thread fails closed
+ok - an unreachable bridge fails closed with a prerequisite report
+ok - a failing bridge fails closed with its status
+ok - an HTTP-200 structured rejection exits nonzero with the bridge's own diagnostic and empty stdout
+ok - a rejection without a reported size relays the bridge message and invents no number
+ok - the health probe distinguishes healthy, unhealthy, unreachable, and misconfigured bridges
+ok - the unconfigured verdict (skipped here: a live bridge occupies the default port)
+ok - configuration evidence is a bridge URL override, consult-loop state, or recorded channel use
+ok - a consult records durable channel evidence so a later dead bridge is reported
+ok - objective to audit to worker to plan to worker to completion flows through every phase
+ok - next-round clears the finished round's scoped fields, so a stale prompt never satisfies the gate
+ok - the plan consultation carries objective, context, the audit prompt once and labelled, and the worker findings
+ok - a ChatGPT bridge failure exits nonzero, records last_error, keeps the phase, and dispatches nothing
+ok - a worker failure returns to dispatch, records last_error, and the stage retries
+ok - a failed spawn records last_error, holds the dispatch phase, and the stage retries
+ok - a confirmed handoff records the fork delivery proof, and the relaunch gate passes on it
+ok - a failed handoff leaves no delivery record and the gate still refuses that worker
+ok - a failed later handoff clears the earlier delivery record, so the gate refuses its relaunch
+ok - a failed later spawn clears the earlier delivery record, so the gate refuses its relaunch
+ok - dispatch refuses option-leading and batch first args, and hands off with an explicit FM_HOME
+ok - wrong-phase calls refuse with no state change
+ok - every subcommand validates the task id before building state paths
+ok - a trailing valueless option refuses with a usage error instead of hanging
+ok - bridge lifecycle stays Firstmate-owned: dispatch refuses a bridge-referencing arg before launch and reports the bridge itself
+ok - bridge start and stop verify the recorded pid against the daemon-dir entrypoints before refusing or killing
+ok - bridge install and setup verbs and any extra start/stop argument refuse
+ok - the audit worker receives the banner-stripped ChatGPT-generated prompt while the objective stays in loop state for the plan packet
+ok - the consult receipt strips only a leading Local-tools-unavailable blockquote and preserves every other byte
+ok - dispatch carries the selected per-stage effort in the worker argv and keeps low as the audit default
+ok - a plan consult citing a usable prior audit records it and skips the redundant audit worker
+ok - a task stuck at audit-worker plans directly from cited prior audit evidence
+ok - a plan consult without cited prior audit evidence keeps the normal audit-required path
+ok - malformed or missing cited evidence is rejected with the phase intact and the stage retryable
+ok - an audit consult inlines a cited report from the task data directory and keeps the reference visible
+ok - a relative citation resolves against HOME when it is not in the task data directory
+ok - an absolute citation is read as-is and inlined
+ok - a consult with no citation emits no empty evidence section and treats prose paths as prose
+ok - an unreadable audit citation fails loudly, sends nothing, and leaves the stage retryable
+ok - an empty @[] citation fails loudly, sends nothing, and leaves the stage retryable
+ok - a plan consult inlines a citation nested inside cited findings instead of sending it bare
+ok - a consult inlines a citation found inside inlined evidence instead of sending it bare
+ok - an unreadable transitive citation fails loudly, sends nothing, and leaves the stage retryable
+ok - an empty @[] inside inlined evidence fails loudly, sends nothing, and leaves the stage retryable
+ok - cyclic citations terminate with each file inlined exactly once
+ok - a citation marker in model output is refused: nothing is read and nothing is sent
+ok - an empty @[] in model output is refused: nothing is sent
+ok - a plan consult inlines a cited prior plan so exact taxonomy values need no manual copying
+ok - a relative cited findings file resolves from the task data directory and is inlined
+ok - cited evidence with quotes, backticks, shell text, spaces, and empty lines is inlined verbatim in order
+ok - a successful audit records non-empty findings while an empty record never completes the worker
+ok - the completion path resolves the dispatched worker's report so findings stop staying empty
+ok - effort reaches the spawn once, from whichever single source supplied it, and conflicting sources refuse
+ok - a rejected plan consult fails, holds the phase, stores no plan, and records the bridge's diagnostic
+ok - a rejected audit consult fails, holds audit-consult, and stores no audit result
+ok - an invalid plan reply holds plan-consult with the rule named, keeps the raw reply, blocks dispatch, and a valid retry passes
+ok - the validated plan and the raw model reply are stored separately
+ok - a plan consult refuses before contacting the bridge when the plan validator is missing
+ok - the none basis passes only on the cited-prior-audit path, never for a dispatched worker's findings
+ok - the plan handoff is a fixed, ordered rendering under an untrusted-input preamble, and the spawn args stay the caller's
+ok - the plan handoff renders deterministically from the stored plan
+ok - a plan dispatch refuses before launching when the result contract is missing
+ok - every result-contract violation is refused with its rule named and no byte of state changed
+ok - an all-pass result is recorded as reported complete with its report path and digest, and the delivery proof stays
+ok - a blocked task fails the loop, clears the delivery proof, and every further command refuses
+ok - a failing result opens exactly one fix round carrying the failure into the next plan, and a second failure ends the loop
+ok - a fix round followed by an all-pass result completes the loop
+ok - init refuses over a failed, complete, or in-flight loop and leaves every record byte for byte
+ok - a worker failure removes the worker's delivery proof so the gate refuses it, and an unremovable proof refuses the record unchanged
+ok - a plan step that forges a handoff heading is refused at consult and never reaches a worker
+ok - a plan retry names the previous P1 refusal and is a new request with a new turn id; a refused retry leaves nothing dispatchable
+ok - init stores the project name and consult propagates it into the consultation command

@@ -1,0 +1,114 @@
+T7 (fm/bridge-fork-caller) live validation transcript
+target commit: 44c5ac683d7d7d50abaf45a326f8158fb8f3c609
+driven from worktree: /Users/cortezashley/.no-mistakes/worktrees/ea4b1a4b43db/01M61SW69D6ATQV4W50QE4TCS1
+
+Product under test : fork/chatgpt/fm-chatgpt-loop.sh + fork/chatgpt/fm-chatgpt-consult.sh (real, unmodified scripts)
+Disposable peer    : local loopback double on 127.0.0.1:17931 that records every request header/body and
+                     writes <routes>/<trace>.outcome.json, mirroring the contract in the deployed fork's
+                     fork/README "Project routing" and fork/project-route.ts (read-only inspection of
+                     ~/tools/codex-chatgpt-web). Isolated HOME and FM_HOME under /tmp; lab torn down after.
+Untouched          : the operator's live bridge on 127.0.0.1:17841 and its home/fork-routes were only read,
+                     never posted to, so no real ChatGPT turn was spent and no operator state changed.
+
+
+===============================================================
+S1  consult: x-fm-chatgpt-project rides the wire only when --project is given
+===============================================================
+$ fm-chatgpt-consult.sh --mode audit --thread t-no-project
+  exit=0 stdout=[CONSULTED ANSWER] stderr=[]
+  recorded request headers containing 'project': []
+$ fm-chatgpt-consult.sh --mode audit --thread t-proj --project firstmate
+  exit=0 stdout=[CONSULTED ANSWER] stderr=[]
+  wire: x-fm-chatgpt-project: firstmate
+  wire model unchanged: chatgpt-web/gpt-5.6-luna
+
+===============================================================
+S2  loop: init --project persists the repo name and the audit consult carries it
+===============================================================
+$ fm-chatgpt-loop.sh init --task t7-live --objective-file objective.txt --project expo-bowling-journal
+initialized task t7-live in phase audit-consult
+  init exit=0
+  state project field = [expo-bowling-journal]
+$ fm-chatgpt-loop.sh consult --stage audit --task t7-live
+  exit=0 stdout-bytes=16 stderr=[]
+  wire header on the loop's consult = expo-bowling-journal
+  phase after consult = audit-dispatch
+$ fm-chatgpt-loop.sh init --task t7-plain --objective-file objective.txt   (no --project)
+initialized task t7-plain in phase audit-consult
+  init exit=0, project field = []
+  consult exit=0 wire header = (absent)
+
+===============================================================
+S3  invalid project names are refused before any bridge request is made
+===============================================================
+  consult --project '../etc/passwd' -> exit=2  msg=[fm-chatgpt: refusing invalid --project name ../etc/passwd (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  loop init --project '../etc/passwd' -> exit=2  msg=[fm-chatgpt-loop: invalid --project name ../etc/passwd (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  consult --project 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' -> exit=2  msg=[fm-chatgpt: refusing invalid --project name aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  loop init --project 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' -> exit=2  msg=[fm-chatgpt-loop: invalid --project name aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  consult --project 'has space' -> exit=2  msg=[fm-chatgpt: refusing invalid --project name has space (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  loop init --project 'has space' -> exit=2  msg=[fm-chatgpt-loop: invalid --project name has space (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  consult --project '.hidden' -> exit=2  msg=[fm-chatgpt: refusing invalid --project name .hidden (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  loop init --project '.hidden' -> exit=2  msg=[fm-chatgpt-loop: invalid --project name .hidden (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  consult --project 'sl/ash' -> exit=2  msg=[fm-chatgpt: refusing invalid --project name sl/ash (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  loop init --project 'sl/ash' -> exit=2  msg=[fm-chatgpt-loop: invalid --project name sl/ash (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  bridge requests observed during all refusals: 0 (0 = nothing was sent)
+  loop state dirs written during refusals: []
+
+===============================================================
+S4  name-length boundary matches the bridge's own ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$
+===============================================================
+  64-char name -> exit=0, wire header length=64 (expect 64)
+  loop init 64-char -> exit=0
+  65-char name -> exit=2 msg=[fm-chatgpt: refusing invalid --project name aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  loop init 65-char -> exit=2 msg=[fm-chatgpt-loop: invalid --project name aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)]
+  bridge still up, requests since start = 2 (1 = refusals never reached it)
+
+===============================================================
+S5  a trailing valueless flag refuses promptly instead of hanging
+===============================================================
+  consult --prompt-file -> exited 2 in <=2.5s, msg=[fm-chatgpt: --prompt-file needs a value]
+  consult --mode -> exited 2 in <=2.5s, msg=[fm-chatgpt: --mode needs a value]
+  consult --thread -> exited 2 in <=2.5s, msg=[fm-chatgpt: --thread needs a value]
+  consult --project -> exited 2 in <=2.5s, msg=[fm-chatgpt: --project needs a value]
+  loop init --project -> exited 2, msg=[fm-chatgpt-loop: --project needs a value]
+
+===============================================================
+S6  a routing fallback is advisory: one stderr notice, exit 0, answer intact through the loop
+===============================================================
+  loop consult exit=0 (expect 0)
+  stderr = [fm-chatgpt: project routing: fallback (unmapped)]
+  stderr line count = 1
+  stdout answer bytes = 16  persisted audit_prompt = [CONSULTED ANSWER]
+  phase = audit-dispatch  last_error = []
+  direct consult (same bridge, same turn shape):
+    exit=0 stdout=[CONSULTED ANSWER] stderr=[fm-chatgpt: project routing: fallback (unmapped)]
+
+===============================================================
+S7  adversarial: another project's or a stale outcome is never reported as this turn's fallback
+===============================================================
+-- this turn routed into the project: quiet --
+  routed: exit=0 stdout=[CONSULTED ANSWER] stderr=[]
+    outcome file: {"project": "firstmate", "decision": "project", "at": 1793211017481, "member": true}
+-- only a 10-minute-old fallback outcome on disk: quiet --
+  stale: exit=0 stdout=[CONSULTED ANSWER] stderr=[]
+    outcome file: {"project": "firstmate", "decision": "fallback", "reason": "unmapped", "at": 1793210418131}
+-- a fallback outcome naming a DIFFERENT project: quiet --
+  other: exit=0 stdout=[CONSULTED ANSWER] stderr=[]
+    outcome file: {"project": "other-repo", "decision": "fallback", "reason": "unmapped", "at": 1793211018727}
+-- positive control: a fallback outcome naming THIS project: one notice --
+  same: exit=0 stdout=[CONSULTED ANSWER] stderr=[fm-chatgpt: project routing: fallback (unmapped)]
+    outcome file: {"project": "firstmate", "decision": "fallback", "reason": "unmapped", "at": 1793211019362}
+
+===============================================================
+S8  routing never masks a real failure: --project with no bridge still fails closed
+===============================================================
+  exit=1 (expect nonzero) stdout bytes=0 stderr=[fm-chatgpt: bridge unreachable at http://127.0.0.1:1/v1; start the codex-chatgpt-web bridge before consulting]
+
+===============================================================
+S9  the project rides the plan-stage consult too, not only the audit consult
+===============================================================
+  fresh init: phase=audit-consult project=firstmate
+  plan consult exit=1 (nonzero is expected: the stub reply is not a valid plan, which is unrelated to routing)
+  plan wire header=firstmate
+  plan wire model=chatgpt-web/gpt-5.6-luna
+  plan consult stderr=[fm-chatgpt-plan: plan rule P1: the reply must hold exactly one fenced block, found 0 fm-chatgpt-loop: the plan reply was refused; phase unchanged at audit-consult, nothing dispatchable stored ]
