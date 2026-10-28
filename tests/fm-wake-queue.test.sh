@@ -2671,13 +2671,7 @@ test_lock_wait_returns_when_its_directory_is_removed() {
     kill -TERM "$holder" 2>/dev/null || true
     fail "the waiter stopped waiting on a live hold while its directory still existed"
   fi
-  # Move the directory away atomically. A plain rm -rf races the waiter's own
-  # owner-directory mktemp: on a lost race the parent survives, its lock path is
-  # gone, and the waiter legitimately acquires it and returns success. Moving
-  # first makes the teardown atomic for every retry, so the waiter must observe
-  # a removed parent and return 1.
-  rm -rf "$state.gone"
-  mv "$state" "$state.gone" || fail "fixture: could not remove the lock's directory"
+  rm -rf "$state"
   i=0
   while [ "$i" -lt 20 ] && kill -0 "$waiter" 2>/dev/null; do
     sleep 0.1
@@ -2692,7 +2686,6 @@ test_lock_wait_returns_when_its_directory_is_removed() {
   fi
   rc=0
   wait "$waiter" || rc=$?
-  rm -rf "$state.gone"
   [ "$rc" -eq 1 ] || fail "the lock wait over a removed directory returned $rc, not 1"
   pass "a lock wait returns within its bound once its directory is removed"
 }
