@@ -15,6 +15,8 @@
 BRIDGE="$ROOT/fork/discord/fm-discord-bridge.py"
 SENDER="$ROOT/fork/discord/fm-discord-send.sh"
 REPLY_HOOK="$ROOT/fork/discord/fm-discord-reply-hook.sh"
+PI_REPLY_MIRROR="$ROOT/fork/discord/fm-pi-reply-mirror.ts"
+PI_EXT_DRIVER="$ROOT/fork/tests/discord-pi-ext-driver"
 EXT_PACKAGE="$ROOT/fork/discord/extension"
 MIRROR="$ROOT/bin/fm-host-mirror.sh"
 LEDGER="$ROOT/bin/fm-fleet-ledger.sh"
@@ -113,6 +115,44 @@ hook_stop() {  # <payload>: one Stop payload through the reply hook as the sessi
 stop_payload() {  # <text> [continuation]
   jq -cn --arg t "$1" --argjson c "${2:-false}" \
     '{hook_event_name: "Stop", session_id: "sess-1", prompt_id: "prompt-1", stop_hook_active: $c, last_assistant_message: $t}'
+}
+
+# pi_spool: the current world's Pi spool directory (set by pi_world).
+pi_spool() { printf '%s\n' "$W_HOME/state/discord-bridge/pi-replies"; }
+
+# pi_world <name> [replies-channel]: a mirror-mode world whose bridge has
+# created the Pi spool (the extension is inert until the bridge has run).
+# The initial pass is quiet-stale so no watcher notice enters the fake log
+# before a test's own assertions; callers may append to D_EXTRA_ENV after.
+pi_world() {
+  discord_world "$1" ${2:+"$2"}
+  D_EXTRA_ENV=(DISCORD_WATCHER_STALE_SECS=999999999)
+  fresh_beat
+  bridge tick >/dev/null 2>&1 || fail "first bridge pass failed"
+  [ -d "$(pi_spool)" ] || fail "the bridge must create the pi-replies spool"
+}
+
+# pi_scenario <scenario-json>: run one agent_settled pass of the REAL Pi
+# extension against W_HOME, as this test shell (whose pid the fixture lock
+# names), so the extension's lock and primary-scope gates resolve exactly as
+# in a live primary session. Sets PI_RC to the driver's exit status.
+pi_scenario() {
+  local scenario="$DTMP/pi-scenario-$$.json"
+  printf '%s' "$1" > "$scenario"
+  FM_HOME="$W_HOME" FM_ROOT_OVERRIDE="$PRIMARY_ROOT" node "$PI_EXT_DRIVER" "$PI_REPLY_MIRROR" "$scenario"
+  PI_RC=$?
+}
+
+# pi_text_event <seq> <text> [continuation] [session]: one valid spool event
+# written straight into the Pi spool, for bridge-side cases the extension
+# itself does not produce (restarts, outbox saturation, malformed files).
+pi_text_event() {
+  local seq=$1 text=$2 cont=${3:-false} sess=${4:-sess-pi-1}
+  mkdir -p "$(pi_spool)"
+  jq -cn --argjson s "$seq" --arg t "$text" --argjson c "$cont" --arg sess "$sess" \
+    '{schema: "firstmate.discord-reply-event.v1", seq: $s, captured_at: (now | floor),
+      session_id: $sess, prompt_id: "", continuation: $c, text_length: ($t | length), text: $t}' \
+    > "$(pi_spool)/$(printf '%012d' "$seq").json"
 }
 
 # owner_event <id> <content> [channel] [author]: a gateway MESSAGE_CREATE file.

@@ -377,4 +377,45 @@ test_a_continued_reply_follows_its_pairing() {
   pass "continuations: a blocked stop's second message replies to the same Discord message; an unpaired stop's continuation stays unpaired"
 }
 
+test_pi_replies_use_the_same_pairing_evidence() {
+  # Replies channel = the command channel, as in the end-to-end evidence
+  # test above, so plain and paired replies are both observable there.
+  discord_world pipair "$D_CMD"
+  D_EXTRA_ENV=("${QUIET_HEALTH[@]}")
+  fresh_beat
+  register_inbound
+  # One delivered message whose result is not yet acknowledged: the Pi reply
+  # stays plain, exactly as a mirror reply does on the same evidence.
+  ingest "$(owner_event 770000000000000001 "what is under way?")" >/dev/null
+  printf '200\n' > "$W_FAKE/responses"
+  for _ in $(seq 1 50); do
+    FM_HOME="$W_HOME" "$PROCEVENT" start discord-inbound >/dev/null 2>&1 && [ "$(pending_count)" = 0 ] && break
+    sleep 0.2
+  done
+  pi_text_event 1 "Two tasks are under way."
+  bridge tick
+  [ "$(posts "$D_CMD" | tail -n 1 | jq -r .reply_to)" = null ] \
+    || fail "a Pi reply is not paired while the Discord batch is unhandled"
+  # Once the delivered message is acknowledged as handled, the next Pi reply
+  # answers it natively - the identical correlate path mirror replies use.
+  local bdir="$W_HOME/state/discord-bridge/inbox" f
+  for f in "$bdir"/batches/*.json "$bdir"/captured/*.json; do
+    [ -f "$f" ] || continue
+    cp -n "$f" "$bdir/batches/" 2>/dev/null || true
+    cp -n "$f" "$bdir/captured/" 2>/dev/null || true
+  done
+  for result in "$W_HOME/state/procevent-inbox/discord-inbound".*.result; do
+    [ -f "$result" ] || continue
+    FM_HOME="$W_HOME" "$PROCEVENT" handled discord-inbound "$(basename "$result" .result | sed 's/.*\.//')" >/dev/null
+  done
+  pi_text_event 2 "Both are isolated; the fix is in review."
+  bridge tick
+  [ "$(posts "$D_CMD" | tail -n 1 | jq -r .reply_to)" = 770000000000000001 ] \
+    || fail "a Pi reply must pair with the handled Discord message exactly like a mirror reply"
+  assert_contains "$(posts "$D_CMD" | tail -n 1 | jq -r .content)" "the fix is in review" "the paired Pi reply text is intact"
+  [ "$(post_count "$D_REPLIES")" = 0 ] || fail "a paired Pi reply is not also posted to the Replies channel"
+  FM_HOME="$W_HOME" "$PROCEVENT" retire discord-inbound --if-owner "$INBOUND_TOKEN" >/dev/null 2>&1
+  pass "Pi pairing: unhandled batches keep Pi replies plain; one handled message gets the native reply through the same correlate path"
+}
+
 fork_run_tests

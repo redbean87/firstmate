@@ -25,12 +25,15 @@ Files
   fm-discord-send.sh        one REST call per invocation: split, post-one, get.
   fm-discord-lib.sh         config loading, redaction, chunking, REST helper.
   fm-discord-reply-hook.sh  optional Claude Stop hook for full-length replies.
+  fm-pi-reply-mirror.ts     Pi extension recording each settled MAIN reply to
+                            the pi-replies spool (see "Pi replies").
   extension/                the process-event-adapter/1 package (adapter
                             "discord") that hands inbox batches to Firstmate.
   fm-discord-service        LaunchAgent launcher for a release (see "Service").
   ../bin/fm-discord-release builds, verifies, and switches releases.
 
-Tests: fork/tests/fm-fork-discord-outbound.test.sh,
+Tests: fork/tests/fm-fork-discord-outbound.test.sh (including the Pi reply
+cases, which drive the extension through fork/tests/discord-pi-ext-driver),
 fork/tests/fm-fork-discord-inbound.test.sh,
 fork/tests/fm-fork-discord-activation.test.sh (run loop, gateway through a
 fake transport, full outbox, history paging, retention, cursor recovery), and
@@ -94,6 +97,9 @@ With DISCORD_REPLIES_SOURCE=hook the bridge reads full replies from
 fork/discord/fm-discord-reply-hook.sh's spool instead (see "Full-length
 replies"). A stop that another hook blocks fires Stop again for the same
 prompt; the second message is delivered marked "(continued)".
+On a Pi primary, neither source is written: the fork's own Pi extension
+records replies into state/discord-bridge/pi-replies/ and the bridge polls
+that spool on every pass in BOTH modes (see "Pi replies").
 
 Pairing a reply with a Discord message is best-effort and conservative. When
 a reply is captured, the bridge looks at Discord messages already returned to
@@ -344,7 +350,75 @@ not gitignored, so it shows as untracked; keep it out of commits (for
 example with .git/info/exclude). The hook records only Stop events of this
 home's lock-owning primary session in a genuine primary checkout, always
 exits 0, prints nothing, and is inert unless the bridge is in hook mode.
-Claude only; with another primary harness use the mirror.
+Claude only; a Cursor primary uses the mirror, and a Pi primary uses the
+extension below.
+
+
+Pi replies
+----------
+
+When the primary firstmate session runs on Pi, MAIN's chat replies reach
+Discord through fork/discord/fm-pi-reply-mirror.ts, a fork-owned Pi
+extension. It writes each settled MAIN reply - with no filtering, including
+replies to operational wakes and background notifications (captain decision
+2026-10-28: parity with Claude) - as one file in
+state/discord-bridge/pi-replies/, in the SAME firstmate.discord-reply-event.v1
+schema the Claude Stop hook spool uses. It never appends to
+state/.host-mirror.jsonl, never captures prompts, and adds no configuration
+key. The bridge polls pi-replies/ on every tick UNCONDITIONALLY, in both
+DISCORD_REPLIES_SOURCE modes, through poll_pi_spool, which shares the hook
+spool's validation, pairing (correlate), durable outbox, deduplication, retry,
+and failure handling; events are identified as pi-<session-hash>-<seq> so they
+never collide with hook- or mirror- ids. A spool file leaves the directory
+only after the outbox durably holds its event, so a crash replays instead of
+dropping, and the durable outbox suppresses the replay. Invalid files move to
+failed/ with a pi-spool- prefix, as the hook spool does.
+
+The extension is loaded EXPLICITLY. The operator-owned ~/.local/bin/fm
+launcher (a personal script, not in this repository) must pass the extension
+on Pi launches; after this fork lands, that launcher's final line becomes:
+
+  exec pi -e "$home/fork/discord/fm-pi-reply-mirror.ts" "$@"
+
+Nothing here relies on the global ~/.pi/agent/extensions auto-discovery, and
+no file is added under the upstream-owned tracked .pi/extensions/. Loading is
+the operator's step: the repository change alone activates nothing.
+
+Interception is Pi's public agent_settled event: the only run boundary after
+which no retry, compaction, or queued continuation remains. The settled final
+reply is the last assistant transcript entry with nonblank text and no
+toolCall part; aborted runs, blank output, tool-call-only output, and
+branch-processing custom entries record nothing. Gates mirror the Claude
+Stop hook: inert until the bridge has created pi-replies/, a genuine primary
+checkout (never a linked task worktree) whose state dir exists, and state/.lock
+naming a pid in this process's ancestry - re-evaluated at every settle. A
+second settle with no new turn-starting entry since the previous one is
+delivered marked "(continued)", matching the hook's stop_hook_active
+semantics; every entry that is not the assistant's own message or a tool
+result (a captain prompt, an operational wake, or the custom_message entry Pi
+uses for background deliveries) starts a fresh turn. session_start clears
+that turn state, so a resumed or replaced session never replays old replies or
+mis-continues them.
+
+Offline verification: the Pi cases in
+fork/tests/fm-fork-discord-outbound.test.sh drive
+the real extension through fork/tests/discord-pi-ext-driver (transcript
+fixtures replayed as session_start/agent_settled steps against an isolated
+fixture home) and the real bridge through the single-tick harness with the
+fake REST transport, which has no network path. It covers extraction and
+rejection cases, operational-reply parity, the worktree and foreign-lock
+gates, session replacement, continuation marking, both reply modes,
+interleaved mirror+Pi delivery with replay suppression, restart recovery of
+a half-consumed spool, outbox saturation, malformed files, and pairing
+evidence (fork/tests/fm-fork-discord-inbound.test.sh). No test contacts
+Discord, the running LaunchAgent bridge, or a live session.
+
+Known uncertainties (non-blocking, each needs live evidence): whether a
+compaction summary can ever present as an assistant text entry; whether a
+queued Pi message lands as an ordinary user entry, and so starts a fresh
+turn; lock/scope parity with the shell helpers in exotic secondmate setups;
+and getSessionFile() stability across every session replacement path. None
+changes the schema or the bridge contract.
 
 
 Security boundaries
