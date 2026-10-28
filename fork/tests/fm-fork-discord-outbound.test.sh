@@ -24,8 +24,16 @@ lock_owned_by_test() {
 
 # scenario <steps-json> [session-file]: the JSON the driver replays.
 scenario() {
-  jq -cn --arg sf "${2:-/tmp/pi-session-1.jsonl}" --argjson steps "$1" \
-    '{session_file: $sf, steps: $steps}'
+  local steps="$DTMP/pi-steps-$$.json"
+  printf '%s' "$1" > "$steps"
+  scenario_file "$steps" "${2:-/tmp/pi-session-1.jsonl}"
+}
+
+# scenario_file <steps-file> [session-file]: the same wrapper with the steps
+# read from a file, so a payload too large for one argv element (Linux exec
+# caps a single argument at 128 KiB) never reaches jq through the command line.
+scenario_file() {
+  jq -c --arg sf "${2:-/tmp/pi-session-1.jsonl}" '{session_file: $sf, steps: .}' "$1"
 }
 
 user_entry() { jq -cn --arg t "$1" '{type: "message", message: {role: "user", content: [{type: "text", text: $t}]}}'; }
@@ -468,19 +476,23 @@ test_settled_extraction_final_reply_only() {
   assert_absent "$W_HOME/state/.host-mirror.jsonl" "the Pi extension never writes the upstream host mirror"
   # Over the hook's 100000-char ceiling: capped with a stated note, and
   # text_length keeps the ORIGINAL size so the cap cannot hide the true one.
-  local huge
-  huge=$(python3 -c 'print("word " * 30000)')
-  pi_scenario "$(scenario '[
+  # The 150000-character payload travels through files, never a command line.
+  local huge_file steps_file
+  huge_file="$DTMP/huge-reply.txt"
+  steps_file="$DTMP/huge-steps.json"
+  python3 -c 'import sys; sys.stdout.write("word " * 30000)' > "$huge_file"
+  jq -cn --rawfile t "$huge_file" '[
     {"event": "agent_settled", "entries": [
-      '"$(user_entry "huge")"',
-      '"$(assistant_entry "$huge")"'
+      {type: "message", message: {role: "user", content: [{type: "text", text: "huge"}]}},
+      {type: "message", message: {role: "assistant", content: [{type: "text", text: $t}]}}
     ]}
-  ]')" || fail "driver failed"
+  ]' > "$steps_file"
+  pi_scenario "$(scenario_file "$steps_file")" || fail "driver failed"
   [ "$(spool_count)" = 4 ] || fail "the long reply must still record"
-  [ "$(jq -r .text_length "$(spool_files | sed -n 4p)")" = "${#huge}" ] \
+  [ "$(jq -r .text_length "$(spool_files | sed -n 4p)")" = "$(wc -c < "$huge_file" | tr -d ' ')" ] \
     || fail "text_length must keep the original length"
   assert_contains "$(jq -r .text "$(spool_files | sed -n 4p)")" "characters not shown" "the cap states what it removed"
-  assert_contains "$(jq -r .text "$(spool_files | sed -n 4p)")" "$(printf '%s' "$huge" | tail -c 50 | sed 's/["\\]/\\&/g')" "the cap keeps the reply's tail"
+  assert_contains "$(jq -r .text "$(spool_files | sed -n 4p)")" "$(tail -c 50 "$huge_file" | sed 's/["\\]/\\&/g')" "the cap keeps the reply's tail"
   pass "extraction: only the settled final assistant text records, full length, one event per settle, toolCall-only/blank/aborted skipped, custom entries ignored, long replies capped with original text_length, no host-mirror write"
 }
 
