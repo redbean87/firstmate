@@ -10,7 +10,8 @@
 #
 # --project NAME is optional and names the repository this consultation is
 # about. When present (validated like the bridge's header contract:
-# ^[A-Za-z0-9][A-Za-z0-9._-]*$, owned by the lib's fm_chatgpt_project_name_valid)
+# ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, owned by the lib's
+# fm_chatgpt_project_name_valid)
 # the request additionally carries the header x-fm-chatgpt-project: NAME, so
 # the codex-chatgpt-web fork opens its ChatGPT chat inside that repository's
 # ChatGPT project. When absent, no project header is sent and the request is
@@ -60,10 +61,10 @@ usage() {
 PROMPT_FILE="" MODE="" THREAD="" PROJECT="" MODEL="$FM_CHATGPT_WEB_MODEL"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --prompt-file) PROMPT_FILE=${2:-}; shift 2 ;;
-    --mode) MODE=${2:-}; shift 2 ;;
-    --thread) THREAD=${2:-}; shift 2 ;;
-    --project) PROJECT=${2:-}; shift 2 ;;
+    --prompt-file) [ $# -ge 2 ] || { printf 'fm-chatgpt: %s needs a value\n' "$1" >&2; usage; exit 2; }; PROMPT_FILE=$2; shift 2 ;;
+    --mode) [ $# -ge 2 ] || { printf 'fm-chatgpt: %s needs a value\n' "$1" >&2; usage; exit 2; }; MODE=$2; shift 2 ;;
+    --thread) [ $# -ge 2 ] || { printf 'fm-chatgpt: %s needs a value\n' "$1" >&2; usage; exit 2; }; THREAD=$2; shift 2 ;;
+    --project) [ $# -ge 2 ] || { printf 'fm-chatgpt: %s needs a value\n' "$1" >&2; usage; exit 2; }; PROJECT=$2; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'fm-chatgpt: unknown argument %s\n' "$1" >&2; usage; exit 2 ;;
   esac
@@ -80,7 +81,7 @@ esac
 # be a name the bridge's routing accepts, refused here before any bridge
 # contact rather than silently dropped by the bridge's HK1 validation.
 if [ -n "$PROJECT" ] && ! fm_chatgpt_project_name_valid "$PROJECT"; then
-  printf 'fm-chatgpt: refusing invalid --project name %s (need ^[A-Za-z0-9][A-Za-z0-9._-]*)\n' "$PROJECT" >&2
+  printf 'fm-chatgpt: refusing invalid --project name %s (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)\n' "$PROJECT" >&2
   exit 2
 fi
 command -v curl >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs curl\n' >&2; exit 1; }

@@ -555,7 +555,7 @@ test_worker_never_touches_bridge() {
 }
 
 test_init_project_field_and_consult_propagation() {
-  local dir out rc
+  local dir out rc name64 name65
   dir="$TMP_ROOT/projprop"; mkdir -p "$dir"
   new_task_files
   # A consult stub records the loop's exact argv and answers the audit stage.
@@ -589,6 +589,18 @@ SH
   [ "$rc" -ne 0 ] || fail "init must refuse an invalid --project name"
   assert_contains "$out" "invalid --project" "the refusal must name the rejected flag"
   [ ! -f "$HOME_DIR/data/projbad/chatgpt-loop.json" ] || fail "a refused init must write no loop record"
+  # The name bound is the bridge's own: 64 characters is accepted, one more
+  # is refused with no state written, so no stored project can be one the
+  # bridge's routing drops as invalid.
+  name64=$(printf 'a%.0s' $(seq 1 64))
+  name65=$(printf 'a%.0s' $(seq 1 65))
+  bash "$LOOP" init --task projmax --objective-file "$TMP_ROOT/objective.txt" --project "$name64" >/dev/null
+  [ "$(jq -r '.project' "$HOME_DIR/data/projmax/chatgpt-loop.json")" = "$name64" ] \
+    || fail "init must accept a project name at the bridge's 64-character bound"
+  out=$(bash "$LOOP" init --task projlong --objective-file "$TMP_ROOT/objective.txt" --project "$name65" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "init must refuse a project name beyond the bridge's 64-character bound"
+  assert_contains "$out" "invalid --project" "the refusal must name the rejected flag"
+  [ ! -f "$HOME_DIR/data/projlong/chatgpt-loop.json" ] || fail "a refused over-long project name must write no loop record"
 
   # consult propagates the stored project into the consultation command...
   rm -f "$dir/consult-argv.txt"

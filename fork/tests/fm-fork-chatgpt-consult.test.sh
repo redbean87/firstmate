@@ -262,6 +262,53 @@ test_project_header_contract() {
   pass "no --project sends no header, --project sends the exact name, invalid names refuse"
 }
 
+test_project_name_bounds_match_bridge() {
+  local dir pid out rc routes name64 name65
+  name64=$(printf 'a%.0s' $(seq 1 64))
+  name65=$(printf 'a%.0s' $(seq 1 65))
+  # 64 characters is the bridge's maximum and still rides the header.
+  dir="$TMP_ROOT/proj-max"; mkdir -p "$dir"
+  routes="$TMP_ROOT/proj-max-routes"; mkdir -p "$routes"
+  new_prompt
+  pid=$(start_stub "$dir")
+  out=$(FM_CHATGPT_ROUTES_DIR="$routes" bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-max --project "$name64" 2>"$dir/stderr.txt"); rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "a project name at the bridge's 64-character maximum must be accepted"
+  [ "$(jq -r '.["x-fm-chatgpt-project"]' "$dir/headers.json")" = "$name64" ] \
+    || fail "the header must carry the 64-character name unchanged"
+  # One character longer than the bridge accepts is refused before contact.
+  out=$(bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-long --project "$name65" 2>&1); rc=$?
+  expect_code 2 "$rc" "a project name one character past the bridge's bound must refuse with exit 2"
+  assert_contains "$out" "refusing invalid --project" "the refusal must name the rejected value"
+  assert_contains "$out" "$name65" "the refusal must echo the over-long name"
+  assert_contains "$out" "{0,63}" "the refusal must state the bridge's bounded pattern"
+  pass "project names are accepted up to the bridge's 64-character bound and refused beyond it"
+}
+
+test_valueless_options_refuse() {
+  local dir spec rc pid
+  dir="$TMP_ROOT/noval"; mkdir -p "$dir"
+  for spec in --prompt-file --mode --thread --project; do
+    bash "$CONSULT" "$spec" >"$dir/noval.out" 2>&1 &
+    pid=$!
+    for _ in $(seq 1 30); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      fail "a trailing valueless option must exit promptly instead of hanging: $spec"
+    fi
+    wait "$pid"; rc=$?
+    [ "$rc" -ne 0 ] || fail "a trailing valueless option must exit nonzero: $spec"
+    assert_contains "$(cat "$dir/noval.out")" "needs a value" "a trailing valueless option must name the missing value: $spec"
+  done
+  pass "a trailing valueless option refuses with a usage error instead of hanging"
+}
+
 test_project_fallback_notice_is_advisory() {
   local dir pid out rc stderr routes
   # The bridge recorded this turn's routing as a fallback: exactly one stderr
@@ -509,6 +556,8 @@ test_rejection_without_reported_size_invents_nothing() {
 
 test_audit_template_missing_fails_closed
 test_project_header_contract
+test_project_name_bounds_match_bridge
+test_valueless_options_refuse
 test_project_fallback_notice_is_advisory
 test_audit_request_shape
 test_plan_request_shape

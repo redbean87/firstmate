@@ -61,7 +61,7 @@
 # plan consult (cited). worker_task records the task id the last dispatch
 # handed the stage prompt to.
 # project names the repository this task is about (init --project NAME,
-# validated ^[A-Za-z0-9][A-Za-z0-9._-]*$ and empty when absent). It is stored
+# validated ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ and empty when absent). It is stored
 # at init because the caller knows the target repository before any audit
 # worker exists, and consult forwards it to fm-chatgpt-consult.sh as --project
 # so the bridge opens the ChatGPT chat inside that repository's ChatGPT
@@ -457,7 +457,7 @@ cmd_init() {
   # later. The same regex the bridge's routing accepts (the lib's
   # fm_chatgpt_project_name_valid owns it); an absent --project stays "".
   if [ -n "$project" ] && ! fm_chatgpt_project_name_valid "$project"; then
-    printf 'fm-chatgpt-loop: invalid --project name %s (need ^[A-Za-z0-9][A-Za-z0-9._-]*)\n' "$project" >&2
+    printf 'fm-chatgpt-loop: invalid --project name %s (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)\n' "$project" >&2
     return 2
   fi
   [ -z "$thread" ] && thread="chatgpt-loop-$task"

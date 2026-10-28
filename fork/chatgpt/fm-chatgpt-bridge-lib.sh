@@ -125,12 +125,16 @@ fm_chatgpt_record_channel_use() {
 
 # fm_chatgpt_project_name_valid <name>
 # Returns 0 when <name> is a project name the bridge's project routing accepts:
-# the whole string is letters, digits, dot, underscore, or dash, starting with
-# a letter or digit. The check is anchored over the whole string, so a newline
-# or space in a name can never ride a per-line match.
+# 1 to 64 characters, the whole string letters, digits, dot, underscore, or
+# dash, starting with a letter or digit, i.e. ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$.
+# The length bound is the bridge's own, so a name firstmate accepts is never
+# one the bridge's routing drops as invalid. The check is anchored over the
+# whole string, so a newline or space in a name can never ride a per-line
+# match.
 fm_chatgpt_project_name_valid() {
   local name="${1:-}"
   [ -n "$name" ] || return 1
+  [ "${#name}" -le 64 ] || return 1
   case "$name" in
     *[!A-Za-z0-9._-]*) return 1 ;;
   esac

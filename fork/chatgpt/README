@@ -155,7 +155,7 @@ State lives in data/<L>/chatgpt-loop.json. The arguments after -- are
 fm-spawn.sh arguments and must start with the worker's plain task id. Run
 with FM_HOME set to the home the worker belongs to.
 
-Project routing: init's --project NAME (validated ^[A-Za-z0-9][A-Za-z0-9._-]*$,
+Project routing: init's --project NAME (validated ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$,
 refused at init when invalid) is stored in the loop record and carried by
 every consult as the codex-chatgpt-web fork's x-fm-chatgpt-project header, so
 the consultation opens inside that repository's ChatGPT project (fork/README
