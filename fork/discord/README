@@ -414,11 +414,11 @@ evidence (fork/tests/fm-fork-discord-inbound.test.sh). No test contacts
 Discord, the running LaunchAgent bridge, or a live session.
 
 Known uncertainties (non-blocking, each needs live evidence): whether a
-compaction summary can ever present as an assistant text entry; the exact
-continuation/new-turn boundary under queued Pi messages; lock/scope parity
-with the shell helpers in exotic secondmate setups; and getSessionFile()
-stability across every session replacement path. None changes the schema or
-the bridge contract.
+compaction summary can ever present as an assistant text entry; whether a
+queued Pi message lands as an ordinary user entry, and so starts a fresh
+turn; lock/scope parity with the shell helpers in exotic secondmate setups;
+and getSessionFile() stability across every session replacement path. None
+changes the schema or the bridge contract.
 
 
 Security boundaries

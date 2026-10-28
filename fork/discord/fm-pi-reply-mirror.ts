@@ -1,5 +1,5 @@
 // Firstmate fork: Pi settled-reply spool writer for the Discord bridge
-// (fork/discord/README "Pi primary replies").
+// (fork/discord/README "Pi replies").
 //
 // When the primary Firstmate session runs on Pi, MAIN's chat replies must
 // reach Discord exactly as they do on Claude Code (captain decision

@@ -3,8 +3,10 @@
 //
 // Imports the REAL extension, registers its handlers on a fake pi API, and
 // replays a scenario of session_start/agent_settled steps against a
-// transcript fixture, exactly the shape Pi delivers (entries with
-// {type: "message", message: {role, content}}). The environment must set
+// transcript fixture, exactly the shapes Pi delivers: message entries as
+// {type: "message", message: {role, content}}, and an extension-injected
+// turn (a background delivery) as {type: "custom_message", customType,
+// content}, with no message wrapper. The environment must set
 // FM_HOME (and usually FM_ROOT_OVERRIDE) so the extension's gates resolve
 // against the fixture home; the caller owns making this process's ancestry
 // match the fixture's state/.lock.
