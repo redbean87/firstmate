@@ -1306,7 +1306,9 @@ bridge_pid_is_loop_instance() {
   local pid=$1 cmd dir
   [ -n "$pid" ] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
-  cmd=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+  # A wide COLUMNS keeps procps from truncating the command line at the
+  # screen width, which would hide the entrypoint for a long daemon path.
+  cmd=$(COLUMNS=10000 LC_ALL=C ps -p "$pid" -o command= 2>/dev/null) || return 1
   dir=$(bridge_daemon_dir)
   case "$cmd" in
     *"$dir/bin/codex-chatgpt-web"*|*"$dir/src/cli.ts"*) return 0 ;;
