@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fm-chatgpt-loop.sh - Firstmate-owned ChatGPT -> worker -> ChatGPT -> worker
 # orchestration state machine.
-# Usage: fm-chatgpt-loop.sh init --task ID --objective-file FILE [--context-file FILE] [--thread ID]
+# Usage: fm-chatgpt-loop.sh init --task ID --objective-file FILE [--context-file FILE] [--thread ID] [--project NAME]
 #        fm-chatgpt-loop.sh consult --stage audit|plan [--findings-file FILE] --task ID
 #        fm-chatgpt-loop.sh dispatch --stage audit|plan [--effort E] --task ID -- <fm-spawn args>
 #        fm-chatgpt-loop.sh record-findings --task ID [--file FILE]
@@ -47,7 +47,7 @@
 # repaired here.
 #
 # State file: $FM_HOME/data/<task-id>/chatgpt-loop.json, one JSON object with
-# task_id, objective, context, thread, phase, iteration, audit_prompt,
+# task_id, objective, context, thread, project, phase, iteration, audit_prompt,
 # audit_result, findings, findings_source, findings_origin, worker_task, plan,
 # plan_raw, plan_refusal, worker_result, result_report, result_report_sha256, completion,
 # fix_rounds_used, previous_plan, previous_result, terminal_reason,
@@ -60,6 +60,12 @@
 # came from the dispatched audit worker (worker) or a prior audit cited to the
 # plan consult (cited). worker_task records the task id the last dispatch
 # handed the stage prompt to.
+# project names the repository this task is about (init --project NAME,
+# validated ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ and empty when absent). It is stored
+# at init because the caller knows the target repository before any audit
+# worker exists, and consult forwards it to fm-chatgpt-consult.sh as --project
+# so the bridge opens the ChatGPT chat inside that repository's ChatGPT
+# project. Empty means no project header, the unchanged upstream behaviour.
 # plan_raw keeps the plan consult's reply byte for byte; plan holds only a
 # plan that passed fork/chatgpt/fm-chatgpt-plan-validate.sh against
 # fork/chatgpt/plan-contract.template, as compact JSON text. plan_refusal
@@ -168,7 +174,7 @@ BRIDGE_PID_FILE="$STATE/chatgpt-loop-bridge.pid"
 FIX_ROUND_LIMIT=1
 
 usage() {
-  printf 'usage: %s init --task ID --objective-file FILE [--context-file FILE] [--thread ID]\n' "$(basename "$0")" >&2
+  printf 'usage: %s init --task ID --objective-file FILE [--context-file FILE] [--thread ID] [--project NAME]\n' "$(basename "$0")" >&2
   printf '       %s consult --stage audit|plan [--findings-file FILE] --task ID\n' "$(basename "$0")" >&2
   printf '       %s dispatch --stage audit|plan [--effort E] --task ID -- <fm-spawn args>\n' "$(basename "$0")" >&2
   printf '       %s record-findings --task ID [--file FILE]\n' "$(basename "$0")" >&2
@@ -430,13 +436,14 @@ persist_findings() {
 }
 
 cmd_init() {
-  local task="" objective_file="" context_file="" thread=""
+  local task="" objective_file="" context_file="" thread="" project=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --task) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; task=$2; shift 2 ;;
       --objective-file) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; objective_file=$2; shift 2 ;;
       --context-file) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; context_file=$2; shift 2 ;;
       --thread) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; thread=$2; shift 2 ;;
+      --project) [ $# -ge 2 ] || { printf 'fm-chatgpt-loop: %s needs a value\n' "$1" >&2; usage; return 2; }; project=$2; shift 2 ;;
       -h|--help) usage; return 0 ;;
       *) printf 'fm-chatgpt-loop: unknown init argument %s\n' "$1" >&2; usage; return 2 ;;
     esac
@@ -445,6 +452,14 @@ cmd_init() {
   fm_task_id_creation_valid "$task" || { printf 'fm-chatgpt-loop: invalid task id: %s\n' "$task" >&2; return 2; }
   [ -n "$objective_file" ] || { printf 'fm-chatgpt-loop: init needs --objective-file\n' >&2; usage; return 2; }
   [ -f "$objective_file" ] || { printf 'fm-chatgpt-loop: objective file not found: %s\n' "$objective_file" >&2; return 2; }
+  # --project is validated at init, where a wrong name is a supervisor input
+  # error refused with nothing written, not a silently dropped routing header
+  # later. The same regex the bridge's routing accepts (the lib's
+  # fm_chatgpt_project_name_valid owns it); an absent --project stays "".
+  if [ -n "$project" ] && ! fm_chatgpt_project_name_valid "$project"; then
+    printf 'fm-chatgpt-loop: invalid --project name %s (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)\n' "$project" >&2
+    return 2
+  fi
   [ -z "$thread" ] && thread="chatgpt-loop-$task"
   local context=""
   if [ -n "$context_file" ]; then
@@ -465,8 +480,8 @@ cmd_init() {
   mkdir -p "$dir" || return 1
   objective=$(cat "$objective_file")
   tmp=$(mktemp "$dir/.chatgpt-loop.init.XXXXXX") || return 1
-  jq -n --arg t "$task" --arg o "$objective" --arg c "$context" --arg th "$thread" --arg u "$(now_iso)" \
-    '{task_id: $t, objective: $o, context: $c, thread: $th, phase: "audit-consult", iteration: 1, audit_prompt: "", audit_result: "", findings: "", findings_source: "", findings_origin: "", worker_task: "", plan: "", plan_raw: "", plan_refusal: "", worker_result: "", result_report: "", result_report_sha256: "", completion: "", fix_rounds_used: 0, previous_plan: "", previous_result: "", terminal_reason: "", last_error: "", updated_at: $u}' > "$tmp" || { rm -f "$tmp"; return 1; }
+  jq -n --arg t "$task" --arg o "$objective" --arg c "$context" --arg th "$thread" --arg pj "$project" --arg u "$(now_iso)" \
+    '{task_id: $t, objective: $o, context: $c, thread: $th, project: $pj, phase: "audit-consult", iteration: 1, audit_prompt: "", audit_result: "", findings: "", findings_source: "", findings_origin: "", worker_task: "", plan: "", plan_raw: "", plan_refusal: "", worker_result: "", result_report: "", result_report_sha256: "", completion: "", fix_rounds_used: 0, previous_plan: "", previous_result: "", terminal_reason: "", last_error: "", updated_at: $u}' > "$tmp" || { rm -f "$tmp"; return 1; }
   # Publish with a hard link, which fails when the name exists, so a record
   # created by a concurrent init between the check above and here is never
   # replaced either.
@@ -639,6 +654,10 @@ cmd_consult() {
     }
   fi
   thread=$(read_field "$file" thread)
+  # The stored project name (init --project) rides this consultation as the
+  # bridge's routing header; empty means no --project, unchanged behaviour.
+  local project
+  project=$(read_field "$file" project)
   local work prompt answer rc build_err
   work=$(mktemp -d) || return 1
   # shellcheck disable=SC2064
@@ -657,7 +676,9 @@ cmd_consult() {
       return 1
     }
   fi
-  if answer=$("$CONSULT_BIN" --prompt-file "$prompt" --mode "$stage" --thread "$thread" 2>"$work/stderr.txt"); then
+  local -a consult_args=(--prompt-file "$prompt" --mode "$stage" --thread "$thread")
+  [ -z "$project" ] || consult_args+=(--project "$project")
+  if answer=$("$CONSULT_BIN" "${consult_args[@]}" 2>"$work/stderr.txt"); then
     rc=0
   else
     rc=$?
@@ -667,6 +688,10 @@ cmd_consult() {
     cat "$work/stderr.txt" >&2
     return "$rc"
   fi
+  # A successful consult's stderr carries only the advisory project-routing
+  # fallback notice; forward it so the operator sees it without it ever
+  # affecting the answer on stdout or the exit status.
+  [ ! -s "$work/stderr.txt" ] || cat "$work/stderr.txt" >&2
   if [ "$stage" = audit ]; then
     local audit_text
     audit_text=$(printf '%s\n' "$answer" | strip_local_tools_banner)
@@ -1281,7 +1306,9 @@ bridge_pid_is_loop_instance() {
   local pid=$1 cmd dir
   [ -n "$pid" ] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
-  cmd=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+  # A wide COLUMNS keeps procps from truncating the command line at the
+  # screen width, which would hide the entrypoint for a long daemon path.
+  cmd=$(COLUMNS=10000 LC_ALL=C ps -p "$pid" -o command= 2>/dev/null) || return 1
   dir=$(bridge_daemon_dir)
   case "$cmd" in
     *"$dir/bin/codex-chatgpt-web"*|*"$dir/src/cli.ts"*) return 0 ;;

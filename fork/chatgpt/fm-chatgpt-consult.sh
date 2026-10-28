@@ -1,12 +1,25 @@
 #!/usr/bin/env bash
 # fm-chatgpt-consult.sh - Firstmate-owned ChatGPT consultation client.
 # Usage: fm-chatgpt-consult.sh --prompt-file FILE --mode audit|plan
-#          --thread THREAD-ID
+#          --thread THREAD-ID [--project NAME]
 #
 # Builds one openai-responses request from the prompt file, stamps it with the
 # Codex turn identity the local bridge requires (fork/chatgpt/fm-chatgpt-bridge-lib.sh
 # owns that contract), POSTs it to the already-running loopback bridge, and
 # prints ChatGPT's response text to stdout and nothing else.
+#
+# --project NAME is optional and names the repository this consultation is
+# about. When present (validated like the bridge's header contract:
+# ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, owned by the lib's
+# fm_chatgpt_project_name_valid)
+# the request additionally carries the header x-fm-chatgpt-project: NAME, so
+# the codex-chatgpt-web fork opens its ChatGPT chat inside that repository's
+# ChatGPT project. When absent, no project header is sent and the request is
+# byte-for-byte the upstream shape. Routing is advisory, never a gate: after a
+# successful turn whose routing outcome the bridge recorded as a fallback,
+# exactly one stderr notice (fm-chatgpt: project routing: fallback (<reason>))
+# is printed and the exit status stays 0 with stdout unchanged. The health
+# probe in the lib sends no project header.
 #
 # The --mode audit instructions inject fork/chatgpt/audit-brief-template
 # verbatim, so the generated audit prompt's shape
@@ -42,15 +55,16 @@ LIBDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$LIBDIR/fm-chatgpt-bridge-lib.sh"
 
 usage() {
-  printf 'usage: %s --prompt-file FILE --mode audit|plan --thread ID\n' "$(basename "$0")" >&2
+  printf 'usage: %s --prompt-file FILE --mode audit|plan --thread ID [--project NAME]\n' "$(basename "$0")" >&2
 }
 
-PROMPT_FILE="" MODE="" THREAD="" MODEL="$FM_CHATGPT_WEB_MODEL"
+PROMPT_FILE="" MODE="" THREAD="" PROJECT="" MODEL="$FM_CHATGPT_WEB_MODEL"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --prompt-file) PROMPT_FILE=${2:-}; shift 2 ;;
-    --mode) MODE=${2:-}; shift 2 ;;
-    --thread) THREAD=${2:-}; shift 2 ;;
+    --prompt-file) [ $# -ge 2 ] || { printf 'fm-chatgpt: %s needs a value\n' "$1" >&2; usage; exit 2; }; PROMPT_FILE=$2; shift 2 ;;
+    --mode) [ $# -ge 2 ] || { printf 'fm-chatgpt: %s needs a value\n' "$1" >&2; usage; exit 2; }; MODE=$2; shift 2 ;;
+    --thread) [ $# -ge 2 ] || { printf 'fm-chatgpt: %s needs a value\n' "$1" >&2; usage; exit 2; }; THREAD=$2; shift 2 ;;
+    --project) [ $# -ge 2 ] || { printf 'fm-chatgpt: %s needs a value\n' "$1" >&2; usage; exit 2; }; PROJECT=$2; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'fm-chatgpt: unknown argument %s\n' "$1" >&2; usage; exit 2 ;;
   esac
@@ -63,6 +77,13 @@ case "$MODE" in
   *) printf 'fm-chatgpt: --mode must be audit or plan\n' >&2; usage; exit 2 ;;
 esac
 [ -n "$THREAD" ] || { printf 'fm-chatgpt: --thread is required (Firstmate owns the turn-identity id)\n' >&2; usage; exit 2; }
+# An empty --project is absent by contract (no header); a non-empty one must
+# be a name the bridge's routing accepts, refused here before any bridge
+# contact rather than silently dropped by the bridge's HK1 validation.
+if [ -n "$PROJECT" ] && ! fm_chatgpt_project_name_valid "$PROJECT"; then
+  printf 'fm-chatgpt: refusing invalid --project name %s (need ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$)\n' "$PROJECT" >&2
+  exit 2
+fi
 command -v curl >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs curl\n' >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { printf 'fm-chatgpt: consultation needs jq\n' >&2; exit 1; }
 
@@ -134,9 +155,14 @@ jq -n --arg m "$MODEL" --arg n "$INSTRUCTIONS" --rawfile p "$PROMPT_FILE" \
   '{model: $m, instructions: $n, input: [{role: "user", content: $p}]}' > "$REQUEST" || exit 1
 fm_chatgpt_stamp_turn "$THREAD" "$REQUEST" >/dev/null || exit 1
 
+# The consult's start instant bounds which routing outcome is this turn's:
+# the bridge records fork-routes/<trace>.outcome.json during the turn, so an
+# outcome older than this consult can never be mistaken for its fallback.
+CONSULT_STARTED_AT_MS=$(($(date +%s) * 1000))
 HTTP=$(curl -s -o "$RESPONSE" -w '%{http_code}' -m 120 \
   -X POST "$BRIDGE_URL/responses" \
   -H 'content-type: application/json' \
+  ${PROJECT:+-H "x-fm-chatgpt-project: $PROJECT"} \
   --data-binary "@$REQUEST") || {
   printf 'fm-chatgpt: bridge unreachable at %s; start the codex-chatgpt-web bridge before consulting\n' "$BRIDGE_URL" >&2
   exit 1
@@ -169,4 +195,13 @@ TEXT=$(fm_chatgpt_response_text "$RESPONSE")
   printf 'fm-chatgpt: bridge returned no response text (HTTP %s)\n' "$HTTP" >&2
   exit 1
 }
+# Project routing is advisory: when a project was requested and the bridge
+# recorded this turn's routing as a fallback, say so once on stderr and keep
+# the answer on stdout with exit 0. An unreadable or absent outcome is silence.
+if [ -n "$PROJECT" ]; then
+  FALLBACK_REASON=$(fm_chatgpt_project_fallback_reason "$PROJECT" "$CONSULT_STARTED_AT_MS" 2>/dev/null) || FALLBACK_REASON=""
+  if [ -n "$FALLBACK_REASON" ]; then
+    printf 'fm-chatgpt: project routing: fallback (%s)\n' "$FALLBACK_REASON" >&2
+  fi
+fi
 printf '%s\n' "$TEXT"

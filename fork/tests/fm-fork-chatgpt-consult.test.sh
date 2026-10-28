@@ -22,23 +22,41 @@ export CHATGPT_WEB_BRIDGE_URL="http://127.0.0.1:$STUB_PORT/v1"
 export FM_HOME="$TMP_ROOT/home"
 mkdir -p "$FM_HOME"
 
-# start_stub <case-dir> [status] [kind]: serves one canned Responses payload
-# and records the request body at <case-dir>/request.json. kind is `ok` (a
+# start_stub <case-dir> [status] [kind] [routes-dir]: serves one canned
+# Responses payload and records the request body at <case-dir>/request.json
+# and the request headers at <case-dir>/headers.json. kind is `ok` (a
 # successful turn), `error200` (HTTP 200 carrying an error payload),
 # `reject200` (HTTP 200 carrying the incident-shaped transport-budget
-# rejection), or `garbage` (HTTP 200 carrying unparseable text); a non-200
-# status serves its error payload at that status. Prints the server pid.
+# rejection), `garbage` (HTTP 200 carrying unparseable text),
+# `fallback-route` (a successful turn whose bridge routing fell back,
+# writing a fresh fallback outcome into routes-dir like the real bridge does
+# mid-turn), `fallback-route-stale` (the same with a routing outcome older
+# than any consult), or `project-route` (a successful turn routed into the
+# project); a non-200 status serves its error payload at that status. Prints
+# the server pid.
 start_stub() {
-  local dir=$1 status=${2:-200} kind=${3:-ok}
+  local dir=$1 status=${2:-200} kind=${3:-ok} routes=${4:-}
   cat > "$dir/stub.py" <<PY
-import http.server, json, sys
+import http.server, json, sys, time
 d = "$dir"
 status = $status
 kind = "$kind"
+routes = "$routes"
 class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
         open(d + "/request.json", "wb").write(self.rfile.read(n))
+        open(d + "/headers.json", "w").write(json.dumps(
+            {k.lower(): v for k, v in self.headers.items()}))
+        if kind in ("fallback-route", "fallback-route-stale", "project-route"):
+            name = self.headers.get("x-fm-chatgpt-project") or "stub-repo"
+            at = int(time.time() * 1000)
+            if kind == "fallback-route-stale":
+                at -= 10 * 60 * 1000
+            outcome = {"project": name, "decision": "fallback", "reason": "unmapped", "at": at}
+            if kind == "project-route":
+                outcome = {"project": name, "decision": "project", "at": at}
+            open(routes + "/12hex0000000.outcome.json", "w").write(json.dumps(outcome))
         if kind == "garbage":
             body = b"not json"
             self.send_response(200)
@@ -202,6 +220,132 @@ test_consult_records_channel_evidence() {
   ( unset CHATGPT_WEB_BRIDGE_URL; FM_HOME="$home"; fm_chatgpt_bridge_configured ); rc=$?
   expect_code 0 "$rc" "a failed consult must still record channel evidence"
   pass "a consult records durable channel evidence so a later dead bridge is reported"
+}
+
+test_project_header_contract() {
+  local dir pid out rc routes
+  # No --project: the request carries no routing header, byte-for-byte the
+  # upstream shape.
+  dir="$TMP_ROOT/proj-none"; mkdir -p "$dir"
+  routes="$TMP_ROOT/proj-none-routes"; mkdir -p "$routes"
+  new_prompt
+  pid=$(start_stub "$dir")
+  out=$(FM_CHATGPT_ROUTES_DIR="$routes" bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-none 2>"$dir/stderr.txt"); rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "a consult without --project must succeed"
+  [ "$out" = "stubbed consultation answer" ] || fail "a headerless consult must print the answer, got: $out"
+  [ -z "$(jq -r '.["x-fm-chatgpt-project"] // empty' "$dir/headers.json")" ] \
+    || fail "a consult without --project must send no x-fm-chatgpt-project header"
+  [ ! -s "$dir/stderr.txt" ] || fail "a headerless consult must stay quiet on stderr, got: $(cat "$dir/stderr.txt")"
+  # With --project: the exact repository name rides the header and no
+  # outcome means no fallback notice.
+  dir="$TMP_ROOT/proj-set"; mkdir -p "$dir"
+  routes="$TMP_ROOT/proj-set-routes"; mkdir -p "$routes"
+  pid=$(start_stub "$dir")
+  out=$(FM_CHATGPT_ROUTES_DIR="$routes" bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-set --project expo-bowling-journal 2>"$dir/stderr.txt"); rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "a consult with --project must succeed"
+  [ "$out" = "stubbed consultation answer" ] || fail "a routed consult must print the answer, got: $out"
+  [ "$(jq -r '.["x-fm-chatgpt-project"]' "$dir/headers.json")" = "expo-bowling-journal" ] \
+    || fail "the header must carry the exact repository name, got: $(jq -r '.["x-fm-chatgpt-project"]' "$dir/headers.json")"
+  [ "$(jq -r '.model' "$dir/request.json")" = "chatgpt-web/gpt-5.6-luna" ] \
+    || fail "routing must not change the request model"
+  [ ! -s "$dir/stderr.txt" ] || fail "a routed consult with no fallback outcome must stay quiet, got: $(cat "$dir/stderr.txt")"
+  # An invalid name is refused before any bridge contact.
+  out=$(bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-bad --project '../etc/passwd' 2>&1); rc=$?
+  expect_code 2 "$rc" "an invalid --project name must refuse with exit 2"
+  assert_contains "$out" "refusing invalid --project" "the refusal must name the rejected value"
+  assert_contains "$out" "../etc/passwd" "the refusal must echo the invalid name"
+  pass "no --project sends no header, --project sends the exact name, invalid names refuse"
+}
+
+test_project_name_bounds_match_bridge() {
+  local dir pid out rc routes name64 name65
+  name64=$(printf 'a%.0s' $(seq 1 64))
+  name65=$(printf 'a%.0s' $(seq 1 65))
+  # 64 characters is the bridge's maximum and still rides the header.
+  dir="$TMP_ROOT/proj-max"; mkdir -p "$dir"
+  routes="$TMP_ROOT/proj-max-routes"; mkdir -p "$routes"
+  new_prompt
+  pid=$(start_stub "$dir")
+  out=$(FM_CHATGPT_ROUTES_DIR="$routes" bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-max --project "$name64" 2>"$dir/stderr.txt"); rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "a project name at the bridge's 64-character maximum must be accepted"
+  [ "$(jq -r '.["x-fm-chatgpt-project"]' "$dir/headers.json")" = "$name64" ] \
+    || fail "the header must carry the 64-character name unchanged"
+  # One character longer than the bridge accepts is refused before contact.
+  out=$(bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-long --project "$name65" 2>&1); rc=$?
+  expect_code 2 "$rc" "a project name one character past the bridge's bound must refuse with exit 2"
+  assert_contains "$out" "refusing invalid --project" "the refusal must name the rejected value"
+  assert_contains "$out" "$name65" "the refusal must echo the over-long name"
+  assert_contains "$out" "{0,63}" "the refusal must state the bridge's bounded pattern"
+  pass "project names are accepted up to the bridge's 64-character bound and refused beyond it"
+}
+
+test_valueless_options_refuse() {
+  local dir spec rc pid
+  dir="$TMP_ROOT/noval"; mkdir -p "$dir"
+  for spec in --prompt-file --mode --thread --project; do
+    bash "$CONSULT" "$spec" >"$dir/noval.out" 2>&1 &
+    pid=$!
+    for _ in $(seq 1 30); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      fail "a trailing valueless option must exit promptly instead of hanging: $spec"
+    fi
+    wait "$pid"; rc=$?
+    [ "$rc" -ne 0 ] || fail "a trailing valueless option must exit nonzero: $spec"
+    assert_contains "$(cat "$dir/noval.out")" "needs a value" "a trailing valueless option must name the missing value: $spec"
+  done
+  pass "a trailing valueless option refuses with a usage error instead of hanging"
+}
+
+test_project_fallback_notice_is_advisory() {
+  local dir pid out rc stderr routes
+  # The bridge recorded this turn's routing as a fallback: exactly one stderr
+  # notice, exit 0, stdout unchanged.
+  dir="$TMP_ROOT/proj-fallback"; mkdir -p "$dir"
+  routes="$TMP_ROOT/proj-fallback-routes"; mkdir -p "$routes"
+  new_prompt
+  pid=$(start_stub "$dir" 200 fallback-route "$routes")
+  out=$(FM_CHATGPT_ROUTES_DIR="$routes" bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-fb --project firstmate 2>"$dir/stderr.txt"); rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "a routing fallback must not fail the consultation"
+  [ "$out" = "stubbed consultation answer" ] || fail "a fallback must leave stdout unchanged, got: $out"
+  stderr=$(cat "$dir/stderr.txt")
+  [ "$stderr" = "fm-chatgpt: project routing: fallback (unmapped)" ] \
+    || fail "expected exactly one fallback notice, got: $stderr"
+  # A successful project route stays silent even with a project requested.
+  dir="$TMP_ROOT/proj-routed"; mkdir -p "$dir"
+  routes="$TMP_ROOT/proj-routed-routes"; mkdir -p "$routes"
+  pid=$(start_stub "$dir" 200 project-route "$routes")
+  out=$(FM_CHATGPT_ROUTES_DIR="$routes" bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-ok --project firstmate 2>"$dir/stderr.txt"); rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "a successful project route must succeed"
+  [ ! -s "$dir/stderr.txt" ] || fail "a successful project route must stay quiet, got: $(cat "$dir/stderr.txt")"
+  # A routing outcome older than this consult is never mistaken for its
+  # fallback, so repeated consults after one fallback do not keep reporting.
+  dir="$TMP_ROOT/proj-stale"; mkdir -p "$dir"
+  routes="$TMP_ROOT/proj-stale-routes"; mkdir -p "$routes"
+  pid=$(start_stub "$dir" 200 fallback-route-stale "$routes")
+  out=$(FM_CHATGPT_ROUTES_DIR="$routes" bash "$CONSULT" --prompt-file "$TMP_ROOT/prompt.txt" \
+    --mode audit --thread t-proj-stale --project firstmate 2>"$dir/stderr.txt"); rc=$?
+  stop_stub "$pid"
+  expect_code 0 "$rc" "a consult with only a stale fallback outcome must succeed"
+  [ "$out" = "stubbed consultation answer" ] || fail "a stale outcome must leave stdout unchanged, got: $out"
+  [ ! -s "$dir/stderr.txt" ] || fail "a stale outcome must not be reported as this turn's fallback, got: $(cat "$dir/stderr.txt")"
+  pass "a routing fallback prints one advisory stderr notice with exit 0 and unchanged stdout"
 }
 
 test_audit_template_missing_fails_closed() {
@@ -411,6 +555,10 @@ test_rejection_without_reported_size_invents_nothing() {
 }
 
 test_audit_template_missing_fails_closed
+test_project_header_contract
+test_project_name_bounds_match_bridge
+test_valueless_options_refuse
+test_project_fallback_notice_is_advisory
 test_audit_request_shape
 test_plan_request_shape
 test_plan_contract_missing_fails_closed
