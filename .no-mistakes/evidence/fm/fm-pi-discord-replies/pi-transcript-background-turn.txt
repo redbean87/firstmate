@@ -1,0 +1,7 @@
+{"type":"model_change","role":null,"customType":null}
+{"type":"thinking_level_change","role":null,"customType":null}
+{"type":"message","role":"system","customType":null}
+{"type":"message","role":"user","customType":null}
+{"type":"message","role":"assistant","customType":null}
+{"type":"custom_message","role":null,"customType":"fm-branch-process"}
+{"type":"message","role":"assistant","customType":null}

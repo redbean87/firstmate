@@ -1,0 +1,75 @@
+# Live Pi -> Discord parity lab (branch fm/fm-pi-discord-replies @ 3ff82388)
+# Real pi 1.4.0 CLI + real fork/discord/fm-pi-reply-mirror.ts + real fork/discord/fm-discord-bridge.py tick,
+# against a scripted Discord REST endpoint (fork/tests/discord-fake-curl). Throwaway lab: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T//fm-lab.u4VSWY
+# Removed in the same evidence turn after this log was written.
+
+== setup: disposable fixture primary checkout, fake Discord, isolated pi config
+primary git dirs: .git / .git
+spool ready: /var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.u4VSWY/primary/state/discord-bridge/pi-replies
+
+== A: real Pi primary answers a captain prompt -> spool event -> Discord post
+{
+  "schema": "firstmate.discord-reply-event.v1",
+  "seq": 1,
+  "captured_at": 1793217699,
+  "session_id": "2026-10-28T20-01-37-169Z_01a1841a-9591-7030-948c-76ac16f23860.jsonl",
+  "prompt_id": "",
+  "continuation": false,
+  "text_length": 17,
+  "text": "MAIN-PARITY-ALPHA"
+}
+--- Discord POSTs in the replies channel:
+{"content":"MAIN-PARITY-ALPHA","reply_to":null}
+OK A
+
+== B: a real background delivery (custom_message + triggerTurn followUp) reply reaches Discord fresh
+{"seq":2,"continuation":false,"text":"BG-TURN-ONE"}
+{"seq":3,"continuation":false,"text":"BG-REPLY-2"}
+--- real Pi transcript of that session (entry type / role / customType), last 8 entries:
+{"type":"model_change","role":null,"customType":null}
+{"type":"thinking_level_change","role":null,"customType":null}
+{"type":"message","role":"system","customType":null}
+{"type":"message","role":"user","customType":null}
+{"type":"message","role":"assistant","customType":null}
+{"type":"custom_message","role":null,"customType":"fm-branch-process"}
+{"type":"message","role":"assistant","customType":null}
+--- Discord POSTs in the replies channel:
+{"content":"MAIN-PARITY-ALPHA","reply_to":null}
+{"content":"BG-TURN-ONE","reply_to":null}
+{"content":"BG-REPLY-2","reply_to":null}
+OK B
+
+== C: reproduction - the SAME live background turn through the pre-fix extension is mislabelled a continuation
+pre-fix run recorded 2 events
+{"seq":4,"continuation":false,"text":"PREFIX-TURN-ONE"}
+{"seq":5,"continuation":true,"text":"BG-REPLY-2"}
+--- Discord POSTs in the replies channel:
+{"content":"MAIN-PARITY-ALPHA","reply_to":null}
+{"content":"BG-TURN-ONE","reply_to":null}
+{"content":"BG-REPLY-2","reply_to":null}
+{"content":"PREFIX-TURN-ONE","reply_to":null}
+{"content":"(continued)\nBG-REPLY-2","reply_to":null}
+pre-fix background reply continuation flag: true
+REPRODUCED: pre-fix extension marks the same live background turn as a continuation and the bridge posts it natively attached to the captain's earlier message
+OK C
+
+== D: adversarial - a linked worktree checkout writes nothing even with a valid home and lock
+linked worktree git dirs: /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.u4VSWY/wtroot/.git/worktrees/linked / /private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.u4VSWY/wtroot/.git
+linked worktree has AGENTS.md and bin/: yes yes
+control (primary checkout) events recorded: 1
+spool events before/after linked-worktree run: 0/0
+OK D
+
+== E: adversarial - a foreign lock holder writes nothing
+spool events before/after foreign-lock run: 0/0 (state/.lock=1)
+OK E
+
+== F: adversarial - inert in a home whose bridge never created pi-replies/
+files under any discord-bridge path in the bridge-less home: 0
+OK F
+
+== G: adversarial - resuming the same session replays no old reply and mislabels no continuation
+{"seq":7,"continuation":false,"text":"RESUMED-REPLY"}
+--- new Discord POSTs:
+{"content":"RESUMED-REPLY","reply_to":null}
+OK G

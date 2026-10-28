@@ -1,0 +1,27 @@
+ok - parity: background-only transcripts never mislabel a later background turn as a continuation
+ok - bridge: Pi spool events deliver in both mirror and hook mode, once, without touching the host mirror or the hook spool
+ok - configuration: missing, shared, or malformed channels, operations as a command channel, and a missing owner refuse before anything runs
+ok - continuation: a second settle of one turn is marked (continued), a new user message starts fresh
+fork/tests/discord-lib.sh: line 73: 99102 Killed: 9                  $runner FM_HOME="$W_HOME" PATH="$D_FAKEBIN:$PATH" FAKE_DISCORD_DIR="$W_FAKE" FM_DISCORD_BRIDGE_QUIET=1 DISCORD_ENV_FILE="$W_HOME/.env-absent" DISCORD_BOT_TOKEN="$D_TOKEN" DISCORD_GUILD_ID="$D_GUILD" DISCORD_OWNER_USER_ID="$D_OWNER" DISCORD_COMMAND_CHANNEL_IDS="$D_CMD" DISCORD_REPLIES_CHANNEL_ID="$W_REPLIES" DISCORD_OPERATIONS_CHANNEL_ID="$D_OPS" DISCORD_API_BASE="https://discord.test/api/v10" ${D_EXTRA_ENV[@]+"${D_EXTRA_ENV[@]}"} "$@"
+ok - restart: a crash after Discord accepted a chunk resends only that chunk with the same nonce, then finishes
+ok - transport: every case posts only through the fake REST log; the fake host is pinned and no gateway runs
+ok - gates: no lock, a foreign lock holder, and a linked worktree all refuse spool writes; the primary session records
+ok - reply hook: complete 6392-character reply delivered in order; only the session's Stop events; continuation marked; hook silent and exit 0
+ok - reply hook: inert unless the bridge runs in hook mode
+ok - install-hook: preserves existing settings, keeps a copy, is idempotent, refuses invalid JSON, uninstalls only its own hook
+ok - quarantine: malformed Pi events move to failed/ with the pi-spool- prefix; the valid event still delivers
+ok - ledger: decision, blocker, failure, completion, PR ready, and merges reach operations once; duplicates and malformed records are safe
+ok - ledger rate limit: notices over the window cap are held back, logged, and summarized once with counts, tasks, and an owner mention
+ok - mirror gap: entries that left the mirror unread are counted, never claimed delivered
+ok - mirror replies: first start skips history, long replies split in order at line boundaries, replies channel only, sent once
+ok - mirror fallback: a reply over the mirror's cap is delivered with an explicit shortened notice
+ok - parity: operational-wake and custom_message background replies are recorded and delivered fresh, unfiltered
+ok - permanent errors: kept in failed/, reported without the body, later messages continue, no futile retries
+ok - interleave: Pi and mirror sources deliver once each in per-source order; replay is suppressed by the durable outbox; the mirror cursor is untouched
+ok - restart: a spool held by a full outbox survives, drains in order after capacity returns, and is never double-sent
+ok - lifecycle: a prompt persisted before a restart does not make the resumed generation's first reply a continuation
+ok - retry: 429 waits Retry-After, 5xx and transport failures back off, same nonce, delivered once
+ok - lifecycle: session_start re-derives state; a restored transcript is never replayed and stale continuation anchors do not survive
+ok - extraction: only the settled final assistant text records, full length, one event per settle, toolCall-only/blank/aborted skipped, custom entries ignored, long replies capped with original text_length, no host-mirror write
+ok - bounded retries: transient failures stop after DISCORD_MAX_ATTEMPTS, are kept in failed/, and reported once
+ok - health: a stale watcher alerts once in operations, then one recovery notice
