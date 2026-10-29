@@ -118,6 +118,10 @@ test_a_green_pull_request_at_the_recorded_head_is_ready() {
   entry="$dir/entry.json"; entry_json green-task "$HEAD_A" > "$entry"
   reset_calls "$dir"
   assert_ready "$dir" "$entry" "$HEAD_A" "a green pull request at the recorded head is ready"
+  assert_contains "$DECISION" "Every reported check is green at that head." \
+    "the advisory body says the reported checks are green at the head it names"
+  assert_contains "$DECISION" "The single required check has reported at that head." \
+    "the advisory body names the one required check it counted, in a sentence that reads"
   [ "$(calls "$dir")" = 3 ] || fail "a ready pull request costs the pull read, the branch read, and the rules read: $(cat "$dir/forge/calls.log")"
   assert_contains "$(cat "$dir/forge/calls.log")" "pr view $PR_URL --json state,isDraft,headRefOid,baseRefName,statusCheckRollup" \
     "the pull read keeps the live state, draft flag, head, base, and rollup fields"
@@ -314,6 +318,10 @@ test_a_green_rollup_with_an_unreadable_required_source_stays_silent() {
 
   printf '%s\n' '[[{"type": "deletion"}]]' > "$dir/forge/rules.json"
   assert_ready "$dir" "$entry" "$HEAD_A" "an active ruleset that requires no check still leaves a fully reported green pull request ready"
+  assert_contains "$DECISION" "Every reported check is green at that head." \
+    "the zero-required advisory body says the reported checks are green at the head it names"
+  assert_contains "$DECISION" "No branch rule requires a check at this base branch." \
+    "the zero-required advisory body states plainly that no branch rule requires a check"
 
   pass "required sources: a green rollup beside any unreadable, incomplete, or ambiguous required-context source is silence, never green"
 }

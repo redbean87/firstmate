@@ -538,10 +538,12 @@ function evaluate(entry, ctx) {
 // advisoryBody <entry> <verdict> -> bounded advisory text
 function advisoryBody(entry, verdict) {
   const scope = verdict.required === 0
-    ? "no branch rule requires a check here"
-    : `all ${verdict.required} required check${verdict.required === 1 ? "" : "s"}`;
+    ? "No branch rule requires a check at this base branch."
+    : verdict.required === 1
+      ? "The single required check has reported at that head."
+      : `All ${verdict.required} required checks have reported at that head.`;
   return `PR READINESS (advisory): ${entry.id} ${entry.pr} at head ${verdict.head}. `
-    + `Every reported check is green at that head and ${scope} reported there. `
+    + `Every reported check is green at that head. ${scope} `
     + "This is advisory evidence to look at the pull request, not an approval, a merge, or authority to merge; "
     + "the merge step re-reads every requirement itself.";
 }
