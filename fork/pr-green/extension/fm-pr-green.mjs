@@ -49,6 +49,7 @@ const EXTENSION_VERSION = "0.1.0";
 const MAX_INPUT_BYTES = 65536;
 const MAX_OUTPUT_BYTES = 30000;
 const MAX_RECORD_BYTES = 65536;
+const ERROR_EVIDENCE_SCHEMA = "firstmate.process-event-extension-error.v1";
 const DEFAULT_WAIT_MS = 50000;
 const RESCAN_MS = 5000;
 const CONFIG_REF_PREFIX = "home:";
@@ -288,6 +289,22 @@ function scanHome(dirs) {
   return { entries, refused };
 }
 
+// classifyResult <content> -> "pr-ready-advisory" | "pr-ready-error"
+//
+// Core captures this source's host failure evidence under the same adapter, so
+// only a body that is not that evidence may be labelled readiness advice.
+function classifyResult(content) {
+  if (typeof content !== "string") return "pr-ready-error";
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return "pr-ready-advisory";
+  }
+  const failure = parsed !== null && typeof parsed === "object" && parsed.schema === ERROR_EVIDENCE_SCHEMA;
+  return failure ? "pr-ready-error" : "pr-ready-advisory";
+}
+
 async function poll(request) {
   const dirs = homeDirs(request.input?.config_ref);
   const deadline = Date.now() + waitMs(dirs);
@@ -347,7 +364,7 @@ if (verb === "handshake") {
     }
   }
 } else if (verb === "invoke" && request.operation === "result.classify") {
-  respond(request.request_id, { classification: "pr-ready-advisory" });
+  respond(request.request_id, { classification: classifyResult(request.input?.content) });
 } else if (verb === "invoke" && request.operation === "result.terminal") {
   // The source never concludes itself: it keeps listening for the next pull
   // request, and a wake is acknowledged with `fm-procevent.sh handled`.

@@ -172,8 +172,10 @@ The path is the one the fork tests already drive with a stub seam:
   check: procevent pr-green pr-green <sequence>
 
   classify    bin/fm-procevent.sh classify <result-file> prints
-              pr-ready-advisory, so the record is recognisable as advisory
-              readiness evidence rather than a merge or an approval.
+              pr-ready-advisory for a readiness body and pr-ready-error for a
+              host failure record, so a failed read is never presented as
+              readiness evidence and readiness evidence is never read as a
+              merge or an approval.
   terminal    no. The source never concludes itself, so it keeps listening for
               the next pull request.
   silent      no. An unhandled readiness result is re-announced until firstmate

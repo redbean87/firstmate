@@ -7,8 +7,8 @@
 //
 // decideWake(entry, ctx)
 //   entry  one armed task that already passed the adapter's eligibility gate:
-//          {id, pr, host, owner, repo, path, number, head, mode, yolo, kind,
-//           meta}. Only GitHub pull requests reach this function; GitLab,
+//          {id, pr, host, owner, repo, number, head, mode, yolo, kind, meta}.
+//          Only GitHub pull requests reach this function; GitLab,
 //          Forgejo, Gerrit, local-only, yolo=off, and secondmate records are
 //          refused before the call, so a change to this module cannot widen
 //          which tasks can wake firstmate.
@@ -40,11 +40,13 @@
 //                pull request URL, and the head it is talking about, and it
 //                says plainly that it is advisory evidence - never an approval,
 //                a merge, or authority to merge.
-//   Errors       returning null is silence and is always safe. A malformed or
-//                oversized body is treated as silence by the adapter. A throw
-//                is NOT silence: the adapter answers with an unavailable error,
-//                which core captures as an actionable adapter-failure record.
-//                Either way no failure path can ever be read as green.
+//   Errors       returning null is silence and is always safe. The adapter
+//                treats an empty, non-string, or oversized body as silence,
+//                so every body must be a bounded string that survives JSON
+//                encoding. A throw is NOT silence: the adapter answers with an
+//                unavailable error, which core captures as an actionable
+//                adapter-failure record. Either way no failure path can ever be
+//                read as green.
 //
 // Nothing in this module, before or after a later slice fills it in, may merge,
 // arm a merge, write a task record, or record approval or merge authority.

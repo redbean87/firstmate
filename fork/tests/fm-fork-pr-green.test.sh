@@ -170,13 +170,13 @@ test_a_malformed_or_unusable_config_ref_is_an_error_not_a_wake() {
   pass "config_ref: a malformed, traversing, or unusable reference answers with an error code and never a wake"
 }
 
-# install_package <home> <package-copy>: bind the copy and register the source
-# through the real host and runner; sets PKG_TOKEN.
+# install_package <home> <package-copy> [config-ref]: bind the copy and register
+# the source through the real host and runner; sets PKG_TOKEN.
 install_package() {
-  local home=$1 pkg=$2 reg
+  local home=$1 pkg=$2 ref=${3:-} reg
   FM_HOME="$home" "$EXT_HOST" bind "$pkg" --adapter pr-green --trust-same-user-code --consent task-metadata >/dev/null \
     || fail "the real extension host must bind the package"
-  reg=$(FM_HOME="$home" "$PROCEVENT" register-extension pr-green pr-green --config-ref "home:$home") \
+  reg=$(FM_HOME="$home" "$PROCEVENT" register-extension pr-green pr-green --config-ref "${ref:-home:$home}") \
     || fail "registration failed"
   PKG_TOKEN=$(printf '%s\n' "$reg" | sed -n 's/^owner-token: //p')
   [ -n "$PKG_TOKEN" ] || fail "registration must print its owner token"
@@ -257,6 +257,25 @@ JS
   FM_HOME="$home" "$PROCEVENT" retire pr-green --if-owner "$token" >/dev/null 2>&1
   assert_absent "$home/state/procevent/pr-green.source" "the owner token retires the registration"
   pass "delivery: the real binding, registration, capture, wake, re-announcement, and acknowledgement path carries one advisory readiness event and records no authority"
+}
+
+test_a_failed_read_is_classified_as_error_evidence() {
+  local home pkg other result out
+  home="$PTMP/classify/home"
+  p_home "$home"
+  other="$PTMP/classify/unusable-home"
+  mkdir -p "$other"
+  pkg="$PTMP/classify/packages/pr-green"
+  mkdir -p "$(dirname "$pkg")"
+  cp -R "$PKG_SRC" "$pkg"
+  install_package "$home" "$pkg" "home:$other"
+  run_source_once_until_result "$home" || fail "the runner captured no evidence for a read it cannot perform"
+  result=$(result_files "$home" | head -1)
+  assert_contains "$(cat "$result")" '"schema":"firstmate.process-event-extension-error.v1"' \
+    "a failed readiness read is captured as host failure evidence"
+  out=$(FM_HOME="$home" "$PROCEVENT" classify "$result") || fail "classifying captured failure evidence failed"
+  [ "$out" = pr-ready-error ] || fail "a failed readiness read must not classify as readiness advice: $out"
+  pass "classification: captured failure evidence is labelled pr-ready-error, and pr-ready-advisory is reserved for a readiness body"
 }
 
 test_the_shipped_package_listens_and_stays_silent() {
