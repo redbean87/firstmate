@@ -23,6 +23,19 @@
 # non-zero exit (including a missing or unexecutable script) as a refusal.
 #
 # Policies, enabled by name in config/fork-policies (one per line, # comments):
+#   brief-intake  ship and scout briefs must carry this fork's three intake
+#                 markers before any launch, fresh or relaunch, so a brief
+#                 cannot silently leave firstmate's hands with one of the
+#                 three defects the 2026-10-29 post-mortem cost review rounds
+#                 on: slice scope as 'Delivers:' and 'Defers:' lines, the
+#                 project's check set named on a 'Checks:' line, and - when
+#                 the brief carries two or more 'Bound:' lines stating
+#                 bounded promises - a 'Composition:' line stating how they
+#                 compose. The refusal names every missing element with the
+#                 exact line to add (fork/bin/fm-brief-intake-check owns the
+#                 markers; fork/brief-intake-note states what firstmate must
+#                 supply). A secondmate charter is not a task brief and is
+#                 never checked; a missing brief is upstream's own refusal.
 #   consult-gate  ship/scout launches need a stored ChatGPT stage prompt
 #                 (data/<id>/chatgpt-loop.json) or a local recorded waiver
 #                 (data/<id>/fork-consult-waiver.json, origin "local"); a
@@ -73,7 +86,7 @@ POLICY_FILE="$CONFIG/fork-policies"
 POLICIES=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$POLICY_FILE" | grep -v '^$') || true
 [ -n "$POLICIES" ] || unusable "config/fork-policies enables no policy; delete the file to disable fork policy"
 while IFS= read -r policy; do
-  case "$policy" in consult-gate|project-pin|resource|claude-subscription) ;; *) unusable "config/fork-policies names unknown policy '$policy'" ;; esac
+  case "$policy" in brief-intake|consult-gate|project-pin|resource|claude-subscription) ;; *) unusable "config/fork-policies names unknown policy '$policy'" ;; esac
 done <<EOF
 $POLICIES
 EOF
@@ -133,6 +146,26 @@ consult_grant() {
     || refuse "its launch grant is not the current one for that loop's plan task (closed breakdown, other worker or attempt, or task not being dispatched)"
   json_ok "$lp" '.phase == "plan-worker"' || refuse "its launch grant's loop $l is not running its plan"
   [ "$(plan_sha "$lp")" = "$(jq -r '.plan_sha256' "$grant")" ] || refuse "loop $l's plan changed since its launch grant was issued"
+}
+
+# brief-intake. Judge the written brief before anything else runs, so a
+# defective brief refuses without any other policy's side effects (no
+# reservation, no account probe). Ship and scout only: a secondmate charter
+# is a standing contract rather than a slice brief. A missing brief is not
+# ours to refuse - bin/fm-spawn.sh's brief check follows this hook and prints
+# its own message.
+policy_brief_intake() {
+  local brief detail rc
+  [ "$FM_LP_KIND" = secondmate ] && return 0
+  brief="$FM_LP_DATA/$FM_LP_TASK/brief.md"
+  [ -f "$brief" ] || return 0
+  detail=$("$FORK_ROOT/fork/bin/fm-brief-intake-check" "$brief")
+  rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) refuse "$detail" ;;
+    *) unusable "${detail:-brief intake check failed to run (exit $rc)}" ;;
+  esac
 }
 
 policy_consult_gate() {
@@ -510,6 +543,7 @@ $matching
 EOF
 }
 
+enabled brief-intake && policy_brief_intake
 enabled consult-gate && policy_consult_gate
 enabled project-pin && policy_project_pin
 enabled claude-subscription && policy_claude_subscription
