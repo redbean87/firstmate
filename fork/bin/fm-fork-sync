@@ -97,8 +97,8 @@ cmd_lint() {
   [ "${1:-}" = --root ] && root=$(cd "${2:?--root needs a path}" && pwd)
   command -v shellcheck >/dev/null 2>&1 || die "shellcheck is not installed (bin/fm-install-shellcheck.sh)"
   (cd "$root" && shellcheck -x fork/bin/fm-launch-policy fork/bin/fm-fork-hook-check fork/bin/fm-fork-sync \
-    fork/bin/fm-discord-release fork/chatgpt/*.sh fork/discord/*.sh fork/discord/fm-discord-service \
-    fork/tests/run fork/tests/*.sh) || rc=1
+    fork/bin/fm-discord-release fork/bin/fm-pr-green-teardown fork/chatgpt/*.sh fork/discord/*.sh \
+    fork/discord/fm-discord-service fork/tests/run fork/tests/*.sh) || rc=1
   (cd "$root" && shellcheck -x -S warning bin/fm-spawn.sh bin/fm-control.sh) || rc=1
   [ "$rc" -eq 0 ] && echo "ok: lint"
   return "$rc"

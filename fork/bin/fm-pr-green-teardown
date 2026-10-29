@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# fm-pr-green-teardown - the fork-owned teardown path for PR readiness state.
+#
+# Usage:
+#   fm-pr-green-teardown --home <home> [--task <id> | --all] [--dry-run]
+#
+# The PR readiness wake (fork/pr-green) keeps one latch marker per task at
+# <home>/state/<id>.pr-green-ready, so one green pull request head wakes Firstmate
+# once instead of once per poll. That marker belongs to the fork, and upstream's
+# bin/fm-teardown.sh - which the fork never edits - knows nothing about it, so the
+# fork owns dropping it. There are two paths, and this is the explicit one:
+#
+#   - the registered source prunes markers by itself on every poll: a marker whose
+#     task record no longer names the same pull request, head, and worker
+#     incarnation is removed, so an ordinary task teardown cleans up without help;
+#   - this script is the explicit path, for a home whose source is being retired,
+#     for a task whose record is gone but whose marker is not, and for an operator
+#     who wants to see or clear that state deliberately.
+#
+# Default scope (no --task, no --all): prune every marker this home's own task
+# records no longer account for - the same rule the source applies - so a routine
+# call is always safe. --task removes exactly one task's marker. --all removes
+# every readiness marker in the home.
+#
+# It only ever touches files named <state>/<id>.pr-green-ready for a path-safe task
+# id, and only when each is a plain regular file. Task records, merge-notification
+# markers (<id>.pr-poll-merge-notified), merge authority records, and everything
+# else in the state directory are read-only to this script: nothing else is
+# removed or rewritten. It never merges, answers a finding, or writes a task
+# record. --dry-run prints what would be removed and removes nothing.
+#
+# Exit: 0 done, 2 usage, 1 refused (an unusable home, or a marker this script must
+# not remove).
+set -u
+
+usage() {
+  sed -n '4,5p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+die() {
+  printf 'fm-pr-green-teardown: %s\n' "$*" >&2
+  exit 1
+}
+
+# task_id_path_safe <id>: upstream's own task-id path-safety rule
+# (bin/fm-pr-lib.sh fm_task_id_path_safe), plus upstream's 64-character creation
+# bound, so this script can never be pointed at a path outside the state directory.
+task_id_path_safe() {
+  local id=${1-}
+  local LC_ALL=C
+  case "$id" in
+    ''|.*|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  [ "${#id}" -le 64 ]
+}
+
+MARKER_SUFFIX='.pr-green-ready'
+MARKER_VERSION='fm-fork-pr-green-ready-v1'
+TASK_ID=
+SCOPE=prune
+DRY_RUN=0
+HOME_DIR=
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --home) [ "$#" -ge 2 ] || usage; HOME_DIR=$2; shift 2 ;;
+    --task) [ "$#" -ge 2 ] || usage; TASK_ID=$2; SCOPE=task; shift 2 ;;
+    --all) SCOPE=all; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) usage ;;
+    *) usage ;;
+  esac
+done
+
+[ -n "$HOME_DIR" ] || usage
+case "$HOME_DIR" in
+  /?*) ;;
+  *) usage ;;
+esac
+if [ "$SCOPE" = task ]; then
+  task_id_path_safe "$TASK_ID" || die "task id must be path-safe: $TASK_ID"
+fi
+
+[ -d "$HOME_DIR" ] && [ ! -L "$HOME_DIR" ] || die "home is not a usable directory: $HOME_DIR"
+STATE="$HOME_DIR/state"
+if [ ! -d "$STATE" ] || [ -L "$STATE" ]; then
+  if [ -e "$STATE" ] || [ -L "$STATE" ]; then
+    die "state is not a usable directory: $STATE"
+  fi
+  printf 'fm-pr-green-teardown: no readiness state (%s has no state directory)\n' "$HOME_DIR"
+  exit 0
+fi
+
+# marker_identity <marker> -> incarnation, pull request URL, and head, one per line
+#
+# The marker fields this teardown needs to decide whether the home's own record
+# still accounts for it. Anything that is not the fixed-arity record this fork
+# writes answers non-zero, which the prune scope treats as removable: a homemade
+# or truncated file in this fork's own namespace can never suppress a wake anyway.
+marker_identity() {
+  local marker=$1 version id incarnation provider host repo_path number head
+  [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  {
+    IFS= read -r version || return 1
+    IFS= read -r id || return 1
+    IFS= read -r incarnation || return 1
+    IFS= read -r provider || return 1
+    IFS= read -r host || return 1
+    IFS= read -r repo_path || return 1
+    IFS= read -r number || return 1
+    IFS= read -r head || return 1
+    IFS= read -r _request || return 1
+    IFS= read -r _established || return 1
+    if IFS= read -r _extra; then return 1; fi
+  } < "$marker" 2>/dev/null || return 1
+  [ "$version" = "$MARKER_VERSION" ] || return 1
+  [ "$provider" = github ] || return 1
+  printf '%s\n%s\n%s\n' "$incarnation" "https://$host/$repo_path/pull/$number" "$head"
+}
+
+# record_accounts <id> <incarnation> <pr> <head>: does this home's own task record
+# still name the same worker incarnation, pull request, and head? A record that is
+# absent, unreadable, duplicated, or different answers non-zero, which is the
+# direction that never suppresses a wake.
+record_accounts() {
+  local id=$1 incarnation=$2 pr=$3 head=$4 record line key value
+  record="$STATE/$id.meta"
+  [ -f "$record" ] && [ ! -L "$record" ] || return 1
+  local spawn_gen='' seen_spawn=0 record_pr='' record_head=''
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      *=*) ;;
+      *) return 1 ;;
+    esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+      spawn_gen)
+        [ "$seen_spawn" -eq 0 ] || return 1
+        seen_spawn=1
+        spawn_gen=$value ;;
+      pr) record_pr=$value ;;
+      pr_head) record_head=$value ;;
+      *) ;;
+    esac
+  done < "$record"
+  [ "$spawn_gen" = "$incarnation" ] && [ "$record_pr" = "$pr" ] && [ "$record_head" = "$head" ]
+}
+
+# candidates -> marker paths this invocation may remove, one per line.
+candidates() {
+  local marker id identity incarnation pr head
+  if [ "$SCOPE" = task ]; then
+    printf '%s\n' "$STATE/$TASK_ID$MARKER_SUFFIX"
+    return 0
+  fi
+  for marker in "$STATE"/*"$MARKER_SUFFIX"; do
+    [ -e "$marker" ] || [ -L "$marker" ] || continue
+    id=${marker##*/}
+    id=${id%"$MARKER_SUFFIX"}
+    task_id_path_safe "$id" || continue
+    if [ "$SCOPE" = all ]; then
+      printf '%s\n' "$marker"
+      continue
+    fi
+    identity=$(marker_identity "$marker") || identity=''
+    if [ -n "$identity" ]; then
+      incarnation=$(printf '%s\n' "$identity" | sed -n 1p)
+      pr=$(printf '%s\n' "$identity" | sed -n 2p)
+      head=$(printf '%s\n' "$identity" | sed -n 3p)
+      if record_accounts "$id" "$incarnation" "$pr" "$head"; then continue; fi
+    fi
+    printf '%s\n' "$marker"
+  done
+}
+
+removed=0
+while IFS= read -r marker; do
+  [ -n "$marker" ] || continue
+  [ -e "$marker" ] || [ -L "$marker" ] || continue
+  { [ -f "$marker" ] && [ ! -L "$marker" ]; } \
+    || die "refusing to remove a marker that is not a plain regular file: $marker"
+  if [ "$DRY_RUN" = 1 ]; then
+    printf 'would remove %s\n' "$marker"
+  else
+    rm -f -- "$marker" || die "cannot remove $marker"
+    printf 'removed %s\n' "$marker"
+  fi
+  removed=$((removed + 1))
+done < <(candidates)
+
+if [ "$DRY_RUN" = 1 ]; then
+  printf 'fm-pr-green-teardown: would remove %s readiness marker(s)\n' "$removed"
+else
+  printf 'fm-pr-green-teardown: removed %s readiness marker(s)\n' "$removed"
+fi

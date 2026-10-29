@@ -1,19 +1,20 @@
 Firstmate fork: PR readiness wake
 =================================
 
-Registers the fork-owned source that will wake Firstmate when a pull request it
-may merge on its own authority has finished: every required check reported green
-at the recorded head. That wake is the capability that closes the gap where a
-green pull request waits for the next heartbeat or for the captain to notice it.
+Registers the fork-owned source that wakes Firstmate when a pull request it may
+merge on its own authority has finished: every required check reported green at
+the recorded head. That wake is the capability that closes the gap where a green
+pull request waits for the next heartbeat or for the captain to notice it.
 
 Slice T1 shipped the adapter and its registration contract with an empty
-readiness seam. This slice (T2) fills that seam with the conservative readiness
+readiness seam. Slice T2 filled that seam with the conservative readiness
 predicate described below, so an eligible pull request whose every unwaived
-required check has reported green at its recorded head now produces the advisory
-wake. The one-shot per-head latch is still owed by a later slice, so a pull
-request that keeps looking ready is announced again by every poll:
-acknowledging a result settles that one sequence, and the next poll captures a
-new one ("Event delivery and acknowledgement").
+required check has reported green at its recorded head produces the advisory
+wake. Slice T3 gave that wake memory: the same seam keeps one readiness latch
+marker per task, so a pull request that stays open and green wakes Firstmate
+once per head instead of once per poll, a changed head re-arms, and an
+interrupted marker write can only ever repeat a wake - never swallow one
+("One wake per head: the latch").
 
 It is fork-owned. Everything lives under fork/pr-green/, upstream code stays
 byte-identical, and it reaches Firstmate through the same documented
@@ -99,7 +100,12 @@ Files
                                       and the protocol verbs.
   extension/readiness.mjs             the readiness seam. It is the whole of
                                       the adapter's judgment: the readiness
-                                      predicate and the advisory body.
+                                      predicate, the readiness latch and its
+                                      marker, and the advisory body.
+  fork/bin/fm-pr-green-teardown       the fork-owned teardown path for readiness
+                                      state: prune, drop one task's marker, or
+                                      drop a whole home's markers, never touching
+                                      a task record or merge-notification state.
   fork/tests/pr-green-fake-gh         the fixture GitHub CLI the fork tests serve
                                       recorded answers from; it never contacts a
                                       forge.
@@ -124,6 +130,17 @@ Files
                                       producer-app binding, the read budget, and
                                       the read cost of each case, all against the
                                       fixture CLI.
+  fork/tests/fm-fork-pr-green-latch.test.sh
+                                      the latch's own suite: two consults of one
+                                      head producing one wake, a changed head
+                                      re-arming, an unpublished marker and an
+                                      uncaptured wake both still delivering,
+                                      identity isolation across tasks, pull
+                                      requests, heads, and worker incarnations,
+                                      the posture re-read before delivery,
+                                      independence from merge notification, poll
+                                      pruning, the teardown path, and the whole
+                                      promise through the real host and runner.
 
 
 The readiness seam
@@ -136,8 +153,10 @@ part of the package can quietly acquire an opinion about a pull request:
 
   entry is one task that already passed the scope gate above, with its validated
   pull request identity and its recorded head - the state/<id>.meta pr_head= the
-  gate already validated. ctx is built once per poll and carries the absolute
-  home, state, and config paths, the poll's clock, a stderr logger, and
+  gate already validated - and the path to that record, which must be exactly
+  <state>/<id>.meta. ctx is built once per poll and carries the absolute home,
+  state, and config paths, the poll's clock, the host's own request id for this
+  poll (see "One wake per head: the latch"), a stderr logger, and
   evaluateCount: how many entries that poll offers the seam, which is what the
   poll's one read budget is split across.
 
@@ -177,9 +196,71 @@ The predicate re-expresses only what an advisory verdict needs, from the
 semantics bin/fm-pr-merge.sh documents. It never calls the merge command and
 never writes a task record, so a divergence can cost a wasted wake or a missed
 one and never a bad merge. extension/readiness.mjs's header is the single owner
-of the contract, including the failure directions a later slice still owes: the
-per-head latch, and an interrupted latch write that fails toward one possible
-duplicate wake rather than a permanently suppressed one.
+of that contract, including the latch below and the failure directions it
+chooses.
+
+
+One wake per head: the latch
+----------------------------
+
+The seam also remembers what it has already announced. For every wake it is
+about to return it publishes one marker, and it consults that marker before any
+forge read:
+
+  marker     <home>/state/<id>.pr-green-ready - one per task, 0600, a fixed
+             ten-line record: the version line fm-fork-pr-green-ready-v1, then
+             task id, the task record's own spawn_gen= incarnation, provider,
+             host, owner/repo, pull number, head, the host request id that
+             produced the wake, and the epoch second it was published. It is
+             published atomically (temp file in the same directory, fsynced,
+             renamed over the marker, directory fsynced, read back through the
+             same reader the next poll uses).
+  suppresses only when every field matches the task's current canonical identity
+             - task id, provider, host, owner/repo, pull number, and the
+             state/<id>.meta pr_head= it compares against - and its incarnation
+             equals the CURRENT state/<id>.meta spawn_gen=. A changed head, a
+             re-pointed pull request, and a replacement worker (upstream mints a
+             new spawn_gen= for every spawn and relaunch) all re-arm instead.
+  posture    mode, yolo, kind, the pull request, and the head are re-read from
+             state/<id>.meta AFTER the forge reads and immediately before
+             delivery, so a yolo=off edit or a re-point during those reads never
+             authorizes a wake. A record that is missing, duplicated, or cannot
+             prove its own incarnation is silence.
+
+Three guarantees meet here, and the order between them is deliberate:
+
+  AT MOST ONE  in normal operation one task, pull request, and head wake once.
+               A later consult of that head is answered with silence and costs no
+               forge read at all.
+  AT LEAST ONE a head that is genuinely ready is never suppressed. Two things
+               guarantee it, and both fail toward a duplicate instead. (1) A
+               marker write that fails or is interrupted leaves no valid marker,
+               so the next poll simply answers again. (2) The marker records the
+               host request id that produced its wake, and core derives that id
+               from the next UNCAPTURED result sequence - unchanged while a wake
+               has not been captured, new once it has been. A retry after a crash
+               between answering and capture therefore arrives with the same id
+               as the marker and is answered again, while an ordinary later poll
+               arrives with a different id and is silent.
+  RE-ARM       a new head, a new pull request, or a new worker incarnation is a
+               new question and wakes again.
+
+Latch state is deliberately independent of merging. It is a separate file from
+upstream's merge-notification marker (<state>/<id>.pr-poll-merge-notified) and
+from every merge record, in both directions: neither marker suppresses, rewrites,
+or removes the other, and a readiness wake never records approval or merge
+authority. The readiness promise is never carried by wake-queue deduplication
+either - it is this marker, in this seam, or nothing.
+
+Cleanup has two owners. The adapter prunes on every poll: a marker is dropped
+unless this home's own task record still names the same pull request, head, and
+incarnation, so a torn-down task, a re-pointed task, and a replaced worker leave
+nothing behind and no marker can suppress a future task or pull request identity.
+A record that is merely unreadable right now keeps its marker, because a transient
+read failure is not evidence the task is gone and a reader that cannot confirm the
+identity does not suppress anyway. fork/bin/fm-pr-green-teardown is the explicit
+path: it prunes, drops one task's ready state, or drops a whole home's, and never
+touches a task record or merge-notification state.
 
 
 Read cost and the forge binary
@@ -272,12 +353,12 @@ The path is the one the fork tests already drive with a stub seam:
               That retry is per result sequence, not per pull request.
   acknowledge bin/fm-procevent.sh handled pr-green <sequence>
 
-The latch that keeps one wake per pull request per head will live in the seam,
-not in core, so a re-announced result and a re-polled head are different things:
-the first is core's ordinary retry of one sequence until `handled`, the second
-is a new sequence the next poll captures, and the seam's own deduplication is
-what a later slice adds to stop it. bin/fm-procevent.sh list shows the pending
-count.
+The latch lives in the seam, not in core, so a re-announced result and a
+re-polled head stay different things: the first is core's ordinary retry of one
+sequence until `handled`, the second is a poll the seam answers with silence
+because that head is already recorded. Neither is wake-queue deduplication, and
+neither is allowed to stand in for the marker described under "One wake per
+head: the latch". bin/fm-procevent.sh list shows the pending count.
 
 
 Latency
@@ -300,21 +381,42 @@ may shorten either one too, and neither can lengthen a wait.
 Adapter state
 -------------
 
-The fork's own adapter state belongs under <home>/state/pr-green/ and is the
-seam's to own. This slice still writes nothing there and creates nothing: the
-adapter and the predicate are pure readers of state/<id>.meta,
-state/<id>.check.sh, config/github-hosts, the optional config/pr-green-gh and
-poll-wait/read-budget knobs above, and the forge. A later slice's latch marker
-lives in that directory, and that marker is the only thing this capability is
-ever meant to write.
+The fork's own adapter state belongs to the seam. It writes exactly one thing:
+the readiness latch marker <home>/state/<id>.pr-green-ready, described under "One
+wake per head: the latch", which the ordinary poll also prunes, and which
+fork/bin/fm-pr-green-teardown clears explicitly:
+
+  fork/bin/fm-pr-green-teardown --home "$FM_HOME" --dry-run   # what prune would drop
+  fork/bin/fm-pr-green-teardown --home "$FM_HOME"             # prune stale markers
+  fork/bin/fm-pr-green-teardown --home "$FM_HOME" --task <id> # one task's marker
+  fork/bin/fm-pr-green-teardown --home "$FM_HOME" --all       # every marker here
+
+Run the `--all` form before retiring the source for good. Upstream's
+task teardown does not know this file (the fork never edits bin/fm-teardown.sh),
+so ask for it explicitly when a whole home goes away, and rely on the poll's own
+pruning otherwise. Everything else it reads belongs to upstream or to optional
+configuration it never writes: state/<id>.meta, state/<id>.check.sh,
+config/github-hosts, config/pr-green-gh, the forge, and the operator- or
+test-set poll-wait/read-budget knobs under state/pr-green/ (see "Latency"). It
+never writes a task record, an approval, or merge-notification state.
 
 
 Known limits
 ------------
 
-  - No per-head latch yet: a green pull request keeps producing a fresh result
-    and wake on every poll, including after an acknowledgement, which the
-    process-event machinery absorbs but does not deduplicate.
+  - The latch needs the host's own request id to prove delivery. A consult
+    without one neither reads nor writes a marker, so it can only ever repeat a
+    wake. The real host always sends the id; only a test or a foreign caller
+    reaches this case.
+  - A relaunch mints a new spawn_gen= for the same task id, so a green head can
+    be announced once more to the replacement worker. That is the duplicate
+    direction on purpose: a replacement has not seen the earlier wake.
+  - A marker is pruned on the next poll after its identity stops being current,
+    so a task torn down and re-created with the same id, pull request, and head
+    inside one poll interval is the one case pruning cannot see; the spawn_gen=
+    binding still separates the two incarnations.
+  - A record whose task mode or head cannot be read is silence here, exactly as
+    for the predicate: the latch never guesses that a wake is deserved.
   - One result carries at most 30000 bytes of advisory blocks. A home with more
     simultaneously ready pull requests than fit leaves the ones past the bound
     out of that result instead of publishing a result the host would refuse.

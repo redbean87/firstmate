@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 // Firstmate fork PR readiness adapter (process-event-adapter/1).
 //
-// Registers the fork-owned source that will wake Firstmate when a pull request
-// it may merge on its own authority has finished: every required check reported
+// Registers the fork-owned source that wakes Firstmate when a pull request it
+// may merge on its own authority has finished: every required check reported
 // green at the recorded head. It is a fork-owned external package
 // (docs/extension-bindings.md), so it edits no upstream file and plugs in through
 // the same extension seam the fork's Discord bridge uses.
 //
 // Slice T1 shipped the adapter, its scope gate, and its registration with an
-// empty readiness seam. This slice installs the readiness evaluation at that
-// seam (see ./readiness.mjs), so an eligible open, non-draft pull request whose
-// live head still matches the record and whose every unwaived required check has
-// reported green at that head now produces the advisory result below. The latch
-// that keeps one wake per head is still owed by a later slice.
+// empty readiness seam. Slice T2 installed the readiness evaluation at that seam
+// (see ./readiness.mjs), so an eligible open, non-draft pull request whose live
+// head still matches the record and whose every unwaived required check has
+// reported green at that head produces the advisory result below. Slice T3 gave
+// that result memory: the seam's readiness latch is published at the same seam,
+// so one green head wakes firstmate once, a changed head re-arms, and an
+// interrupted latch write can only ever repeat a wake.
 //
 // ADVISORY BY CONSTRUCTION. This package merges nothing, arms nothing, records
 // no approval or merge authority, and never rewrites a task record. A wake only
@@ -40,13 +42,18 @@
 //                  labelled pr-ready-advisory; failure evidence is labelled
 //                  pr-ready-error and never presented as a green pull request.
 //
-// The judgment - the readiness predicate, the one-shot per-head latch, and the
-// wake body - lives entirely in ./readiness.mjs, the documented seam. This slice
-// installs the conservative readiness predicate there; the latch is still owed,
-// so a pull request that keeps looking ready produces a fresh result and wake on
-// every poll: `handled` settles one result sequence, and the next poll captures a
-// new one. One result carries every pull request that poll finds ready, never
-// only the one that sorts first.
+// The judgment - the readiness predicate, the one-shot readiness latch, and the
+// wake body - lives entirely in ./readiness.mjs, the documented seam. One result
+// carries every pull request that poll finds ready, never only the one that sorts
+// first, and a poll that finds only latched heads returns no-result.
+//
+// Adapter state. The latch marker is the only state this capability writes, and
+// it belongs to that seam: <home>/state/<id>.pr-green-ready, one per task,
+// published by rename. This file only hands the seam what it needs - the poll's
+// request id as the delivery witness - and asks it to prune markers whose task
+// identity is no longer current on each poll, so no marker outlives the task,
+// pull request, head, or worker incarnation it was written for. The fork-owned
+// teardown path for that state is fork/bin/fm-pr-green-teardown.
 //
 // The seam reads the forge, so it is asked about each pull request at most once
 // per invocation: the 5-second rescan below exists to notice a newly armed task
@@ -58,10 +65,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { decideWake } from "./readiness.mjs";
+import { decideWake, pruneReadinessMarkers } from "./readiness.mjs";
 
 const EXTENSION_ID = "org.firstmate.fork.pr-green";
-const EXTENSION_VERSION = "0.2.0";
+const EXTENSION_VERSION = "0.3.0";
 const MAX_INPUT_BYTES = 65536;
 const MAX_OUTPUT_BYTES = 30000;
 const MAX_RECORD_BYTES = 65536;
@@ -324,9 +331,10 @@ function classifyResult(content) {
 async function poll(request) {
   const dirs = homeDirs(request.input?.config_ref);
   const deadline = Date.now() + waitMs(dirs);
-  // One ctx for the whole poll: the seam prices its forge reads against it and
-  // splits that one budget across the entries the poll evaluates.
-  const ctx = { ...dirs, now: Date.now(), log };
+  // One ctx for the whole poll: the seam prices its forge reads against it, splits
+  // that one budget across the entries the poll evaluates, and receives the host's
+  // own request id, which is the delivery witness its readiness latch compares.
+  const ctx = { ...dirs, now: Date.now(), requestId: request.request_id, log };
   let announced = false;
   // One readiness evaluation per task per recorded head per invocation, so a
   // slow forge is read once rather than on every rescan. A head change inside
@@ -338,6 +346,11 @@ async function poll(request) {
       for (const entry of scan.entries) log(`pr-green: eligible ${entry.id}`);
       for (const refused of scan.refused) log(`pr-green: skipped ${refused.id} ${refused.reason}`);
       log(`pr-green: poll ${scan.entries.length} eligible, ${scan.refused.length} refused`);
+      // Fork-owned cleanup on the ordinary poll: a latch marker is dropped unless
+      // the task record still names the same pull request, head, and incarnation,
+      // so no marker outlives the identity it was written for.
+      const pruned = pruneReadinessMarkers(ctx);
+      if (pruned > 0) log(`pr-green: latch-pruned ${pruned}`);
       announced = true;
     }
     const pending = scan.entries.filter((entry) => !evaluated.has(`${entry.id}\u0000${entry.head}`));

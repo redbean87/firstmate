@@ -1,8 +1,9 @@
 // The readiness seam of the fork PR readiness adapter (process-event-adapter/1).
 //
 // This module is the WHOLE of the adapter's judgment. Slice T1 shipped it empty;
-// this slice installs the conservative GitHub readiness predicate in it, so no
-// other part of the package can quietly acquire an opinion about a pull request.
+// it now holds the conservative GitHub readiness predicate and the readiness
+// latch that keeps one wake per head, so no other part of the package can
+// quietly acquire an opinion about a pull request.
 //
 // decideWake(entry, ctx)
 //   entry  one armed task that already passed the adapter's eligibility gate:
@@ -13,12 +14,15 @@
 //          which tasks can wake firstmate.
 //          head is the recorded state/<id>.meta pr_head= that the gate already
 //          validated, so it is the recorded head this module compares against.
-//          The gate reads state/<id>.meta and the armed merge poll's
-//          state/<id>.check.sh sidecar; both are owned by upstream tasks and
-//          are never written here.
-//   ctx    {home, stateDir, configDir, evaluateCount, now, log}: absolute paths
-//          resolved from the registration's config_ref, how many entries this
-//          poll offers the seam, the current epoch milliseconds, and a stderr
+//          meta must be exactly <stateDir>/<id>.meta: the seam re-reads that one
+//          record itself (see "THE LATCH" below) and refuses to read any other
+//          path. The gate reads state/<id>.meta and the armed merge poll's
+//          state/<id>.check.sh sidecar; both are owned by upstream tasks and are
+//          never written here.
+//   ctx    {home, stateDir, configDir, evaluateCount, now, requestId, log}:
+//          absolute paths resolved from the registration's config_ref, how many
+//          entries this poll offers the seam, the current epoch milliseconds, the
+//          host's own request id for this poll (see "The latch"), and a stderr
 //          logger the host captures and discards. One ctx per poll, shared by
 //          every entry that poll evaluates, so the read budget below is one
 //          total for the poll and is split across those entries.
@@ -79,30 +83,63 @@
 // operator's gh configuration is visible, and no credential is read or written
 // here.
 //
-// The contract this seam keeps, plus the one obligation a later slice fills in:
+// The contract this seam keeps:
 //
-//   Latch        owed by a later slice: at most one wake per pull request per
-//                head. The marker is durable state under <home>/state/pr-green/.
-//                An interrupted or failed marker write must fail toward one
-//                possible duplicate wake, never toward a permanently suppressed
-//                one, because a duplicate wake costs an extra merge-time re-read
-//                while a lost wake costs the whole capability.
-//   Body         the advisory text firstmate reads. This slice produces it,
+//   Latch        at most one wake per task, pull request, and live head in
+//                normal operation; re-armed by a changed head. See "The latch"
+//                below, which composes that with the guarantee that a genuinely
+//                ready head is never silently suppressed.
+//   Body         the advisory text firstmate reads. This seam produces it,
 //                and it names the task, the pull request URL, and the head it
 //                is talking about, and it says plainly that it is advisory
 //                evidence - never an approval, a merge, or authority to merge.
-//   Errors       this slice keeps this too: returning null is silence and is
-//                always safe. The adapter treats an empty, non-string, or
-//                oversized body as silence, so every body must be a bounded
-//                string that survives JSON encoding. A throw is NOT silence:
-//                the adapter answers with an unavailable error, which core
-//                captures as an actionable adapter-failure record. Either way
-//                no failure path can ever be read as green.
+//   Errors       returning null is silence and is always safe. The adapter
+//                treats an empty, non-string, or oversized body as silence, so
+//                every body must be a bounded string that survives JSON
+//                encoding. A throw is NOT silence: the adapter answers with an
+//                unavailable error, which core captures as an actionable
+//                adapter-failure record. Either way no failure path can ever be
+//                read as green.
 //
-// Nothing in this module may merge, arm a merge, write a task record, or record
-// approval or merge authority. It is a pure reader of the forge and this home's
-// task records. bin/fm-pr-merge.sh remains the only merge authority and
-// re-validates every required check at merge time.
+// THE LATCH. Readiness has memory: one marker per task, <home>/state/<id>.pr-
+// green-ready, written as one fixed-arity line record and published by
+// temp-file rename (0600, same directory, fsynced), in the shape upstream's own
+// <state>/<id>.pr-poll-merge-notified marker already uses. It is a SEPARATE file
+// from that merge-notification marker and from every merge record, so readiness
+// suppression and merge notification can never stand in for each other in either
+// direction.
+//
+//   marker    version line fm-fork-pr-green-ready-v1, then task id, the task
+//             record's spawn_gen= incarnation, provider, host, owner/repo, pull
+//             number, head, the host request id that produced the wake, and the
+//             epoch second it was published.
+//   matches   a marker suppresses only when every identity field above equals
+//             this task's own canonical identity (task id, provider, host,
+//             owner/repo, number, head) and its incarnation equals the CURRENT
+//             state/<id>.meta spawn_gen=. A changed head, a changed pull request,
+//             and a replaced worker (upstream mints a new spawn_gen= for every
+//             spawn and relaunch) therefore re-arm rather than suppress.
+//   duplicate two things make the latch fail toward one possible duplicate wake
+//             and never toward suppression. (1) A marker write that fails, is
+//             interrupted, or is unreadable afterwards leaves no valid marker, so
+//             the next poll simply answers again. (2) A marker records the HOST
+//             request id that produced its wake: core derives that id from the
+//             next uncaptured result sequence, so it is unchanged while a wake has
+//             not yet been captured and changes once it has. A retry after a crash
+//             between answering and capture therefore arrives with the SAME id as
+//             the marker and is answered again instead of being suppressed, while
+//             an ordinary later poll arrives with a different id and is silent.
+//             Both directions are exercised by fork/tests/fm-fork-pr-green-latch.
+//
+// The marker is written before the wake is returned, never after: a crash in
+// between is repaired by the request-id rule above, whereas writing after would
+// leave a delivered wake unrecorded and repeat it on every poll.
+//
+// Nothing in this module may merge, arm a merge, rewrite a task record, or record
+// approval or merge authority; the latch is the only state this capability is
+// ever meant to write, and it records a wake, not a merge. It is otherwise a pure
+// reader of the forge and this home's task records. bin/fm-pr-merge.sh remains
+// the only merge authority and re-validates every required check at merge time.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -119,6 +156,23 @@ const MAX_ROLLUP_ENTRIES = 2000;
 const MAX_REQUIREMENTS = 500;
 
 const HEAD = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+// The delivery modes this fork may merge on its own authority. Re-checked here
+// from the task record rather than trusted from the caller's entry.
+const READINESS_MODES = new Set(["no-mistakes", "direct-PR"]);
+const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// Upstream's per-spawn incarnation token (bin/fm-spawn.sh spawn_gen=), the same
+// token durable consumers use to tell a replacement worker from the task id it
+// reused.
+const INCARNATION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// Core derives a source.poll request id from the registration generation and the
+// next uncaptured result sequence, so this id is the seam's delivery witness.
+const REQUEST_ID = /^sha256:[0-9a-f]{64}$/;
+const PROVIDER = "github";
+const MARKER_VERSION = "fm-fork-pr-green-ready-v1";
+const MARKER_SUFFIX = ".pr-green-ready";
+const MARKER_FIELDS = 10;
+const MAX_MARKER_BYTES = 4096;
+const MAX_RECORD_BYTES = 65536;
 // The merge gate accepts a supersession timestamp only when it is a whole-second
 // UTC instant, so a timestamp of any other shape can never make a stale run
 // disappear.
@@ -543,7 +597,325 @@ function evaluate(entry, ctx) {
   return { head, base, required: required.length };
 }
 
-// advisoryBody <entry> <verdict> -> bounded advisory text
+// --- the readiness latch ---------------------------------------------------
+//
+// Everything below owns the one piece of durable state this capability writes.
+// It is written only for a pull request this seam is about to answer ready, and
+// it can only ever cause a wake to be skipped for the exact identity it names.
+
+// privateText <file> <max-bytes> -> string | null
+//
+// One small regular, non-link, non-oversized file's text, or null. null means
+// "unavailable", and no caller may read it as "empty".
+function privateText(file, maxBytes) {
+  let info;
+  try {
+    info = fs.lstatSync(file);
+  } catch {
+    return null;
+  }
+  if (!info.isFile() || info.isSymbolicLink() || info.size > maxBytes) return null;
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+// recordFields <text> -> Map | null
+//
+// One task record as its own plain key=value lines. A duplicate key, a line
+// without a key, or a key outside the record's own alphabet makes the record
+// ambiguous, so it is refused rather than resolved in either direction.
+function recordFields(text) {
+  const fields = new Map();
+  for (const line of text.split("\n")) {
+    const value = line.replace(/\r$/, "");
+    if (value === "") continue;
+    const split = value.indexOf("=");
+    if (split <= 0) return null;
+    const key = value.slice(0, split);
+    if (!/^[a-z][a-z0-9_]*$/.test(key)) return null;
+    if (fields.has(key)) return null;
+    fields.set(key, value.slice(split + 1));
+  }
+  return fields;
+}
+
+// markerFields <text> -> string[] | null
+//
+// The marker is fixed-arity: exactly MARKER_FIELDS lines, each one field, and a
+// version line first. A short, long, or reordered marker is unusable, which is
+// the safe direction - an unusable marker never suppresses a wake.
+function markerFields(text) {
+  const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
+  if (lines.length !== MARKER_FIELDS + 1 || lines[MARKER_FIELDS] !== "") return null;
+  const fields = lines.slice(0, MARKER_FIELDS);
+  if (fields[0] !== MARKER_VERSION) return null;
+  return fields;
+}
+
+// markerPath <ctx> <id> -> absolute path | null
+function markerPath(ctx, id) {
+  if (typeof id !== "string" || !TASK_ID.test(id)) return null;
+  if (typeof ctx.stateDir !== "string" || !path.isAbsolute(ctx.stateDir)) return null;
+  return path.join(ctx.stateDir, `${id}${MARKER_SUFFIX}`);
+}
+
+// identityOf <fields> -> the marker's canonical pull request identity
+//
+// The marker splits the identity into the parts a reader can check one at a
+// time: provider, host, owner/repo, and pull number. Its pull request URL is
+// derived from those parts, never parsed back out of a stored string.
+function identityOf(fields) {
+  return {
+    id: fields[1],
+    incarnation: fields[2],
+    provider: fields[3],
+    host: fields[4],
+    repoPath: fields[5],
+    number: fields[6],
+    head: fields[7],
+    request: fields[8],
+    pr: `https://${fields[4]}/${fields[5]}/pull/${fields[6]}`,
+  };
+}
+
+// readMarker <ctx> <entry> <incarnation> -> identity | null
+//
+// The marker that names this task's own canonical pull request identity, its
+// live head, and its current incarnation, or null when there is no such marker.
+// Every mismatch - a changed head, a changed pull request, a replaced worker, a
+// malformed or foreign marker - is null, which is the re-arm direction.
+function readMarker(ctx, entry, incarnation) {
+  const file = markerPath(ctx, entry.id);
+  if (file === null) return null;
+  const text = privateText(file, MAX_MARKER_BYTES);
+  if (text === null) return null;
+  const fields = markerFields(text);
+  if (fields === null) return null;
+  const identity = identityOf(fields);
+  if (identity.id !== entry.id) return null;
+  if (identity.provider !== PROVIDER) return null;
+  if (identity.host !== entry.host) return null;
+  if (identity.repoPath !== `${entry.owner}/${entry.repo}`) return null;
+  if (identity.number !== entry.number) return null;
+  if (identity.head !== entry.head) return null;
+  if (identity.incarnation !== incarnation) return null;
+  if (!REQUEST_ID.test(identity.request)) return null;
+  return identity;
+}
+
+// armedIdentity <fields> <entry> <expected-meta> -> {incarnation} | null
+//
+// The one eligibility test for a task record, shared by the latch, the delivery
+// re-check, and marker pruning, so all three read the record the same way. It is
+// deliberately independent of the adapter's gate: this is the posture the WAKE is
+// delivered under, read from the record as it is now. A record that is not a
+// ship of mode no-mistakes/direct-PR, is yolo=off, has been re-pointed at another
+// pull request or head, or cannot prove its own incarnation never authorizes a
+// wake.
+function armedIdentity(fields, entry, expectedMeta) {
+  if (entry.meta !== expectedMeta) return null;
+  const kind = fields.get("kind") ?? "";
+  const mode = fields.get("mode") ?? "";
+  if (kind === "secondmate" || mode === "secondmate") return null;
+  if (!READINESS_MODES.has(mode)) return null;
+  if ((fields.get("yolo") ?? "") !== "on") return null;
+  if ((fields.get("pr") ?? "") !== entry.pr) return null;
+  if ((fields.get("pr_head") ?? "") !== entry.head) return null;
+  const incarnation = fields.get("spawn_gen") ?? "";
+  if (!INCARNATION.test(incarnation)) return null;
+  return { incarnation };
+}
+
+// currentArmed <ctx> <entry> -> {incarnation} | null
+//
+// This task's current posture, from its own record under this home's state
+// directory. Anything other than exactly <stateDir>/<id>.meta is refused, so the
+// seam can never be pointed at another path by its caller.
+function currentArmed(ctx, entry) {
+  if (typeof entry.id !== "string" || !TASK_ID.test(entry.id)) return null;
+  if (typeof ctx.stateDir !== "string" || !path.isAbsolute(ctx.stateDir)) return null;
+  const expectedMeta = path.join(ctx.stateDir, `${entry.id}.meta`);
+  if (entry.meta !== expectedMeta) return null;
+  const text = privateText(expectedMeta, MAX_RECORD_BYTES);
+  if (text === null) return null;
+  const fields = recordFields(text);
+  if (fields === null) return null;
+  return armedIdentity(fields, entry, expectedMeta);
+}
+
+// witnessOf <ctx> -> request id | null
+//
+// A consult with no usable host request id cannot prove anything about delivery,
+// so it neither reads nor writes a marker and every answer it gives is a possible
+// duplicate. In a real host the id is always present.
+function witnessOf(ctx) {
+  return typeof ctx.requestId === "string" && REQUEST_ID.test(ctx.requestId) ? ctx.requestId : null;
+}
+
+// publishMarker <ctx> <entry> <incarnation> <request> -> boolean
+//
+// Atomic publication: one 0600 temp file in the same directory, fsynced, then
+// renamed over the marker, then the directory fsynced, then the marker read back
+// through the same reader the next poll uses. Every failure returns false and
+// leaves no partial marker, and the caller answers anyway: a marker that cannot
+// be published costs one duplicate wake, never a suppressed one.
+function publishMarker(ctx, entry, incarnation, request) {
+  const file = markerPath(ctx, entry.id);
+  if (file === null) return false;
+  let tmp = null;
+  try {
+    const stateInfo = fs.lstatSync(ctx.stateDir);
+    if (!stateInfo.isDirectory() || stateInfo.isSymbolicLink()) return false;
+    let existing;
+    try {
+      existing = fs.lstatSync(file);
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") return false;
+      existing = null;
+    }
+    if (existing !== null && (!existing.isFile() || existing.isSymbolicLink())) return false;
+    const body = [
+      MARKER_VERSION,
+      entry.id,
+      incarnation,
+      PROVIDER,
+      entry.host,
+      `${entry.owner}/${entry.repo}`,
+      entry.number,
+      entry.head,
+      request,
+      String(Math.floor(Date.now() / 1000)),
+    ].join("\n") + "\n";
+    tmp = path.join(ctx.stateDir, `.fm-fork-pr-green-ready.${process.pid}.${Date.now()}`);
+    const handle = fs.openSync(tmp, "wx", 0o600);
+    try {
+      fs.writeFileSync(handle, body);
+      fs.fsyncSync(handle);
+    } finally {
+      fs.closeSync(handle);
+    }
+    if (privateText(tmp, MAX_MARKER_BYTES) !== body) return false;
+    fs.renameSync(tmp, file);
+    tmp = null;
+    const directory = fs.openSync(ctx.stateDir, "r");
+    try {
+      fs.fsyncSync(directory);
+    } catch {
+      // A directory that cannot be fsynced still holds the rename; the marker is
+      // readable right now, which is what the next poll consults.
+    } finally {
+      fs.closeSync(directory);
+    }
+    return privateText(file, MAX_MARKER_BYTES) === body;
+  } catch {
+    return false;
+  } finally {
+    if (tmp !== null) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch {
+        // Nothing was published under the marker's own name either way.
+      }
+    }
+  }
+}
+
+// pruneReadinessMarkers <ctx> -> number removed
+//
+// Fork-owned cleanup, run by the adapter on every poll it makes: a marker is
+// dropped unless the task record under this home still names the same canonical
+// pull request, head, and incarnation. A task that was torn down, re-pointed at
+// another pull request, or replaced by a new incarnation therefore never leaves a
+// marker that could suppress a future task or pull request identity. A record
+// that is merely unreadable right now is left alone, because a transient read
+// failure is not evidence the task is gone, and a reader that cannot confirm the
+// identity does not suppress anyway.
+//
+// The marker filename is the task id, so this only ever touches a file this fork
+// wrote. bin/fm-teardown.sh (upstream-owned, and never edited by the fork) drops
+// its own per-task artifacts; a marker left behind by a teardown is pruned here on
+// the next poll, and fork/bin/fm-pr-green-teardown is the explicit path.
+export function pruneReadinessMarkers(ctx) {
+  let removed = 0;
+  let names;
+  try {
+    if (typeof ctx.stateDir !== "string" || !path.isAbsolute(ctx.stateDir)) return 0;
+    names = fs.readdirSync(ctx.stateDir);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    if (!name.endsWith(MARKER_SUFFIX)) continue;
+    const id = name.slice(0, -MARKER_SUFFIX.length);
+    if (!TASK_ID.test(id)) continue;
+    const file = path.join(ctx.stateDir, name);
+    let marker = null;
+    try {
+      const info = fs.lstatSync(file);
+      if (!info.isFile() || info.isSymbolicLink()) continue;
+      const fields = markerFields(fs.readFileSync(file, "utf8"));
+      if (fields !== null) marker = identityOf(fields);
+    } catch {
+      continue;
+    }
+    if (marker === null) {
+      // An unreadable marker cannot suppress anything; dropping it just keeps the
+      // state directory to the shapes this fork understands.
+      if (unlinkMarker(file)) removed += 1;
+      continue;
+    }
+    if (markerStale(ctx, marker)) {
+      if (unlinkMarker(file)) removed += 1;
+    }
+  }
+  return removed;
+}
+
+function unlinkMarker(file) {
+  try {
+    fs.unlinkSync(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// markerStale <ctx> <marker> -> boolean
+//
+// True only when this home's own record proves the marker no longer names a live
+// identity: the record is gone, is no longer a readable task record, or no longer
+// carries this marker's pull request, head, and incarnation. An unreadable record
+// keeps its marker.
+function markerStale(ctx, marker) {
+  const record = path.join(ctx.stateDir, `${marker.id}.meta`);
+  let info;
+  try {
+    info = fs.lstatSync(record);
+  } catch (error) {
+    return Boolean(error) && error.code === "ENOENT";
+  }
+  if (!info.isFile() || info.isSymbolicLink()) return true;
+  const text = privateText(record, MAX_RECORD_BYTES);
+  if (text === null) return false;
+  const fields = recordFields(text);
+  if (fields === null) return true;
+  const entry = {
+    id: marker.id,
+    host: marker.host,
+    owner: marker.repoPath.slice(0, marker.repoPath.lastIndexOf("/")),
+    repo: marker.repoPath.slice(marker.repoPath.lastIndexOf("/") + 1),
+    number: marker.number,
+    head: marker.head,
+    pr: marker.pr,
+    meta: record,
+  };
+  return armedIdentity(fields, entry, record) === null;
+}
+
+
 function advisoryBody(entry, verdict) {
   const scope = verdict.required === 0
     ? "No branch rule requires a check at this base branch."
@@ -561,8 +933,37 @@ export function decideWake(entry, ctx) {
   // throw would be captured as actionable adapter-failure evidence, so the
   // predicate answers null instead of ever leaving that record behind.
   try {
+    const witness = witnessOf(ctx);
+    // The latch is consulted BEFORE any forge read, and only against the record's
+    // own current incarnation: an already-announced head costs one local read and
+    // no network, and a marker left by another incarnation of the same task id
+    // cannot suppress this one.
+    if (witness !== null) {
+      const armed = currentArmed(ctx, entry);
+      if (armed !== null) {
+        const marker = readMarker(ctx, entry, armed.incarnation);
+        if (marker !== null && marker.request !== witness) {
+          ctx.log(`pr-green: latched ${entry.id}`);
+          return null;
+        }
+      }
+    }
     const verdict = evaluate(entry, ctx);
-    return verdict === null ? null : { advisory: advisoryBody(entry, verdict) };
+    if (verdict === null) return null;
+    // Posture, re-read from the record AFTER the forge reads and immediately
+    // before delivery: a yolo=off edit, a re-pointed pull request, a changed
+    // head, or a replaced worker during those reads never authorizes a wake.
+    const confirmed = currentArmed(ctx, entry);
+    if (confirmed === null) {
+      ctx.log(`pr-green: not-ready ${entry.id} posture-changed`);
+      return null;
+    }
+    if (witness !== null && !publishMarker(ctx, entry, confirmed.incarnation, witness)) {
+      // Duplicate direction on purpose: no marker means the next poll answers
+      // again, which is the only failure this capability may ever make.
+      ctx.log(`pr-green: latch-unpublished ${entry.id}`);
+    }
+    return { advisory: advisoryBody(entry, verdict) };
   } catch (error) {
     try {
       ctx.log(`pr-green: not-ready ${entry.id} evaluation-failed`);
