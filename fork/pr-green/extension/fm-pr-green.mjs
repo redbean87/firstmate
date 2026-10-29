@@ -321,6 +321,9 @@ function classifyResult(content) {
 async function poll(request) {
   const dirs = homeDirs(request.input?.config_ref);
   const deadline = Date.now() + waitMs(dirs);
+  // One ctx for the whole poll: the seam prices its forge reads against it, so
+  // every eligible task this poll evaluates shares one read budget.
+  const ctx = { ...dirs, now: Date.now(), log };
   let announced = false;
   // One readiness evaluation per task per recorded head per invocation, so a
   // slow forge is read once rather than on every rescan. A head change inside
@@ -334,7 +337,6 @@ async function poll(request) {
       log(`pr-green: poll ${scan.entries.length} eligible, ${scan.refused.length} refused`);
       announced = true;
     }
-    const ctx = { ...dirs, now: Date.now(), log };
     for (const entry of scan.entries) {
       const seen = `${entry.id}\u0000${entry.head}`;
       if (evaluated.has(seen)) continue;
@@ -390,7 +392,9 @@ if (verb === "handshake") {
   // request, and a wake is acknowledged with `fm-procevent.sh handled`.
   respond(request.request_id, { value: false });
 } else if (verb === "invoke" && request.operation === "result.silent") {
-  // A readiness wake is re-announced until Firstmate acknowledges it.
+  // A readiness wake has no channel of its own: the runner publishes the
+  // ordinary wake for that result sequence and re-announces it until Firstmate
+  // acknowledges that sequence. A later poll is a new sequence.
   respond(request.request_id, { value: false });
 } else {
   throw new Error("unsupported extension verb or operation");

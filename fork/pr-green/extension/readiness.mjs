@@ -18,7 +18,9 @@
 //          are never written here.
 //   ctx    {home, stateDir, configDir, now, log}: absolute paths resolved from
 //          the registration's config_ref, the current epoch milliseconds, and
-//          a stderr logger the host captures and discards.
+//          a stderr logger the host captures and discards. One ctx per poll,
+//          shared by every entry that poll evaluates, so the read budget below
+//          bounds the whole poll rather than each pull request in it.
 //   returns null, which is silence, or {advisory: "<wake body>"}.
 //
 // The predicate. A wake is produced only when every one of these holds:
@@ -51,11 +53,12 @@
 // Cost. The common not-ready case costs exactly one forge read (the initial
 // pull request view). The required-context reads, and the check-run producer
 // read a bound requirement needs, happen only after the initial read already
-// looks fully green and at the recorded head. Every read shares one bounded
-// budget (READ_BUDGET_MS, never above the watcher's 30-second per-check
-// timeout) and one per-read timeout, so a slow forge produces silence inside
-// that budget rather than outliving it. state/pr-green/read-budget-ms may
-// shorten the budget for tests or a slow host; it can never lengthen it.
+// looks fully green and at the recorded head. Every read of one poll shares one
+// bounded budget (READ_BUDGET_MS, well inside the binding's 300-second default
+// invoke timeout) and one per-read timeout, so a slow forge produces silence
+// inside that budget rather than outliving it no matter how many tasks the poll
+// has to evaluate. state/pr-green/read-budget-ms may shorten the budget for
+// tests or a slow host; it can never lengthen it.
 //
 // Naming the forge binary. The extension host invokes this process with a
 // minimal environment whose PATH holds only the interpreter's own directory and
@@ -69,26 +72,25 @@
 // operator's gh configuration is visible, and no credential is read or written
 // here.
 //
-// The contract the rest of the package still owes, and which later slices fill
-// in:
+// The contract this seam keeps, plus the one obligation a later slice fills in:
 //
-//   Latch        at most one wake per pull request per head. The marker is
-//                durable state under <home>/state/pr-green/. An interrupted or
-//                failed marker write must fail toward one possible duplicate
-//                wake, never toward a permanently suppressed one, because a
-//                duplicate wake costs an extra merge-time re-read while a lost
-//                wake costs the whole capability.
-//   Body         the advisory text firstmate reads. It names the task, the
-//                pull request URL, and the head it is talking about, and it
-//                says plainly that it is advisory evidence - never an approval,
-//                a merge, or authority to merge.
-//   Errors       returning null is silence and is always safe. The adapter
-//                treats an empty, non-string, or oversized body as silence,
-//                so every body must be a bounded string that survives JSON
-//                encoding. A throw is NOT silence: the adapter answers with an
-//                unavailable error, which core captures as an actionable
-//                adapter-failure record. Either way no failure path can ever be
-//                read as green.
+//   Latch        owed by a later slice: at most one wake per pull request per
+//                head. The marker is durable state under <home>/state/pr-green/.
+//                An interrupted or failed marker write must fail toward one
+//                possible duplicate wake, never toward a permanently suppressed
+//                one, because a duplicate wake costs an extra merge-time re-read
+//                while a lost wake costs the whole capability.
+//   Body         the advisory text firstmate reads. This slice produces it,
+//                and it names the task, the pull request URL, and the head it
+//                is talking about, and it says plainly that it is advisory
+//                evidence - never an approval, a merge, or authority to merge.
+//   Errors       this slice keeps this too: returning null is silence and is
+//                always safe. The adapter treats an empty, non-string, or
+//                oversized body as silence, so every body must be a bounded
+//                string that survives JSON encoding. A throw is NOT silence:
+//                the adapter answers with an unavailable error, which core
+//                captures as an actionable adapter-failure record. Either way
+//                no failure path can ever be read as green.
 //
 // Nothing in this module may merge, arm a merge, write a task record, or record
 // approval or merge authority. It is a pure reader of the forge and this home's
@@ -99,8 +101,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-// The whole readiness evaluation stays inside the watcher's 30-second per-check
-// timeout, with room for the adapter's own bookkeeping around it.
+// One poll's whole readiness evaluation stays well inside the binding's default
+// 300-second invoke timeout, with room for the adapter's own bookkeeping.
 const READ_BUDGET_MS = 25000;
 const MIN_BUDGET_MS = 200;
 const PER_READ_MS = 8000;
@@ -179,6 +181,21 @@ function readBudgetMs(ctx) {
   return READ_BUDGET_MS;
 }
 
+// The deadline belongs to the poll, not to the pull request: every decideWake
+// call that shares one ctx shares one budget, so N eligible tasks cost at most
+// READ_BUDGET_MS in total instead of N times it.
+const readDeadlines = new WeakMap();
+
+// readDeadline <ctx> -> epoch milliseconds
+function readDeadline(ctx) {
+  let deadline = readDeadlines.get(ctx);
+  if (deadline === undefined) {
+    deadline = Date.now() + readBudgetMs(ctx);
+    readDeadlines.set(ctx, deadline);
+  }
+  return deadline;
+}
+
 // ForgeReader: the bounded, read-only view of one pull request on one host.
 //
 // Every read answers a parsed JSON document or null, and null always means "this
@@ -189,7 +206,7 @@ function readBudgetMs(ctx) {
 function forgeReader(entry, ctx) {
   const gh = ghBinary(ctx);
   if (!gh) return null;
-  const deadline = Date.now() + readBudgetMs(ctx);
+  const deadline = readDeadline(ctx);
   const env = { ...process.env, GH_PAGER: "cat", GH_NO_UPDATE_NOTIFIER: "1", GH_PROMPT_DISABLED: "1" };
   if (entry.host === "github.com") delete env.GH_HOST;
   else env.GH_HOST = entry.host;
@@ -235,7 +252,8 @@ function forgeReader(entry, ctx) {
 // The merge gate's own reading of one rollup, re-expressed for an advisory
 // verdict: a check run is green only when it COMPLETED with SUCCESS, NEUTRAL, or
 // SKIPPED, a status context is green only when its state is SUCCESS, and
-// anything unrecognized is red.
+// anything unrecognized - including a __typename that is neither of the two the
+// rollup union carries - is unreadable, so the whole rollup is silence.
 function checkEntries(rollup) {
   if (!Array.isArray(rollup) || rollup.length > MAX_ROLLUP_ENTRIES) return null;
   const entries = [];
@@ -254,12 +272,14 @@ function checkEntries(rollup) {
         ok: raw.status === "COMPLETED" && GREEN_CONCLUSIONS.has(raw.conclusion),
         at: typeof raw.startedAt === "string" && SETTLED_AT.test(raw.startedAt) ? raw.startedAt : null,
       });
-    } else {
+    } else if (raw.__typename === "StatusContext") {
       entries.push({
         kind: "status_context",
         name: typeof raw.context === "string" ? raw.context : "",
         ok: raw.state === "SUCCESS",
       });
+    } else {
+      return null;
     }
   }
   return entries;

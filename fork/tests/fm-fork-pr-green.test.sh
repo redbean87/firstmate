@@ -324,6 +324,37 @@ test_the_shipped_package_stays_silent_for_a_pull_request_that_is_not_green() {
   pass "silence: the shipped package binds, registers, reads the forge, and produces no wake while a check is still running"
 }
 
+test_one_poll_shares_one_read_budget_across_its_tasks() {
+  local home pkg calls started elapsed
+  home="$PTMP/budget/home"
+  p_home "$home"
+  record "$home" a-ship kind=ship harness=pi mode=no-mistakes yolo=on \
+    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A"
+  armed "$home" a-ship
+  record "$home" b-ship kind=ship harness=pi mode=no-mistakes yolo=on \
+    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_B"
+  armed "$home" b-ship
+  fixture_forge "$home" green
+  mkdir -p "$home/state/pr-green"
+  printf '400\n' > "$home/state/pr-green/read-budget-ms"
+  printf '5\n' > "$home/forge/hang-pr-view"
+  fast_poll "$home"
+  pkg="$PTMP/budget/packages/pr-green"
+  mkdir -p "$(dirname "$pkg")"
+  cp -R "$PKG_SRC" "$pkg"
+  install_package "$home" "$pkg"
+  : > "$home/forge/calls.log"
+  started=$SECONDS
+  FM_HOME="$home" "$PROCEVENT" start pr-green >/dev/null 2>&1 || true
+  elapsed=$((SECONDS - started))
+  [ -z "$(result_files "$home")" ] || fail "a forge that never answers produces no readiness result"
+  calls=$(wc -l < "$home/forge/calls.log" | tr -d ' ')
+  [ "$calls" = 1 ] \
+    || fail "one poll spends one read budget across every task it evaluates, so the hanging forge is asked once: $(cat "$home/forge/calls.log")"
+  [ "$elapsed" -lt 3 ] || fail "a poll of hanging reads answers inside its budget, took ${elapsed}s"
+  pass "budget: one poll shares one bounded read budget across all eligible tasks, so a hang cannot be multiplied by the task count"
+}
+
 test_the_installed_predicate_delivers_a_readiness_wake_end_to_end() {
   local home pkg result
   home="$PTMP/readiness/home"

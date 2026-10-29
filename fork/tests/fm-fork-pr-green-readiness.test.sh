@@ -434,6 +434,9 @@ test_malformed_documents_and_partial_answers_are_silence() {
   rollup "$dir" '[{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}, {"__typename": "Deployment"}]'
   assert_silent "$dir" "$entry" "an entry the rollup does not classify as green is silence rather than an assumption"
 
+  rollup "$dir" '[{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}, {"__typename": "Deployment", "state": "SUCCESS"}]'
+  assert_silent "$dir" "$entry" "a green-looking state on an entry that is not a status context cannot stand in for a check"
+
   green_pr "$dir" "$HEAD_A"
   assert_ready "$dir" "$entry" "$HEAD_A" "the intact fixture is ready again after the malformed cases"
 

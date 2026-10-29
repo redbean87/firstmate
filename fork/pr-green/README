@@ -10,14 +10,15 @@ Slice T1 shipped the adapter and its registration contract with an empty
 readiness seam. This slice (T2) fills that seam with the conservative readiness
 predicate described below, so an eligible pull request whose every unwaived
 required check has reported green at its recorded head now produces the advisory
-wake. The one-shot per-head latch is still owed by a later slice, so a ready
-pull request is re-announced every poll until firstmate acknowledges the result
-("Event delivery and acknowledgement").
+wake. The one-shot per-head latch is still owed by a later slice, so a pull
+request that keeps looking ready is announced again by every poll:
+acknowledging a result settles that one sequence, and the next poll captures a
+new one ("Event delivery and acknowledgement").
 
 It is fork-owned. Everything lives under fork/pr-green/, upstream code stays
 byte-identical, and it reaches Firstmate through the same documented
 extension seam the Discord bridge uses: an external process-event adapter,
-registered in the home, that will emit one ordinary process-event wake which
+registered in the home, that emits one ordinary process-event wake which
 Firstmate's existing supervision already consumes.
 
 Like fork/README, this file is plain text with no extension on purpose:
@@ -29,10 +30,9 @@ fork does not edit that inventory.
 Advisory by construction
 ------------------------
 
-The wake this source is built to emit is advisory: it will say "look at this
-pull request", never "merge it". The constraints below bind the predicate a
-later slice installs at the seam, and the code shipping today already keeps
-them.
+The wake this source emits is advisory: it says "look at this pull request",
+never "merge it". The constraints below bind the predicate installed at the
+seam, and the shipped code keeps them.
 
   - bin/fm-pr-merge.sh remains the only merge authority. It re-reads every
     required check at merge time and refuses a red pull request, a required
@@ -40,7 +40,7 @@ them.
   - Nothing in this package merges, arms a merge, answers a finding, writes a
     waiver, records approval, or records merge authority. It never rewrites a
     task record.
-  - Because the readiness test cannot share core internals, it will be an
+  - Because the readiness test cannot share core internals, the predicate is an
     independent, advisory implementation. A divergence from the merge gate can
     cost a wasted wake or a missed one; it cannot cause a bad merge.
   - Silence must be the default for the readiness judgment: a missing required
@@ -92,7 +92,8 @@ Files
 
   extension/firstmate-extension.json  the process-event-adapter/1 manifest:
                                       id org.firstmate.fork.pr-green, adapter
-                                      name "pr-green", consent task-metadata.
+                                      name "pr-green", consent task-metadata,
+                                      credential-store, network.
   extension/fm-pr-green.mjs           the adapter: config_ref validation, the
                                       scope gate above, the bounded long poll,
                                       and the protocol verbs.
@@ -154,8 +155,9 @@ A wake is produced only when all of this holds at once:
              producer-bound requirement that reported as a check run.
 
 Silence is the answer to every other outcome: a lookup failure, a timeout, an
-incomplete or malformed answer, an unparsable document, an unreadable
-required-context source, a partially successful read, or any doubt at all. A
+incomplete or malformed answer, an unparsable document, a rollup entry outside
+the two shapes the rollup carries, an unreadable required-context source, a
+partially successful read, or any doubt at all. A
 green-looking rollup beside an unreadable required-context source is silence,
 never green. The merge gate's narrow "rulesets unavailable on this plan"
 exception is deliberately not mirrored: here an unreadable required set is not
@@ -176,9 +178,10 @@ Read cost and the forge binary
 The common not-ready case costs exactly one forge read: the live pull request
 view. The required-context reads, and the check-run producer read a
 producer-bound requirement needs, happen only after that view already looks
-fully green at the recorded head. Every read shares one bounded budget of 25
-seconds - under the watcher's own 30-second per-check timeout - so a slow forge
-produces silence inside that budget instead of outliving it, and the adapter asks
+fully green at the recorded head. Every read of one poll shares one bounded
+budget of 25 seconds, well inside the binding's 300-second default invoke
+timeout, so a slow forge produces silence inside that budget instead of
+outliving it however many tasks the poll has to evaluate. The adapter also asks
 the seam about one pull request at most once per poll rather than once per
 internal rescan.
 
@@ -237,8 +240,8 @@ restarts it every cycle, so retire the source to stop it.
 Event delivery and acknowledgement
 ----------------------------------
 
-When a later slice's seam reports a ready pull request, the adapter returns one
-result. Core captures it as external evidence and publishes the ordinary bounded
+When the seam reports a ready pull request, the adapter returns one result. Core
+captures it as external evidence and publishes the ordinary bounded
 process-event wake, so nothing new is introduced into Firstmate's supervision.
 The path is the one the fork tests already drive with a stub seam:
 
@@ -253,12 +256,15 @@ The path is the one the fork tests already drive with a stub seam:
               the next pull request.
   silent      no. An unhandled readiness result is re-announced until firstmate
               acknowledges it, so a single wake is never lost to a missed turn.
+              That retry is per result sequence, not per pull request.
   acknowledge bin/fm-procevent.sh handled pr-green <sequence>
 
 The latch that keeps one wake per pull request per head will live in the seam,
 not in core, so a re-announced result and a re-polled head are different things:
-the first is core's ordinary retry until `handled`, the second is the seam's own
-deduplication. bin/fm-procevent.sh list shows the pending count.
+the first is core's ordinary retry of one sequence until `handled`, the second
+is a new sequence the next poll captures, and the seam's own deduplication is
+what a later slice adds to stop it. bin/fm-procevent.sh list shows the pending
+count.
 
 
 Latency
@@ -290,9 +296,9 @@ ever meant to write.
 Known limits
 ------------
 
-  - No per-head latch yet: a green pull request keeps producing a result on each
-    poll until firstmate acknowledges it, which the process-event machinery
-    absorbs but does not deduplicate.
+  - No per-head latch yet: a green pull request keeps producing a fresh result
+    and wake on every poll, including after an acknowledgement, which the
+    process-event machinery absorbs but does not deduplicate.
   - The predicate is a fork-owned re-expression, not the merge gate's own code.
     It is deliberately the stricter of the two where they can differ (an
     unreadable required-context source is silence here), so the failure it can
