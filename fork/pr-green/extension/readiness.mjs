@@ -1,8 +1,9 @@
 // The readiness seam of the fork PR readiness adapter (process-event-adapter/1).
 //
 // This module is the WHOLE of the adapter's judgment. Slice T1 shipped it empty;
-// this slice installs the conservative GitHub readiness predicate in it, so no
-// other part of the package can quietly acquire an opinion about a pull request.
+// it now holds the conservative GitHub readiness predicate and the readiness
+// latch that keeps one wake per head, so no other part of the package can
+// quietly acquire an opinion about a pull request.
 //
 // decideWake(entry, ctx)
 //   entry  one armed task that already passed the adapter's eligibility gate:
@@ -14,10 +15,10 @@
 //          head is the recorded state/<id>.meta pr_head= that the gate already
 //          validated, so it is the recorded head this module compares against.
 //          meta must be exactly <stateDir>/<id>.meta: the seam re-reads that one
-//          record itself (see "The latch" and "Posture, re-read") and refuses to
-//          read any other path. The gate reads state/<id>.meta and the armed
-//          merge poll's state/<id>.check.sh sidecar; both are owned by upstream
-//          tasks and are never written here.
+//          record itself (see "THE LATCH" below) and refuses to read any other
+//          path. The gate reads state/<id>.meta and the armed merge poll's
+//          state/<id>.check.sh sidecar; both are owned by upstream tasks and are
+//          never written here.
 //   ctx    {home, stateDir, configDir, evaluateCount, now, requestId, log}:
 //          absolute paths resolved from the registration's config_ref, how many
 //          entries this poll offers the seam, the current epoch milliseconds, the
@@ -88,17 +89,17 @@
 //                normal operation; re-armed by a changed head. See "The latch"
 //                below, which composes that with the guarantee that a genuinely
 //                ready head is never silently suppressed.
-//   Body         the advisory text firstmate reads. This slice produces it,
+//   Body         the advisory text firstmate reads. This seam produces it,
 //                and it names the task, the pull request URL, and the head it
 //                is talking about, and it says plainly that it is advisory
 //                evidence - never an approval, a merge, or authority to merge.
-//   Errors       this slice keeps this too: returning null is silence and is
-//                always safe. The adapter treats an empty, non-string, or
-//                oversized body as silence, so every body must be a bounded
-//                string that survives JSON encoding. A throw is NOT silence:
-//                the adapter answers with an unavailable error, which core
-//                captures as an actionable adapter-failure record. Either way
-//                no failure path can ever be read as green.
+//   Errors       returning null is silence and is always safe. The adapter
+//                treats an empty, non-string, or oversized body as silence, so
+//                every body must be a bounded string that survives JSON
+//                encoding. A throw is NOT silence: the adapter answers with an
+//                unavailable error, which core captures as an actionable
+//                adapter-failure record. Either way no failure path can ever be
+//                read as green.
 //
 // THE LATCH. Readiness has memory: one marker per task, <home>/state/<id>.pr-
 // green-ready, written as one fixed-arity line record and published by

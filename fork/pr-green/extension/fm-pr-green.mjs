@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Firstmate fork PR readiness adapter (process-event-adapter/1).
 //
-// Registers the fork-owned source that will wake Firstmate when a pull request
-// it may merge on its own authority has finished: every required check reported
+// Registers the fork-owned source that wakes Firstmate when a pull request it
+// may merge on its own authority has finished: every required check reported
 // green at the recorded head. It is a fork-owned external package
 // (docs/extension-bindings.md), so it edits no upstream file and plugs in through
 // the same extension seam the fork's Discord bridge uses.
@@ -11,10 +11,10 @@
 // empty readiness seam. Slice T2 installed the readiness evaluation at that seam
 // (see ./readiness.mjs), so an eligible open, non-draft pull request whose live
 // head still matches the record and whose every unwaived required check has
-// reported green at that head produces the advisory result below. This slice
-// (T3) gives that result memory: the seam's readiness latch is published at the
-// same seam, so one green head wakes firstmate once, a changed head re-arms, and
-// an interrupted latch write can only ever repeat a wake.
+// reported green at that head produces the advisory result below. Slice T3 gave
+// that result memory: the seam's readiness latch is published at the same seam,
+// so one green head wakes firstmate once, a changed head re-arms, and an
+// interrupted latch write can only ever repeat a wake.
 //
 // ADVISORY BY CONSTRUCTION. This package merges nothing, arms nothing, records
 // no approval or merge authority, and never rewrites a task record. A wake only

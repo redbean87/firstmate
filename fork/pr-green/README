@@ -1,18 +1,18 @@
 Firstmate fork: PR readiness wake
 =================================
 
-Registers the fork-owned source that will wake Firstmate when a pull request it
-may merge on its own authority has finished: every required check reported green
-at the recorded head. That wake is the capability that closes the gap where a
-green pull request waits for the next heartbeat or for the captain to notice it.
+Registers the fork-owned source that wakes Firstmate when a pull request it may
+merge on its own authority has finished: every required check reported green at
+the recorded head. That wake is the capability that closes the gap where a green
+pull request waits for the next heartbeat or for the captain to notice it.
 
 Slice T1 shipped the adapter and its registration contract with an empty
 readiness seam. Slice T2 filled that seam with the conservative readiness
 predicate described below, so an eligible pull request whose every unwaived
 required check has reported green at its recorded head produces the advisory
-wake. This slice (T3) gives that wake memory: the same seam keeps one readiness
-latch marker per task, so a pull request that stays open and green wakes
-Firstmate once per head instead of once per poll, a changed head re-arms, and an
+wake. Slice T3 gave that wake memory: the same seam keeps one readiness latch
+marker per task, so a pull request that stays open and green wakes Firstmate
+once per head instead of once per poll, a changed head re-arms, and an
 interrupted marker write can only ever repeat a wake - never swallow one
 ("One wake per head: the latch").
 
@@ -156,9 +156,9 @@ part of the package can quietly acquire an opinion about a pull request:
   gate already validated - and the path to that record, which must be exactly
   <state>/<id>.meta. ctx is built once per poll and carries the absolute home,
   state, and config paths, the poll's clock, the host's own request id for this
-  poll (see "The latch"), a stderr logger, and evaluateCount: how many entries
-  that poll offers the seam, which is what the poll's one read budget is split
-  across.
+  poll (see "One wake per head: the latch"), a stderr logger, and
+  evaluateCount: how many entries that poll offers the seam, which is what the
+  poll's one read budget is split across.
 
 A wake is produced only when all of this holds at once:
 
@@ -394,10 +394,11 @@ fork/bin/fm-pr-green-teardown clears explicitly:
 Run the `--all` form before retiring the source for good. Upstream's
 task teardown does not know this file (the fork never edits bin/fm-teardown.sh),
 so ask for it explicitly when a whole home goes away, and rely on the poll's own
-pruning otherwise. Everything else the adapter reads is upstream's:
-state/<id>.meta, state/<id>.check.sh, config/github-hosts, the optional
-config/pr-green-gh, the poll-wait/read-budget knobs, and the forge. It never
-writes a task record, an approval, or merge-notification state.
+pruning otherwise. Everything else it reads belongs to upstream or to optional
+configuration it never writes: state/<id>.meta, state/<id>.check.sh,
+config/github-hosts, config/pr-green-gh, the forge, and the operator- or
+test-set poll-wait/read-budget knobs under state/pr-green/ (see "Latency"). It
+never writes a task record, an approval, or merge-notification state.
 
 
 Known limits
