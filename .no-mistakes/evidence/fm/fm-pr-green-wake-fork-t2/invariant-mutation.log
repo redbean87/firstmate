@@ -1,0 +1,19 @@
+### Baseline (unmutated copy): both targeted suites pass
+ok - delivery: the real binding, registration, capture, wake, re-announcement, and acknowledgement path carries one advisory readiness event and records no authority
+ok - silence: the shipped package binds, registers, reads the forge, and produces no wake while a check is still running
+pr-green suite exit=0
+ok - identity: status contexts are judged one by one and unnamed check runs are never treated as one check
+ok - cost: every not-ready rollup is silent after exactly one forge read, and no required-context read happens
+
+### Mutation A: wrong divisor total/(N-1) - the poll may spend more than its one total
+pr-green suite exit=1
+not ok - every eligible task gets its own forge read in one poll, whatever its id sorts after: pr view https://github.com/acme/app/pull/7 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+
+### Mutation B: pre-fix mechanism - one first-come deadline shared by the whole poll
+pr-green suite exit=1
+not ok - every eligible task gets its own forge read in one poll, whatever its id sorts after: pr view https://github.com/acme/app/pull/7 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+
+### Mutation C: pre-fix advisory wording spliced into a fixed sentence
+readiness suite exit=1
+not ok - the advisory body says the reported checks are green at the head it names (missing: 'Every reported check is green at that head.')
+not ok - the zero-required advisory body says the reported checks are green at the head it names (missing: 'Every reported check is green at that head.')

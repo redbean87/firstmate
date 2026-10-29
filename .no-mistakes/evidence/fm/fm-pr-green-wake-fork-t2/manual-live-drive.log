@@ -1,0 +1,70 @@
+
+=== S1: green PR -> one advisory wake (real host + runner + adapter) ===
+--- captured result body ---
+PR READINESS (advisory): green-ship https://github.com/acme/app/pull/7 at head 1111111111111111111111111111111111111111. Every reported check is green at that head. The single required check has reported at that head. This is advisory evidence to look at the pull request, not an approval, a merge, or authority to merge; the merge step re-reads every requirement itself.
+--- wake queue ---
+1793285425	1	check	procevent:pr-green:1	check: procevent pr-green pr-green 1
+1793285425	2	check	procevent:pr-green:1	check: procevent pr-green pr-green 1
+--- classify ---
+pr-ready-advisory
+--- forge calls ---
+pr view https://github.com/acme/app/pull/7 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+api repos/acme/app/branches/main
+api --paginate --slurp repos/acme/app/rules/branches/main
+--- authority/decision records (expect none) ---
+--- task record unchanged? ---
+5bc4b4758fe02d2d35ae2eaf1adbe60cd65a3312c5030c41791c280e4388992d  /private/tmp/fm-live-pr-green/work/s1/state/green-ship.meta
+
+=== S2: pending check -> silence, one read, no required read ===
+{"status":"no-result","output":""}
+--- seam log ---
+pr-green: eligible pending-ship
+pr-green: poll 1 eligible, 0 refused
+pr-green: not-ready pending-ship checks-not-green
+--- forge calls (expect 1, pr view only) ---
+pr view https://github.com/acme/app/pull/7 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+
+=== S3: green rollup + unreadable required-context source -> silence ===
+fail-rules           status=no-result output=  reads=3  reason=not-ready src-ship required-rules-unreadable
+fail-branch          status=no-result output=  reads=2  reason=not-ready src-ship required-protection-unreadable
+raw-rules-malformed  status=no-result output=  reads=3  reason=not-ready src-ship required-rules-unreadable
+no-rules-answer      status=no-result output=  reads=3  reason=not-ready src-ship required-rules-unreadable
+
+=== S4: head mismatch / closed / draft -> silence ===
+head-mismatch    status=no-result output=  reason=not-ready life-ship head-mismatch
+closed           status=no-result output=  reason=not-ready life-ship not-open
+draft            status=no-result output=  reason=not-ready life-ship draft-unconfirmed
+no-draft-flag    status=no-result output=  reason=not-ready life-ship draft-unconfirmed
+
+=== S5: out-of-scope records are refused before any forge read ===
+--- gate decisions ---
+pr-green: eligible green-ship
+pr-green: skipped gerrit-ship unsupported-provider
+pr-green: skipped gitlab-ship unsupported-provider
+pr-green: skipped not-armed not-armed
+pr-green: skipped unlisted-gh host-not-listed
+pr-green: skipped yolo-off yolo-off
+--- forge reads for the whole out-of-scope set ---
+pr view https://github.com/acme/app/pull/7 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+
+=== S6: one poll announces every simultaneously ready PR in one result ===
+--- one result, every ready PR ---
+PR READINESS (advisory): a-ship https://github.com/acme/app/pull/7 at head 1111111111111111111111111111111111111111
+PR READINESS (advisory): b-ship https://github.com/acme/app/pull/8 at head 1111111111111111111111111111111111111111
+PR READINESS (advisory): c-ship https://github.com/acme/app/pull/9 at head 1111111111111111111111111111111111111111
+advisory blocks: 3
+--- acknowledge, then the next poll ---
+adv blocks in sequence 2: 3
+
+=== S7: fair split - three hanging reads, every entry still read inside one budget ===
+status=no-result output=''
+reads=3 elapsed=4112ms budget=4000ms
+pr view https://github.com/acme/app/pull/7 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+pr view https://github.com/acme/app/pull/8 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+pr view https://github.com/acme/app/pull/9 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+
+=== S8: advisory body wording for 0 and 1 required checks (seam output) ===
+zero   PR READINESS (advisory): wording-task https://github.com/acme/app/pull/7 at head 1111111111111111111111111111111111111111. Every reported check is green at that head. No branch rule requires a check at this base branch. This is advisory evidence to look at the pull request, not an approval, a merge, or authority to merge; the merge step re-reads every requirement itself.
+one    PR READINESS (advisory): wording-task https://github.com/acme/app/pull/7 at head 1111111111111111111111111111111111111111. Every reported check is green at that head. The single required check has reported at that head. This is advisory evidence to look at the pull request, not an approval, a merge, or authority to merge; the merge step re-reads every requirement itself.
+
+DONE

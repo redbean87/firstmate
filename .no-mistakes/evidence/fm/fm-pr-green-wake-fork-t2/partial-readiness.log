@@ -1,0 +1,9 @@
+--- poll result (one task is green, one still running) ---
+result
+PR READINESS (advisory): a-green https://github.com/acme/app/pull/7 at head 1111111111111111111111111111111111111111. Every reported check is green at that head. The single required check has reported at that head. This is advisory evidence to look at the pull request, not an approval, a merge, or authority to merge; the merge step re-reads every requirement itself.
+
+--- forge reads (both entries were asked; only the green one cost required reads) ---
+pr view https://github.com/acme/app/pull/7 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup
+api repos/acme/app/branches/main
+api --paginate --slurp repos/acme/app/rules/branches/main
+pr view https://github.com/acme/app/pull/8 --json state,isDraft,headRefOid,baseRefName,statusCheckRollup

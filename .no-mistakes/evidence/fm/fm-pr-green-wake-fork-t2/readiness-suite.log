@@ -1,0 +1,11 @@
+ok - producers: a producer-bound requirement needs its own app reported at the live head, and an unreadable producer read is silence
+ok - lifecycle: a closed, draft, head-mismatched, or unreadable pull request is never ready, and never costs a required read
+ok - ready: an open, non-draft pull request at the recorded head with every check green and every required check reported is advisory-ready
+ok - required sources: a green rollup beside any unreadable, incomplete, or ambiguous required-context source is silence, never green
+ok - budget: a forge read that hangs is silence within the shortened budget rather than a stall or a wake
+ok - cli: an absent, ambiguous, or unexecutable forge CLI is silence, never a wake, and a symlinked binary is resolved
+ok - supersession: only a completed, whole-second-dated run strictly older than a green run of the same name is superseded
+ok - malformed: failed, empty, unparsable, wrongly shaped, and unclassified answers are all silence
+ok - required: a reported SKIPPED/NEUTRAL is green while a required context missing from the rollup is silence
+ok - identity: status contexts are judged one by one and unnamed check runs are never treated as one check
+ok - cost: every not-ready rollup is silent after exactly one forge read, and no required-context read happens

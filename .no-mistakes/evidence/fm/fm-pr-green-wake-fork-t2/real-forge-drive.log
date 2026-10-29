@@ -1,0 +1,16 @@
+gh: /opt/homebrew/bin/gh (gh version 2.86.0 (2026-01-21))
+
+=== real GitHub, real gh, real seam =====================================
+open, non-draft, green, no required check  PR READINESS (advisory): jq-3699 https://github.com/jqlang/jq/pull/3699 at head 01593dbeca146a15e36f3773abcae0904099e832. Every reported check is green at that head. No branch rule requires a check at this base branch. This is advisory evidence to look at the pull request, not an approval, a merge, or authority to merge; the merge step re-reads every requirement itself.
+open, green, 3 required checks reported    PR READINESS (advisory): cli-14858 https://github.com/cli/cli/pull/14858 at head b17c1554e635b794ff9dbb6607e15575bd9ea387. Every reported check is green at that head. All 3 required checks have reported at that head. This is advisory evidence to look at the pull request, not an approval, a merge, or authority to merge; the merge step re-reads every requirement itself.
+open, green rollup, required never reported SILENT
+    pr-green: not-ready cli-14867 required-unreported
+open + green but recorded head is stale    SILENT
+    pr-green: not-ready cli-stale head-mismatch
+already merged pull request                SILENT
+    pr-green: not-ready cli-merged not-open
+
+=== the real forge's own answers behind those verdicts ==================
+jq-3699   branch {"protected":false}  rulesets [[]]
+cli-14858 branch {"protected":true,"required":["build (macos-latest)","build (ubuntu-latest)","build (windows-latest)"]}  rulesets [[{"type":"copilot_code_review","required":null}]]
+cli-14867 reported check names label-external / label_issues, close-from-default-branch / close-from-default-branch, check-requirements / check-requirements, check-requirements / close-unmet-requirements, close-unmet-requirements, close-no-help-wanted, ready-for-review

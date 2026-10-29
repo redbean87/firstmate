@@ -1,0 +1,8 @@
+ok - classification: captured failure evidence is labelled pr-ready-error, and pr-ready-advisory is reserved for a readiness body
+ok - config_ref: a malformed, traversing, or unusable reference answers with an error code and never a wake
+ok - budget: one poll reads every eligible task once inside a single total budget, so a hang cannot cost a later task its read
+ok - multiplicity: every simultaneously ready pull request reaches the one advisory result, and a later poll announces all of them again
+ok - scope gate: only armed GitHub pull requests of mode no-mistakes/direct-PR yolo=on ships are offered, and polling writes nothing
+ok - predicate: the real readiness seam turns a fully green fixture pull request into one advisory process-event wake, and records no authority
+ok - delivery: the real binding, registration, capture, wake, re-announcement, and acknowledgement path carries one advisory readiness event and records no authority
+ok - silence: the shipped package binds, registers, reads the forge, and produces no wake while a check is still running

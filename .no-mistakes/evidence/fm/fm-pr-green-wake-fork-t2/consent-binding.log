@@ -1,0 +1,31 @@
+--- manifest ---
+{
+  "schema": "firstmate.extension-manifest.v1",
+  "id": "org.firstmate.fork.pr-green",
+  "version": "0.2.0",
+  "host_protocols": [1],
+  "entrypoint": "fm-pr-green.mjs",
+  "capabilities": [
+    {
+      "name": "process-event-adapter",
+      "versions": [1],
+      "adapter_names": ["pr-green"]
+    }
+  ],
+  "required_consents": ["task-metadata", "credential-store", "network"]
+}
+
+--- bind WITHOUT the consents this slice now requires ---
+error[binding-failed]: error[consent-missing]: manifest requires explicit --consent credential-store
+exit=1
+
+--- bind with every manifest-required consent ---
+bound: org.firstmate.fork.pr-green@0.2.0
+binding: /private/tmp/fm-live-pr-green/consent/home/config/extensions.d/org.firstmate.fork.pr-green.json
+binding-digest: sha256:f5b49a7541d71230db633ef1957505ca3e62cec8cf360c4af56996037219ed44
+package: /private/tmp/fm-live-pr-green/consent/home/data/extensions/packages/org.firstmate.fork.pr-green/0.2.0/ed71a01b4adcd16715cb04bd749319f41b509352d1c8654436994136f93abcdc
+package-digest: sha256:ed71a01b4adcd16715cb04bd749319f41b509352d1c8654436994136f93abcdc
+verified: process-event-adapter/1 (pr-green)
+exit=0
+
+--- recorded binding consents (real host output) ---
