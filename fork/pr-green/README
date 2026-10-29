@@ -1,15 +1,20 @@
 Firstmate fork: PR readiness wake
 =================================
 
-Wakes Firstmate when a pull request it may merge on its own authority has
-finished: every required check reported green at the recorded head. It is the
-capability that closes the gap where a green pull request waits for the next
-heartbeat or for the captain to notice it.
+Registers the fork-owned source that will wake Firstmate when a pull request it
+may merge on its own authority has finished: every required check reported green
+at the recorded head. That wake is the capability that closes the gap where a
+green pull request waits for the next heartbeat or for the captain to notice it.
+
+This slice, T1, ships the adapter and its registration contract only. The
+readiness predicate, the one-shot per-head latch, and the wake body land in a
+later slice ("The readiness seam" below); until then the registered source
+listens and stays silent.
 
 It is fork-owned. Everything lives under fork/pr-green/, upstream code stays
 byte-identical, and it reaches Firstmate through the same documented
 extension seam the Discord bridge uses: an external process-event adapter,
-registered in the home, emitting one ordinary process-event wake that
+registered in the home, that will emit one ordinary process-event wake which
 Firstmate's existing supervision already consumes.
 
 Like fork/README, this file is plain text with no extension on purpose:
@@ -21,7 +26,10 @@ fork does not edit that inventory.
 Advisory by construction
 ------------------------
 
-The wake is advisory. It says "look at this pull request", never "merge it".
+The wake this source is built to emit is advisory: it will say "look at this
+pull request", never "merge it". The constraints below bind the predicate a
+later slice installs at the seam, and the code shipping today already keeps
+them.
 
   - bin/fm-pr-merge.sh remains the only merge authority. It re-reads every
     required check at merge time and refuses a red pull request, a required
@@ -29,12 +37,12 @@ The wake is advisory. It says "look at this pull request", never "merge it".
   - Nothing in this package merges, arms a merge, answers a finding, writes a
     waiver, records approval, or records merge authority. It never rewrites a
     task record.
-  - Because the readiness test cannot share core internals, it is an
+  - Because the readiness test cannot share core internals, it will be an
     independent, advisory implementation. A divergence from the merge gate can
     cost a wasted wake or a missed one; it cannot cause a bad merge.
-  - Silence is the default. A missing required check, an unreadable or failed
-    read, a stale head, an unclear conclusion, or any doubt produces no wake,
-    never a claim of green.
+  - Silence must be the default. A missing required check, an unreadable or
+    failed read, a stale head, an unclear conclusion, or any doubt must produce
+    no wake, never a claim of green.
 
 Only work Firstmate may land on its own authority is eligible, so a wake can
 only ever be a question Firstmate is already allowed to answer by itself.
@@ -43,9 +51,9 @@ only ever be a question Firstmate is already allowed to answer by itself.
 Supported scope
 ---------------
 
-  Providers     GitHub only. gitlab, gerrit, and forgejo records can never
-                wake this source: a URL that is not a GitHub pull request URL
-                is refused before any readiness logic runs, and a GitHub
+  Providers     GitHub only. gitlab, gerrit, and forgejo records can never be
+                offered to this source: a URL that is not a GitHub pull request
+                URL is refused before any readiness logic runs, and a GitHub
                 Enterprise host is accepted only when this home lists it in
                 config/github-hosts, exactly as upstream's own GitHub host
                 rule requires.
@@ -110,11 +118,11 @@ about a pull request:
   silent.
 
 extension/readiness.mjs's header is the single owner of the contract a later
-slice must satisfy there, including the failure directions: it returns null
-for any uncertainty, it latches at most one wake per pull request per head,
-and an interrupted latch write fails toward one possible duplicate wake rather
-than a permanently suppressed one. The fork tests drive the seam with a stub
-package copy, which is what makes the seam real: replacing that one file is
+slice must satisfy there, including the failure directions: it must return null
+for any uncertainty, it must latch at most one wake per pull request per head,
+and an interrupted latch write must fail toward one possible duplicate wake
+rather than a permanently suppressed one. The fork tests drive the seam with a
+stub package copy, which is what makes the seam real: replacing that one file is
 the only way to produce a wake, and it is how later slices will fill it in.
 
 Nothing has been installed at that seam yet, so registering the package today
@@ -156,9 +164,10 @@ restarts it every cycle, so retire the source to stop it.
 Event delivery and acknowledgement
 ----------------------------------
 
-When the seam reports a ready pull request, the adapter returns one result.
-Core captures it as external evidence and publishes the ordinary bounded
-process-event wake, so nothing new is introduced into Firstmate's supervision:
+When a later slice's seam reports a ready pull request, the adapter returns one
+result. Core captures it as external evidence and publishes the ordinary bounded
+process-event wake, so nothing new is introduced into Firstmate's supervision.
+The path is the one the fork tests already drive with a stub seam:
 
   check: procevent pr-green pr-green <sequence>
 
@@ -171,9 +180,9 @@ process-event wake, so nothing new is introduced into Firstmate's supervision:
               acknowledges it, so a single wake is never lost to a missed turn.
   acknowledge bin/fm-procevent.sh handled pr-green <sequence>
 
-The latch that keeps one wake per pull request per head lives in the seam, not
-in core, so a re-announced result and a re-polled head are different things: the
-first is core's ordinary retry until `handled`, the second is the seam's own
+The latch that keeps one wake per pull request per head will live in the seam,
+not in core, so a re-announced result and a re-polled head are different things:
+the first is core's ordinary retry until `handled`, the second is the seam's own
 deduplication. bin/fm-procevent.sh list shows the pending count.
 
 
@@ -181,12 +190,13 @@ Latency
 -------
 
 The source holds one bounded long poll (up to 50 seconds) and re-scans the
-home's task records every 5 seconds inside it, which is what makes a wake
-prompt: a state change that arrives mid-poll is seen within about five seconds.
-When the poll returns no result the runner exits and the ordinary supervision
-cycle restarts it (FM_POLL, 15 seconds by default), so the worst case without a
-live scan is roughly one poll plus one cycle. Only tests shorten that wait:
-they set state/pr-green/poll-wait-ms (100-50000) to keep their runs fast.
+home's task records every 5 seconds inside it, so a state change that arrives
+mid-poll is seen within about five seconds; once the predicate lands, that is
+what will make a wake prompt. When the poll returns no result the runner exits
+and the ordinary supervision cycle restarts it (FM_POLL, 15 seconds by default),
+so the worst case without a live scan is roughly one poll plus one cycle. Only
+tests shorten that wait: they set state/pr-green/poll-wait-ms (100-50000) to
+keep their runs fast.
 
 
 Adapter state

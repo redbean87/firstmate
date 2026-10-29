@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 // Firstmate fork PR readiness adapter (process-event-adapter/1).
 //
-// Wakes Firstmate when a pull request it may merge on its own authority has
-// finished: every required check reported green at the recorded head. It is a
-// fork-owned external package (docs/extension-bindings.md), so it edits no
+// Registers the fork-owned source that will wake Firstmate when a pull request
+// it may merge on its own authority has finished: every required check reported
+// green at the recorded head. This slice ships the adapter, its scope gate, and
+// its registration; the readiness predicate and the wake it emits land at the
+// seam in a later slice, so the registered source listens and stays silent. It
+// is a fork-owned external package (docs/extension-bindings.md), so it edits no
 // upstream file and plugs in through the same extension seam the fork's Discord
 // bridge uses.
 //
 // ADVISORY BY CONSTRUCTION. This package merges nothing, arms nothing, records
 // no approval or merge authority, and never rewrites a task record. A wake only
-// tells Firstmate to look; bin/fm-pr-merge.sh remains the only thing that can
-// merge and re-validates every required check at merge time. A divergence
+// ever tells Firstmate to look; bin/fm-pr-merge.sh remains the only thing that
+// can merge and re-validates every required check at merge time. A divergence
 // between this adapter and that gate can cost a wasted wake or a missed one,
 // never a bad merge.
 //
