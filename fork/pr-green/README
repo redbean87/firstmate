@@ -110,8 +110,11 @@ Files
                                       predicate turning a green fixture pull
                                       request into one advisory result through the
                                       real binding, registration, and runner,
-                                      silence while a check is still running, and
-                                      the wake and acknowledgement path driven
+                                      silence while a check is still running, one
+                                      result carrying every simultaneously ready
+                                      task, one poll reading every eligible task
+                                      inside its one shared read budget, and the
+                                      wake and acknowledgement path driven
                                       through a package copy whose seam is a
                                       fixture stub.
   fork/tests/fm-fork-pr-green-readiness.test.sh
@@ -190,8 +193,9 @@ seconds, well inside the binding's 300-second default invoke timeout, and that
 budget is split evenly across the entries the poll evaluates, so a hanging or
 very slow pull request spends only its own share instead of the share of every
 task that sorts after it. The adapter also asks the seam about one pull request
-at most once per poll rather than once per internal rescan, and once one poll
-has evaluated its eligible tasks it returns them together as one result.
+at most once per poll for each recorded head rather than once per internal
+rescan, and once one poll has evaluated its eligible tasks it returns them
+together as one result.
 
 The extension host gives a bound package a minimal environment, so the gh on the
 operator's PATH is usually not resolvable inside it. The predicate therefore
@@ -206,9 +210,8 @@ resolves the binary explicitly, and predicts nothing:
 
 Authentication is gh's own, which is why the binding requires the credential-store
 consent: the operator's existing gh login is used and no credential is ever read,
-written, or handed to the package. state/pr-green/read-budget-ms (200-25000) may
-shorten the read budget for tests or an unusually slow host; it can never
-lengthen it.
+written, or handed to the package. state/pr-green/read-budget-ms may shorten the
+read budget (see "Latency" for its range); it can never lengthen it.
 
 
 Registration
@@ -250,10 +253,10 @@ Event delivery and acknowledgement
 
 When the seam reports ready pull requests, the adapter returns one result
 carrying an advisory block for each of them - never only the pull request whose
-task id sorts first. Core captures it as external evidence and publishes the
-ordinary bounded process-event wake, so nothing new is introduced into
-Firstmate's supervision. The path is the one the fork tests already drive with a
-stub seam:
+task id sorts first - up to the result-size limit under "Known limits". Core
+captures it as external evidence and publishes the ordinary bounded
+process-event wake, so nothing new is introduced into Firstmate's supervision.
+The path is the one the fork tests already drive with a stub seam:
 
   check: procevent pr-green pr-green <sequence>
 
@@ -282,15 +285,16 @@ Latency
 
 The source holds one bounded long poll (up to 50 seconds) and re-scans the
 home's task records every 5 seconds inside it, so a newly armed task is picked up
-mid-poll rather than at the next cycle. That rescan is cheap and local: the forge
-is asked about each eligible pull request at most once per poll, so the rescan
-never multiplies network reads. When the poll returns no result the runner exits
-and the ordinary supervision cycle restarts it (FM_POLL, 15 seconds by default),
-so a green pull request is normally announced within roughly one poll plus one
-cycle - as long as its own share of the read budget is enough for its forge
-reads, which the share limit under "Known limits" bounds.
-Only tests shorten those waits: they set state/pr-green/poll-wait-ms (100-50000)
-and state/pr-green/read-budget-ms (200-25000) to keep their runs fast.
+mid-poll rather than at the next cycle. That rescan is cheap and local: it
+re-reads task records only, so it never multiplies the poll's forge reads (see
+"Read cost and the forge binary"). When the poll returns no result the runner
+exits and the ordinary supervision cycle restarts it (FM_POLL, 15 seconds by
+default), so a green pull request is normally announced within roughly one poll
+plus one cycle - as long as its own share of the read budget is enough for its
+forge reads, which the share limit under "Known limits" bounds.
+Tests set state/pr-green/poll-wait-ms (100-50000) and
+state/pr-green/read-budget-ms (200-25000) to keep those waits short; an operator
+may shorten either one too, and neither can lengthen a wait.
 
 
 Adapter state

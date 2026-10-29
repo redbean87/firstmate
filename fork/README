@@ -49,7 +49,7 @@ process-event extension, registered through the same seam as the Discord
 inbound adapter. It ships the adapter, its scope gate, its registration, and the
 readiness predicate: an open, non-draft pull request of an eligible task, at the
 recorded head, whose every unwaived required check has reported green, produces
-one advisory wake, while a pending, failed, missing, unreadable, or otherwise
+an advisory wake, while a pending, failed, missing, unreadable, or otherwise
 incomplete input stays silent. The wake only ever tells Firstmate to look, and
 bin/fm-pr-merge.sh remains the only merge authority and re-validates every
 check at merge time.
