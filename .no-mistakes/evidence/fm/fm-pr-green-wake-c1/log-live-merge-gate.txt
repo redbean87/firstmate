@@ -1,0 +1,137 @@
+real script: /Users/cortezashley/.no-mistakes/worktrees/ea4b1a4b43db/01M62S03PGWQZ0MD5V92TYRN34/bin/fm-pr-merge.sh
+
+===== A. green required check at the live head merges with zero waivers =====
+exit=0
+-- stderr --
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair a missing or failed watcher cycle with the Pi tool fm_watch_arm_pi, or restart Pi with -e /Users/cortezashley/.no-mistakes/worktrees/ea4b1a4b43db/01M62S03PGWQZ0MD5V92TYRN34/.pi/extensions/fm-primary-turnend-guard.ts -e /Users/cortezashley/.no-mistakes/worktrees/ea4b1a4b43db/01M62S03PGWQZ0MD5V92TYRN34/.pi/extensions/fm-primary-pi-watch.ts if the extensions are not loaded.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+verified: https://github.com/example/repo/pull/11 is open and mergeable, with every unwaived required check reported and every unwaived check green at head 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1
+-- stdout --
+armed: state/task-x1.check.sh
+verified: https://github.com/example/repo/pull/11 is merged (state=MERGED, merged=true, isInMergeQueue=false)
+-- every fake-gh call --
+  pr view https://github.com/example/repo/pull/11 --json headRefOid -q .headRefOid
+  pr view https://github.com/example/repo/pull/11 --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup
+  api repos/example/repo/branches/main
+  api --paginate repos/example/repo/rules/branches/main
+  pr merge 11 --repo example/repo --match-head-commit 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1 --squash
+  api graphql -f query=query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state merged isInMergeQueue baseRefName}}} -F owner=example -F repo=repo -F number=11 --jq .data.repository.pullRequest | "state=" + (.state // ""), "merged=" + (.merged | tostring), "queued=" + (.isInMergeQueue | tostring), "base=" + (.baseRefName // "")
+
+===== B. red check refuses and nothing merges =====
+exit=1
+-- stderr --
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+error: refusing to merge https://github.com/example/repo/pull/11
+  - check 'lint' is not green
+error: these checks are not green: lint
+-- stdout --
+armed: state/task-x1.check.sh
+-- every fake-gh call --
+  pr view https://github.com/example/repo/pull/11 --json headRefOid -q .headRefOid
+  pr view https://github.com/example/repo/pull/11 --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup
+  api repos/example/repo/branches/main
+  api --paginate repos/example/repo/rules/branches/main
+
+===== C. required check that never reported refuses, named apart from red =====
+exit=1
+-- stderr --
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+error: refusing to merge https://github.com/example/repo/pull/11
+  - required check 'deploy' has not reported at head 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1
+error: these required checks have not reported: deploy
+-- stdout --
+armed: state/task-x1.check.sh
+-- every fake-gh call --
+  pr view https://github.com/example/repo/pull/11 --json headRefOid -q .headRefOid
+  pr view https://github.com/example/repo/pull/11 --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup
+  api repos/example/repo/branches/main
+  api --paginate repos/example/repo/rules/branches/main
+
+===== D. unreadable required-context source refuses instead of reading as green =====
+exit=1
+-- stderr --
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+error: refusing to merge https://github.com/example/repo/pull/11
+  - the branch protection summary for base branch main could not be read, so a required check that has not reported cannot be ruled out
+-- stdout --
+armed: state/task-x1.check.sh
+-- every fake-gh call --
+  pr view https://github.com/example/repo/pull/11 --json headRefOid -q .headRefOid
+  pr view https://github.com/example/repo/pull/11 --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup
+  api repos/example/repo/branches/main
+  api --paginate repos/example/repo/rules/branches/main
+
+===== E. attended --allow-red still waives only its named check =====
+exit=0
+-- stderr --
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+verified: https://github.com/example/repo/pull/11 is open and mergeable, with every unwaived required check reported and every unwaived check green at head 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1
+-- stdout --
+armed: state/task-x1.check.sh
+verified: https://github.com/example/repo/pull/11 is merged (state=MERGED, merged=true, isInMergeQueue=false)
+-- every fake-gh call --
+  pr view https://github.com/example/repo/pull/11 --json headRefOid -q .headRefOid
+  pr view https://github.com/example/repo/pull/11 --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup
+  api repos/example/repo/branches/main
+  api --paginate repos/example/repo/rules/branches/main
+  pr merge 11 --repo example/repo --match-head-commit 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1 --squash
+  api graphql -f query=query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state merged isInMergeQueue baseRefName}}} -F owner=example -F repo=repo -F number=11 --jq .data.repository.pullRequest | "state=" + (.state // ""), "merged=" + (.merged | tostring), "queued=" + (.isInMergeQueue | tostring), "base=" + (.baseRefName // "")
+
+===== F. attended --allow-missing waives only its named unreported check =====
+exit=0
+-- stderr --
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+verified: https://github.com/example/repo/pull/11 is open and mergeable, with every unwaived required check reported and every unwaived check green at head 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1
+-- stdout --
+armed: state/task-x1.check.sh
+verified: https://github.com/example/repo/pull/11 is merged (state=MERGED, merged=true, isInMergeQueue=false)
+-- every fake-gh call --
+  pr view https://github.com/example/repo/pull/11 --json headRefOid -q .headRefOid
+  pr view https://github.com/example/repo/pull/11 --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup
+  api repos/example/repo/branches/main
+  api --paginate repos/example/repo/rules/branches/main
+  pr merge 11 --repo example/repo --match-head-commit 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1 --squash
+  api graphql -f query=query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state merged isInMergeQueue baseRefName}}} -F owner=example -F repo=repo -F number=11 --jq .data.repository.pullRequest | "state=" + (.state // ""), "merged=" + (.merged | tostring), "queued=" + (.isInMergeQueue | tostring), "base=" + (.baseRefName // "")
+
+===== G. a payload with no check rollup is refused, never read as green =====
+exit=1
+-- stderr --
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+error: could not read the GitHub pull request state before merging
+-- stdout --
+armed: state/task-x1.check.sh
+-- every fake-gh call --
+  pr view https://github.com/example/repo/pull/11 --json headRefOid -q .headRefOid
+  pr view https://github.com/example/repo/pull/11 --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup
+
+===== H. plan-gated rules read still proves no ruleset requirement and merges =====
+exit=0
+-- stderr --
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+verified: https://github.com/example/repo/pull/11 is open and mergeable, with every unwaived required check reported and every unwaived check green at head 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1
+-- stdout --
+armed: state/task-x1.check.sh
+verified: https://github.com/example/repo/pull/11 is merged (state=MERGED, merged=true, isInMergeQueue=false)
+-- every fake-gh call --
+  pr view https://github.com/example/repo/pull/11 --json headRefOid -q .headRefOid
+  pr view https://github.com/example/repo/pull/11 --json state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup
+  api repos/example/repo/branches/main
+  api --paginate repos/example/repo/rules/branches/main
+  pr merge 11 --repo example/repo --match-head-commit 11e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1 --squash
+  api graphql -f query=query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state merged isInMergeQueue baseRefName}}} -F owner=example -F repo=repo -F number=11 --jq .data.repository.pullRequest | "state=" + (.state // ""), "merged=" + (.merged | tostring), "queued=" + (.isInMergeQueue | tostring), "base=" + (.baseRefName // "")
+
+===== I. Gerrit change stays refused =====
+exit=2
+error: firstmate does not submit a Gerrit change: submitting requires an attributed human approval it must not manufacture, so a human submits the change on the server

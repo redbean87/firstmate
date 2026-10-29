@@ -1,0 +1,26 @@
+FM_TEST_BEGIN 2026-10-29T03:17:46Z tests/fm-pr-github-checks.test.sh family=pr-forge expected_gate_skip=none
+ok - a fully reported green rollup with no required contexts is green
+ok - classic and ruleset requirements that reported green are green
+ok - a required check that never reported stays not green while every read succeeded
+ok - reported SKIPPED and NEUTRAL results count as green exactly as the merge gate takes them
+ok - a pending or failed check, status context included, is never green
+ok - an older cancelled run superseded by a later passing run leaves the check green
+ok - a re-run that has not finished neither supersedes nor is superseded
+ok - a non-green status context is reported independently and never superseded
+ok - a green rollup with an unreadable requirement source is never green
+ok - a failed ruleset read and a failed producer read are refusals, never green
+ok - a branch-protection summary without its required-status object and an unparseable rules payload are both refusals
+ok - a missing or malformed check rollup is an unreadable payload, not an empty red set
+ok - a payload read at another head cannot produce a verdict for this one
+ok - an empty required set proven by two successful reads is green, while an unproven one refuses
+ok - a plan-gated rules read still proves the repository has no ruleset requirement
+ok - an app-bound requirement is satisfied only by a run from that app at the verified head
+ok - a readiness call that passes no waiver refuses a red check the attended gate may waive
+ok - a readiness call that passes no waiver refuses an unreported requirement the attended gate may waive
+ok - sourcing the library is silent and exposes the one verdict plus the reads it composes
+ok - the verdict reports through its own outputs and writes nothing to stdout or stderr
+FM_TEST_END 2026-10-29T03:17:49Z tests/fm-pr-github-checks.test.sh exit=0 duration_ms=2279 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=2370
+FM_TEST_SUMMARY_FAMILY family=pr-forge count=1 duration_ms=2279 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-pr-github-checks.test.sh duration_ms=2279
+rc=0

@@ -1,0 +1,61 @@
+repository: kunchenguid/firstmate (public, read-only)
+predicate: /Users/cortezashley/.no-mistakes/worktrees/ea4b1a4b43db/01M62S03PGWQZ0MD5V92TYRN34/bin/fm-pr-github-checks-lib.sh via source, real gh + jq
+run started: 2026-10-29T03:31:52Z
+gh login: redbean87
+
+PR 7937 head=861cec20ae2b75dfd0b03a51a57071d206cc84b1 base=main
+GitHub its own verdict for PR 7937: mergeStateStatus=CLEAN, 22 checks in the rollup
+
+===== R1. real green PR 7937 with no waivers is green =====
+rc=0
+status=green
+incomplete=false
+red=[]
+unreported=[]
+lines:
+stderr:
+
+PR 7943 head=957c450269f92252c9f6db01eabe3cc8997fee84 base=main
+GitHub its own verdict for PR 7943: mergeStateStatus=UNSTABLE, 1 checks in the rollup
+
+===== R2. real red PR 7943 with no waivers is blocked and names the red check =====
+rc=1
+status=blocked
+incomplete=false
+red=[Greptile Review]
+unreported=[]
+lines:
+  - check 'Greptile Review' is not green
+stderr:
+
+===== R3. the same green payload against a base branch GitHub cannot read is never green =====
+rc=1
+status=blocked
+incomplete=true
+red=[]
+unreported=[]
+lines:
+  - the branch protection summary for base branch fm-no-such-base-branch could not be read, so a required check that has not reported cannot be ruled out
+stderr:
+
+===== R4. the same green payload at a different head is never green =====
+rc=1
+status=unreadable
+incomplete=false
+red=[]
+unreported=[]
+lines:
+stderr:
+
+===== R5. a red check waived is the attended gate verdict, not readiness =====
+rc=0
+status=green
+incomplete=false
+red=[]
+unreported=[]
+lines:
+stderr:
+
+===== R6. sourcing the shared library is silent (no poll output, no wake) =====
+stdout+stderr bytes:        0
+functions exposed: function
