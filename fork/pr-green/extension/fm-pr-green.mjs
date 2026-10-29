@@ -3,12 +3,16 @@
 //
 // Registers the fork-owned source that will wake Firstmate when a pull request
 // it may merge on its own authority has finished: every required check reported
-// green at the recorded head. This slice ships the adapter, its scope gate, and
-// its registration; the readiness predicate and the wake it emits land at the
-// seam in a later slice, so the registered source listens and stays silent. It
-// is a fork-owned external package (docs/extension-bindings.md), so it edits no
-// upstream file and plugs in through the same extension seam the fork's Discord
-// bridge uses.
+// green at the recorded head. It is a fork-owned external package
+// (docs/extension-bindings.md), so it edits no upstream file and plugs in through
+// the same extension seam the fork's Discord bridge uses.
+//
+// Slice T1 shipped the adapter, its scope gate, and its registration with an
+// empty readiness seam. This slice installs the readiness evaluation at that
+// seam (see ./readiness.mjs), so an eligible open, non-draft pull request whose
+// live head still matches the record and whose every unwaived required check has
+// reported green at that head now produces the advisory result below. The latch
+// that keeps one wake per head is still owed by a later slice.
 //
 // ADVISORY BY CONSTRUCTION. This package merges nothing, arms nothing, records
 // no approval or merge authority, and never rewrites a task record. A wake only
@@ -37,9 +41,13 @@
 //                  pr-ready-error and never presented as a green pull request.
 //
 // The judgment - the readiness predicate, the one-shot per-head latch, and the
-// wake body - lives entirely in ./readiness.mjs, the documented seam later
-// slices fill in. It returns silence today, so with no seam installed this
-// adapter is registered, listening, and silent.
+// wake body - lives entirely in ./readiness.mjs, the documented seam. This slice
+// installs the conservative readiness predicate there; the latch is still owed,
+// so a ready pull request is re-announced every poll until firstmate handles it.
+//
+// The seam reads the forge, so it is asked about each pull request at most once
+// per invocation: the 5-second rescan below exists to notice a newly armed task
+// cheaply, not to spend a network read per entry every 5 seconds.
 //
 // Diagnostics go to stderr as bounded one-line records. The host captures and
 // discards extension stderr, so nothing here reaches a wake or an authority
@@ -50,7 +58,7 @@ import path from "node:path";
 import { decideWake } from "./readiness.mjs";
 
 const EXTENSION_ID = "org.firstmate.fork.pr-green";
-const EXTENSION_VERSION = "0.1.0";
+const EXTENSION_VERSION = "0.2.0";
 const MAX_INPUT_BYTES = 65536;
 const MAX_OUTPUT_BYTES = 30000;
 const MAX_RECORD_BYTES = 65536;
@@ -314,6 +322,10 @@ async function poll(request) {
   const dirs = homeDirs(request.input?.config_ref);
   const deadline = Date.now() + waitMs(dirs);
   let announced = false;
+  // One readiness evaluation per task per recorded head per invocation, so a
+  // slow forge is read once rather than on every rescan. A head change inside
+  // the same poll is a new question and is evaluated again.
+  const evaluated = new Set();
   for (;;) {
     const scan = scanHome(dirs);
     if (!announced) {
@@ -324,6 +336,9 @@ async function poll(request) {
     }
     const ctx = { ...dirs, now: Date.now(), log };
     for (const entry of scan.entries) {
+      const seen = `${entry.id}\u0000${entry.head}`;
+      if (evaluated.has(seen)) continue;
+      evaluated.add(seen);
       const decided = decideWake(entry, ctx);
       if (decided === null || decided === undefined) continue;
       const advisory = decided && typeof decided.advisory === "string" ? decided.advisory : "";

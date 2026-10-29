@@ -57,9 +57,29 @@ fast_poll() {
   printf '100\n' > "$1/state/pr-green/poll-wait-ms"
 }
 
+# fixture_forge <home> <kind>: point this home at the fixture GitHub CLI and give
+# it a recorded answer set. The readiness predicate reads GitHub, so no test here
+# may reach a real gh: an unconfigured home would probe the operator's own
+# install and call the live forge for the fixture owner.
+fixture_forge() {  # <home> <kind> [forge-dir]
+  local home=$1 kind=$2 forge=${3:-$1/forge}
+  # The wrapper is the executable the predicate resolves; config/pr-green-gh names
+  # it by absolute path, which is the explicit override a real home uses. A case
+  # that must prove a poll writes nothing keeps the recorded answer set and its
+  # call log outside the home entirely.
+  fork_fixture_gh "$home/bin/gh" "$forge"
+  mkdir -p "$home/config"
+  printf '%s\n' "$home/bin/gh" > "$home/config/pr-green-gh"
+  case "$kind" in
+    green) fork_pr_green_forge "$forge" "$HEAD_A" ;;
+    pending) fork_pr_pending_forge "$forge" "$HEAD_A" ;;
+    *) fail "fixture_forge: unknown fixture $kind" ;;
+  esac
+}
+
 poll_request() {  # <request-hex> <config-ref>
   jq -cn --arg rid "sha256:$1" --arg ref "$2" '{schema: "firstmate.extension-request.v1", request_id: $rid,
-    host_protocol: 1, extension_id: "org.firstmate.fork.pr-green", extension_version: "0.1.0",
+    host_protocol: 1, extension_id: "org.firstmate.fork.pr-green", extension_version: "0.2.0",
     package_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     capability: "process-event-adapter", capability_version: 1, adapter: "pr-green",
     operation: "source.poll", input: {source_id: "pr-green", config_ref: $ref}}'
@@ -122,6 +142,9 @@ build_gate_home() {
   printf '%s\n' kind=ship mode=no-mistakes yolo=on \
     pr=https://github.com/acme/app/pull/17 pr_head="$HEAD_A" > "$home/config/linked-target.meta"
   ln -s ../config/linked-target.meta "$home/state/linked.meta"
+  # A not-ready forge, so this case can only ever observe the gate: a green one
+  # here would produce a wake through the now-installed readiness predicate.
+  fixture_forge "$home" pending "$PTMP/gate/forge"
   fast_poll "$home"
 }
 
@@ -174,7 +197,8 @@ test_a_malformed_or_unusable_config_ref_is_an_error_not_a_wake() {
 # the source through the real host and runner; sets PKG_TOKEN.
 install_package() {
   local home=$1 pkg=$2 ref=${3:-} reg
-  FM_HOME="$home" "$EXT_HOST" bind "$pkg" --adapter pr-green --trust-same-user-code --consent task-metadata >/dev/null \
+  FM_HOME="$home" "$EXT_HOST" bind "$pkg" --adapter pr-green --trust-same-user-code \
+    --consent task-metadata --consent credential-store --consent network >/dev/null \
     || fail "the real extension host must bind the package"
   reg=$(FM_HOME="$home" "$PROCEVENT" register-extension pr-green pr-green --config-ref "${ref:-home:$home}") \
     || fail "registration failed"
@@ -278,7 +302,7 @@ test_a_failed_read_is_classified_as_error_evidence() {
   pass "classification: captured failure evidence is labelled pr-ready-error, and pr-ready-advisory is reserved for a readiness body"
 }
 
-test_the_shipped_package_listens_and_stays_silent() {
+test_the_shipped_package_stays_silent_for_a_pull_request_that_is_not_green() {
   local home pkg
   home="$PTMP/silent/home"
   build_gate_home "$home"
@@ -286,12 +310,50 @@ test_the_shipped_package_listens_and_stays_silent() {
   mkdir -p "$(dirname "$pkg")"
   cp -R "$PKG_SRC" "$pkg"
   install_package "$home" "$pkg"
+  : > "$PTMP/gate/forge/calls.log"
   FM_HOME="$home" "$PROCEVENT" start pr-green >/dev/null 2>&1 || true
-  [ -z "$(result_files "$home")" ] || fail "with no predicate installed the shipped package captures no result"
+  [ -z "$(result_files "$home")" ] || fail "a pull request whose checks are still running captures no result"
   [ -z "$(wake_payloads "$home")" ] || fail "the shipped package publishes no wake: $(wake_payloads "$home")"
   assert_absent "$home/state/procevent-inbox/pr-green.1.result" "no readiness evidence is captured"
+  [ -s "$PTMP/gate/forge/calls.log" ] || fail "the installed predicate must actually read the fixture forge, or this case proves nothing"
+  assert_contains "$(cat "$PTMP/gate/forge/calls.log")" "pr view https://github.com/acme/app/pull/7" \
+    "the installed predicate reads the eligible pull request"
+  assert_not_contains "$(cat "$PTMP/gate/forge/calls.log")" "branches/" \
+    "a pull request whose checks are not green is refused before any required-context read"
   assert_present "$home/state/procevent/pr-green.source" "the silent source stays registered and listening"
-  pass "silence: the shipped package binds, registers, listens, and produces no wake until the readiness seam is filled in"
+  pass "silence: the shipped package binds, registers, reads the forge, and produces no wake while a check is still running"
+}
+
+test_the_installed_predicate_delivers_a_readiness_wake_end_to_end() {
+  local home pkg result
+  home="$PTMP/readiness/home"
+  p_home "$home"
+  record "$home" green-ship kind=ship harness=pi mode=no-mistakes yolo=on \
+    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A"
+  armed "$home" green-ship
+  fixture_forge "$home" green
+  fast_poll "$home"
+  pkg="$PTMP/readiness/packages/pr-green"
+  mkdir -p "$(dirname "$pkg")"
+  # The real package, real seam, and real forge reads: only the forge is a fake.
+  cp -R "$PKG_SRC" "$pkg"
+  install_package "$home" "$pkg"
+  run_source_once_until_result "$home" || fail "the installed readiness predicate published no result for a green pull request"
+  result=$(result_files "$home" | head -1)
+  assert_contains "$(cat "$result")" "PR READINESS (advisory)" "the captured result carries the advisory body"
+  assert_contains "$(cat "$result")" "https://github.com/acme/app/pull/7" "the advisory body names the recorded pull request"
+  assert_contains "$(cat "$result")" "at head $HEAD_A" "the advisory body names the recorded head"
+  assert_contains "$(cat "$result")" "not an approval, a merge, or authority to merge" \
+    "the advisory body states plainly that it carries no merge authority"
+  [ "$(FM_HOME="$home" "$PROCEVENT" classify "$result")" = pr-ready-advisory ] \
+    || fail "the result classifies as advisory readiness evidence"
+  assert_contains "$(wake_payloads "$home")" "procevent pr-green pr-green 1" \
+    "Firstmate gets the existing bounded process-event wake"
+  assert_contains "$(cat "$home/forge/calls.log")" "api repos/acme/app/branches/main" \
+    "the end-to-end path reads the required contexts only after the rollup looks green"
+  [ -z "$(find "$home/state" -name '*merge-authority*' -o -name '*.answer*' -o -name '*captain-hold*' -o -name '.pr-poll-merge-notified*')" ] \
+    || fail "a readiness wake records no approval, decision answer, or merge authority"
+  pass "predicate: the real readiness seam turns a fully green fixture pull request into one advisory process-event wake, and records no authority"
 }
 
 fork_run_tests

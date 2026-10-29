@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Fixture GitHub CLI for the fork PR readiness tests. Never contacts GitHub.
+#
+# It answers the exact reads the readiness predicate performs and nothing else,
+# so a readiness test can pin what each input means - including the inputs that
+# must stay silent - without a network, an account, or a live pull request.
+#
+#   FAKE_GH_DIR   fixture directory (required)
+#   FAKE_GH_LOG   file receiving one line per call (optional)
+#
+# For each read the fixture directory may hold:
+#
+#   <key>.json    the response body served with exit 0
+#   raw-<key>     exact bytes served with exit 0 (for malformed or empty bodies)
+#   fail-<key>    present: the call fails with exit 1 and a message on stderr
+#   hang-<key>    the number of seconds to sleep before answering (the sleep
+#                 replaces this process, so a caller's timeout kills it)
+#
+# Keys: pr-view, branch, rules, check-runs. Anything else is a call shape the
+# predicate must not make, and it fails rather than guessing.
+set -u
+
+dir=${FAKE_GH_DIR-}
+log=${FAKE_GH_LOG-}
+[ -n "$dir" ] || { echo 'fixture gh: FAKE_GH_DIR is unset' >&2; exit 2; }
+[ -d "$dir" ] || { echo 'fixture gh: FAKE_GH_DIR is not a directory' >&2; exit 2; }
+[ -z "$log" ] || printf '%s\n' "$*" >>"$log"
+
+last=
+for argument in "$@"; do last=$argument; done
+
+case "${1-}" in
+  pr) key=pr-view ;;
+  api)
+    case "$last" in
+      */rules/branches/*) key=rules ;;
+      */check-runs) key=check-runs ;;
+      */branches/*) key=branch ;;
+      *) key=unexpected ;;
+    esac
+    ;;
+  *) key=unexpected ;;
+esac
+
+if [ "$key" = unexpected ]; then
+  echo "fixture gh: unexpected invocation: $*" >&2
+  exit 2
+fi
+
+[ ! -f "$dir/fail-$key" ] || { echo "fixture gh: $key is unavailable" >&2; exit 1; }
+if [ -f "$dir/hang-$key" ]; then
+  exec sleep "$(cat "$dir/hang-$key")"
+fi
+if [ -f "$dir/raw-$key" ]; then
+  cat "$dir/raw-$key"
+  exit 0
+fi
+if [ -f "$dir/$key.json" ]; then
+  cat "$dir/$key.json"
+  exit 0
+fi
+echo "fixture gh: no fixture for $key" >&2
+exit 1
