@@ -180,7 +180,7 @@ That its duration landed within 3% of the two clean runs is evidence the elevate
 `tests/fm-pr-health.test.sh` joined this family after the date above, so that result does not cover it.
 `tests/fm-pr-github-checks.test.sh` joined this family after the date above, so that result does not cover it.
 
-These durations are not comparable with the six-member run above: that measurement was taken on a different machine state, and the gap is far larger than two short scripts can account for, so it is not evidence about the two new members.
+These durations are not comparable with the six-member run above: that measurement was taken on a different machine state, and the gap is far larger than two short scripts can account for, so it is not evidence about the two members the re-proof added, `tests/fm-pr-state.test.sh` and `tests/fm-pr-reviewers.test.sh`.
 For the same reason the 1.72x four-worker figure recorded above is left as a statement about that measurement rather than restated as current.
 
 ### secondmate: admitted
