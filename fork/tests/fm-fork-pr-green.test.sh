@@ -82,7 +82,7 @@ fixture_forge() {  # <home> <kind> [forge-dir]
 
 poll_request() {  # <request-hex> <config-ref>
   jq -cn --arg rid "sha256:$1" --arg ref "$2" '{schema: "firstmate.extension-request.v1", request_id: $rid,
-    host_protocol: 1, extension_id: "org.firstmate.fork.pr-green", extension_version: "0.2.0",
+    host_protocol: 1, extension_id: "org.firstmate.fork.pr-green", extension_version: "0.3.0",
     package_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     capability: "process-event-adapter", capability_version: 1, adapter: "pr-green",
     operation: "source.poll", input: {source_id: "pr-green", config_ref: $ref}}'
@@ -222,6 +222,13 @@ run_source_until_result() {
   return 1
 }
 
+# start_source <home>: one runner invocation, run to completion. It blocks until
+# the source's poll has finished, so a poll that answers nothing is directly
+# observable as a missing result file.
+start_source() {  # <home>
+  FM_HOME="$1" "$PROCEVENT" start pr-green >/dev/null 2>&1 || true
+}
+
 # run_source_once_until_result <home>: run the real runner until it has published
 # the first readiness result.
 run_source_once_until_result() {  # <home>
@@ -244,6 +251,10 @@ test_the_registered_source_delivers_one_advisory_wake() {
   # one of them ready. This is the same single file a later slice fills in.
   cat > "$pkg/readiness.mjs" <<'JS'
 import fs from "node:fs";
+// The adapter imports the whole seam, so a fixture seam implements the whole
+// interface: the readiness judgment the adapter calls, and the fork-owned cleanup
+// of the latch state that judgment never wrote.
+export function pruneReadinessMarkers() { return 0; }
 export function decideWake(entry, ctx) {
   fs.appendFileSync(`${ctx.home}/seam-observed.txt`, `${entry.id}\n`);
   if (entry.id !== "ok-nomistakes") return null;
@@ -338,10 +349,10 @@ test_one_poll_gives_every_task_its_own_read_inside_one_budget() {
   home="$PTMP/budget/home"
   p_home "$home"
   record "$home" a-ship kind=ship harness=pi mode=no-mistakes yolo=on \
-    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A"
+    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A" spawn_gen=s1793000000.4200.7
   armed "$home" a-ship
   record "$home" b-ship kind=ship harness=pi mode=no-mistakes yolo=on \
-    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_A"
+    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_A" spawn_gen=s1793000000.4200.8
   armed "$home" b-ship
   record "$home" c-ship kind=ship harness=pi mode=no-mistakes yolo=on \
     pr=https://github.com/acme/app/pull/9 pr_head="$HEAD_A"
@@ -372,7 +383,7 @@ test_the_installed_predicate_delivers_a_readiness_wake_end_to_end() {
   home="$PTMP/readiness/home"
   p_home "$home"
   record "$home" green-ship kind=ship harness=pi mode=no-mistakes yolo=on \
-    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A"
+    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A" spawn_gen=s1793000000.4200.7
   armed "$home" green-ship
   fixture_forge "$home" green
   fast_poll "$home"
@@ -404,10 +415,10 @@ test_one_result_carries_every_simultaneously_ready_task() {
   home="$PTMP/multi/home"
   p_home "$home"
   record "$home" a-ship kind=ship harness=pi mode=no-mistakes yolo=on \
-    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A"
+    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A" spawn_gen=s1793000000.4200.7
   armed "$home" a-ship
   record "$home" b-ship kind=ship harness=pi mode=no-mistakes yolo=on \
-    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_A"
+    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_A" spawn_gen=s1793000000.4200.8
   armed "$home" b-ship
   fixture_forge "$home" green
   fast_poll "$home"
@@ -424,14 +435,29 @@ test_one_result_carries_every_simultaneously_ready_task() {
   [ "$(grep -c 'PR READINESS (advisory)' "$first")" = 2 ] \
     || fail "one result carries exactly one advisory block per ready task: $(cat "$first")"
   FM_HOME="$home" "$PROCEVENT" handled pr-green 1 >/dev/null || fail "acknowledging the first result failed"
+  # Both heads are latched now, so the next poll has nothing to say.
+  start_source "$home"
+  [ ! -e "$home/state/procevent-inbox/pr-green.2.result" ] \
+    || fail "an acknowledged head reappeared as a fresh wake: $(cat "$home/state/procevent-inbox/pr-green.2.result")"
+  # Both tasks push a new head and both go green again: the later result still
+  # carries every ready pull request, so the first never crowds out the second.
+  record "$home" a-ship kind=ship harness=pi mode=no-mistakes yolo=on \
+    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_B" spawn_gen=s1793000000.4200.7
+  armed "$home" a-ship
+  record "$home" b-ship kind=ship harness=pi mode=no-mistakes yolo=on \
+    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_B" spawn_gen=s1793000000.4200.8
+  armed "$home" b-ship
+  fork_pr_green_forge "$home/forge" "$HEAD_B"
   run_source_until_result "$home" "$home/state/procevent-inbox/pr-green.2.result" \
-    || fail "a later poll published no result once the first was acknowledged"
+    || fail "a later poll published no result after both heads changed"
   second="$home/state/procevent-inbox/pr-green.2.result"
   assert_contains "$(cat "$second")" "a-ship https://github.com/acme/app/pull/7" \
-    "the later poll still announces the first ready task"
+    "the later result still carries the first ready task"
   assert_contains "$(cat "$second")" "b-ship https://github.com/acme/app/pull/8" \
-    "the later poll is not starved by the first ready task"
-  pass "multiplicity: every simultaneously ready pull request reaches the one advisory result, and a later poll announces all of them again"
+    "the later result is not starved by the first ready task"
+  [ "$(grep -c 'PR READINESS (advisory)' "$second")" = 2 ] \
+    || fail "a re-armed result still carries one advisory block per ready task: $(cat "$second")"
+  pass "multiplicity: every simultaneously ready pull request reaches the one advisory result, latched heads stay quiet, and changed heads re-arm them together"
 }
 
 fork_run_tests

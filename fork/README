@@ -25,10 +25,12 @@ Ownership boundary
                       inbound process-event extension, optional reply hook,
                       Pi reply extension.
   PR readiness wake   fork/pr-green/: process-event extension (adapter
-                      "pr-green"). It ships the adapter, its registration, and
-                      the conservative readiness predicate that emits the
-                      advisory wake when every required check has reported green
-                      at a task's recorded head.
+                      "pr-green"). It ships the adapter, its registration, the
+                      conservative readiness predicate that emits the advisory
+                      wake when every required check has reported green at a
+                      task's recorded head, and the readiness latch that makes
+                      each such head wake once (fork/bin/fm-pr-green-teardown is
+                      the fork-owned teardown for that latch state).
   Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
                       fork/tests/.
   Fork CI             .github/workflows/fork-ci.yml.
@@ -52,7 +54,10 @@ recorded head, whose every unwaived required check has reported green, produces
 an advisory wake, while a pending, failed, missing, unreadable, or otherwise
 incomplete input stays silent. The wake only ever tells Firstmate to look, and
 bin/fm-pr-merge.sh remains the only merge authority and re-validates every
-check at merge time.
+check at merge time. Its readiness latch keeps one wake per task, pull request,
+and live head: a changed head re-arms, and a failed marker write or an
+interrupted wake repeats rather than suppressing (fork/pr-green/README, "One
+wake per head: the latch").
 
 Plan breakdown (the worker-construction step) is part of the ChatGPT channel,
 not the bridge: the bridge (codex-chatgpt-web, fm-chatgpt-bridge-lib.sh,

@@ -52,11 +52,20 @@ new_case() {
   printf '%s\n' "$dir"
 }
 
-entry_json() {  # <id> <head>
-  jq -cn --arg id "$1" --arg head "$2" --arg url "$PR_URL" \
+# entry_json <case-dir> <id> <head>: one entry the scope gate would hand the
+# seam, plus the task record it names. The seam re-reads <stateDir>/<id>.meta
+# itself before it delivers a wake (mode, yolo, the same pull request and head, and
+# the record's own spawn_gen= incarnation), so this predicate suite gives every
+# ready case a real record instead of a path that cannot be read.
+entry_json() {  # <case-dir> <id> <head>
+  local meta="$1/home/state/$2.meta"
+  printf '%s\n' "kind=ship" "mode=no-mistakes" "yolo=on" \
+    "pr=$PR_URL" "pr_head=$3" "spawn_gen=s1793000000.4100.$RANDOM" > "$meta"
+  chmod 0600 "$meta"
+  jq -cn --arg id "$2" --arg head "$3" --arg url "$PR_URL" --arg meta "$meta" \
     '{id: $id, mode: "no-mistakes", yolo: "on", kind: "ship", pr: $url,
       host: "github.com", owner: "acme", repo: "app", number: "7",
-      head: $head, meta: "/fixture/state/none.meta"}'
+      head: $head, meta: $meta}'
 }
 
 ctx_json() {  # <case-dir>
@@ -115,7 +124,7 @@ test_a_green_pull_request_at_the_recorded_head_is_ready() {
   local dir entry
   dir=$(new_case ready)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json green-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" green-task "$HEAD_A" > "$entry"
   reset_calls "$dir"
   assert_ready "$dir" "$entry" "$HEAD_A" "a green pull request at the recorded head is ready"
   assert_contains "$DECISION" "Every reported check is green at that head." \
@@ -128,7 +137,8 @@ test_a_green_pull_request_at_the_recorded_head_is_ready() {
   assert_contains "$(cat "$dir/forge/calls.log")" "api repos/acme/app/branches/main" "classic branch protection is read at the pull request's own base"
   assert_contains "$(cat "$dir/forge/calls.log")" "api --paginate --slurp repos/acme/app/rules/branches/main" "active rulesets are read at that base"
   assert_not_contains "$(cat "$dir/forge/calls.log")" "check-runs" "an unbound required check needs no producer read"
-  [ -z "$(find "$dir/home/state" -type f)" ] || fail "the predicate creates nothing in the home's state"
+  [ -z "$(find "$dir/home/state" -type f -name '*.pr-green-ready')" ] \
+    || fail "a consult with no host request id cannot prove delivery, so it publishes no latch marker"
   pass "ready: an open, non-draft pull request at the recorded head with every check green and every required check reported is advisory-ready"
 }
 
@@ -136,7 +146,7 @@ test_the_common_not_ready_case_costs_only_the_initial_read() {
   local dir entry name body
   dir=$(new_case cost)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json cost-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" cost-task "$HEAD_A" > "$entry"
   for name in pending queued failed cancelled status-red; do
     case "$name" in
       pending)
@@ -163,7 +173,7 @@ test_check_run_supersession_matches_the_merge_gate() {
   local dir entry
   dir=$(new_case supersession)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json supersede-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" supersede-task "$HEAD_A" > "$entry"
 
   rollup "$dir" '[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"},
     {"__typename":"CheckRun","name":"deploy","status":"COMPLETED","conclusion":"CANCELLED","startedAt":"2026-01-01T00:00:00Z"},
@@ -200,7 +210,7 @@ test_status_contexts_and_unnamed_runs_are_judged_separately() {
   local dir entry
   dir=$(new_case identity)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json identity-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" identity-task "$HEAD_A" > "$entry"
 
   rollup "$dir" '[{"__typename":"StatusContext","context":"legacy","state":"SUCCESS"},
     {"__typename":"StatusContext","context":"legacy","state":"FAILURE"}]'
@@ -224,7 +234,7 @@ test_reported_skipped_and_neutral_are_green_and_unreported_required_is_not() {
   local dir entry
   dir=$(new_case skipped)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json skipped-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" skipped-task "$HEAD_A" > "$entry"
 
   rollup "$dir" '[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SKIPPED","startedAt":"2026-01-01T00:00:00Z"},
     {"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"NEUTRAL","startedAt":"2026-01-01T00:00:00Z"}]'
@@ -244,7 +254,7 @@ test_a_closed_draft_or_unrecorded_head_is_never_ready() {
   local dir entry
   dir=$(new_case lifecycle)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json lifecycle-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" lifecycle-task "$HEAD_A" > "$entry"
 
   jq -cn --arg head "$HEAD_A" '{state: "CLOSED", isDraft: false, headRefOid: $head, baseRefName: "main",
     statusCheckRollup: [{__typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "SUCCESS"}]}' > "$dir/forge/pr-view.json"
@@ -282,7 +292,7 @@ test_a_green_rollup_with_an_unreadable_required_source_stays_silent() {
   local dir entry
   dir=$(new_case required-source)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json source-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" source-task "$HEAD_A" > "$entry"
 
   : > "$dir/forge/fail-branch"
   assert_silent "$dir" "$entry" "a failed branch-protection read beside a green rollup is silence"
@@ -330,7 +340,7 @@ test_a_bound_requirement_needs_its_producer_app() {
   local dir entry
   dir=$(new_case producers)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json producer-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" producer-task "$HEAD_A" > "$entry"
   printf '%s\n' '{"protected": true, "protection": {"required_status_checks": {"checks": [{"context": "ci", "app_id": 15368}], "contexts": []}}}' \
     > "$dir/forge/branch.json"
 
@@ -372,7 +382,7 @@ test_a_missing_or_unusable_github_cli_is_silence() {
   local dir entry
   dir=$(new_case cli)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json cli-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" cli-task "$HEAD_A" > "$entry"
 
   printf '%s\n' "$dir/bin/not-here" > "$dir/home/config/pr-green-gh"
   reset_calls "$dir"
@@ -398,7 +408,7 @@ test_a_hanging_read_returns_silence_inside_the_budget() {
   local dir entry started elapsed
   dir=$(new_case budget)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json budget-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" budget-task "$HEAD_A" > "$entry"
   mkdir -p "$dir/home/state/pr-green"
   printf '400\n' > "$dir/home/state/pr-green/read-budget-ms"
   printf '5\n' > "$dir/forge/hang-pr-view"
@@ -415,7 +425,7 @@ test_malformed_documents_and_partial_answers_are_silence() {
   local dir entry
   dir=$(new_case malformed)
   green_pr "$dir" "$HEAD_A"
-  entry="$dir/entry.json"; entry_json malformed-task "$HEAD_A" > "$entry"
+  entry="$dir/entry.json"; entry_json "$dir" malformed-task "$HEAD_A" > "$entry"
 
   : > "$dir/forge/fail-pr-view"
   assert_silent "$dir" "$entry" "a failed pull read is silence"
