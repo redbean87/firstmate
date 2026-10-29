@@ -1,0 +1,1 @@
+no-result: pr-green (exit 0)

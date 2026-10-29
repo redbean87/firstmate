@@ -1,0 +1,1 @@
+PR READINESS (advisory): ok-nomistakes https://github.com/acme/app/pull/7 at head 1111111111111111111111111111111111111111. Every required check is reported green. This is evidence for firstmate to look, not approval, and the merge step re-reads every requirement before merging.

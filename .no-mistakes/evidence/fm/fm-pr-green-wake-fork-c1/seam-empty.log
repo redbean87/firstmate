@@ -1,0 +1,22 @@
+pr-green: eligible ok-directpr
+pr-green: eligible ok-enterprise
+pr-green: eligible ok-nomistakes
+pr-green: skipped bad-head pr-head-invalid
+pr-green: skipped change-gerrit unsupported-provider
+pr-green: skipped duplicated record-unreadable
+pr-green: skipped forgejo unsupported-provider
+pr-green: skipped ghe-unlisted host-not-listed
+pr-green: skipped linked record-unreadable
+pr-green: skipped local-only mode-local-only
+pr-green: skipped mate secondmate
+pr-green: skipped mr-gitlab unsupported-provider
+pr-green: skipped no-head no-pr-head
+pr-green: skipped not-armed not-armed
+pr-green: skipped yolo-off yolo-off
+pr-green: poll 3 eligible, 12 refused
+pr-green: seam-invalid ok-directpr no advisory body
+pr-green: seam-invalid ok-enterprise no advisory body
+pr-green: seam-invalid ok-nomistakes no advisory body
+pr-green: seam-invalid ok-directpr no advisory body
+pr-green: seam-invalid ok-enterprise no advisory body
+pr-green: seam-invalid ok-nomistakes no advisory body

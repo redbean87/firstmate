@@ -1,0 +1,16 @@
+  ok: HK1: present once and identical to fork/hooks/hk1-spawn.block
+  ok: HK1: after capacity admission (3832), before the brief check (3887), launch-brief render (3946) and first endpoint step (4482)
+  ok: HK1: every upstream contract variable is assigned before the block
+  ok: HK1: no contract variable is reassigned between the block and launch
+  ok: HK2: present once and identical to fork/hooks/hk2-control.block
+  ok: HK2: inside do_relaunch(), after resolve_relaunch_profile, before safe_checkpoint (1221) and do_exit (1230)
+  ok: HK2: every upstream contract name exists
+  ok: no fork reference in any other upstream bin/ file
+PASS hook wiring check
+  ok - classification: captured failure evidence is labelled pr-ready-error, and pr-ready-advisory is reserved for a readiness body
+  ok - config_ref: a malformed, traversing, or unusable reference answers with an error code and never a wake
+  ok - scope gate: only armed GitHub pull requests of mode no-mistakes/direct-PR yolo=on ships are offered, and polling writes nothing
+  ok - delivery: the real binding, registration, capture, wake, re-announcement, and acknowledgement path carries one advisory readiness event and records no authority
+  ok - silence: the shipped package binds, registers, listens, and produces no wake until the readiness seam is filled in
+PASS fork/tests/fm-fork-pr-green.test.sh
+fork suite: 2 of 2 passed in 13s

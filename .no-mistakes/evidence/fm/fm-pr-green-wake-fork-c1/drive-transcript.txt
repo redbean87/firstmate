@@ -1,0 +1,74 @@
+########## scenario 1+2: scope gate and silence of the shipped package
+ok - poll envelope ok
+ok - shipped package stays silent (no-result)
+ok - no-result carries no output
+ok - exactly three eligible records
+ok - eligible ok-nomistakes
+ok - eligible ok-directpr
+ok - eligible ok-enterprise
+ok - refused mr-gitlab unsupported-provider
+ok - refused change-gerrit unsupported-provider
+ok - refused forgejo unsupported-provider
+ok - refused yolo-off yolo-off
+ok - refused local-only mode-local-only
+ok - refused mate secondmate
+ok - refused no-head no-pr-head
+ok - refused bad-head pr-head-invalid
+ok - refused not-armed not-armed
+ok - refused ghe-unlisted host-not-listed
+ok - refused duplicated record-unreadable
+ok - refused linked record-unreadable
+ok - a silent poll writes nothing
+ok - source registered
+ok - list reports the registered source
+ok - registered shipped package captures no result
+ok - registered shipped package publishes no wake
+ok - silent source stays registered for the next poll
+ok - no readiness evidence captured
+
+########## scenario 3: an advisory readiness body wakes firstmate, advisory by construction
+ok - captured result carries the advisory body
+ok - advisory body names the pull request
+ok - advisory body names the recorded head
+ok - Firstmate gets the bounded process-event wake
+ok - a readiness body classifies as pr-ready-advisory
+ok - seam offered exactly the authorized tasks
+ok - unhandled wake is re-announced
+ok - handled acknowledgement accepted
+ok - a handled wake is not re-announced
+ok - the readiness path rewrites no task record
+ok - no decision answer, merge authority, or captain hold written
+ok - owner token retires the source
+ok - retired source record removed
+
+########## scenario 4: an unreadable readiness read is captured as error evidence, not readiness
+ok - captured body is host failure evidence
+ok - failure evidence classifies as pr-ready-error
+
+########## scenario 5: fail-closed adversarial inputs stay silent or answer with an error
+ok - config_ref [/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.VnXCB5/failclosed] is refused as an invalid request
+ok - config_ref [/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.VnXCB5/failclosed] answers no result
+ok - config_ref [home:/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.VnXCB5/failclosed/../nowhere] is refused as an invalid request
+ok - config_ref [home:/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-lab.VnXCB5/failclosed/../nowhere] answers no result
+ok - config_ref [home:relative/path] is refused as an invalid request
+ok - config_ref [home:relative/path] answers no result
+ok - config_ref [home:/] is refused as an invalid request
+ok - config_ref [home:/] answers no result
+ok - a home without a state directory is unavailable
+ok - ...and answers no result
+ok - an empty advisory body stays silent
+ok - empty body is named as seam-invalid
+ok - an oversized advisory body stays silent
+ok - oversized body is named as seam-invalid
+ok - a throwing readiness seam classifies as pr-ready-error
+
+########## scenario 6: the seam contract the package documents is what it supplies
+ok - the seam receives exactly the documented entry keys
+ok - the seam receives no undocumented path key
+ok - the seam receives the parsed pull request identity
+ok - the seam receives the documented ctx keys
+ok - entry.meta is inside the home's state directory
+ok - an unencodable body is captured as host failure evidence
+ok - an unencodable body never classifies as readiness advice
+
+########## summary: 63 checks passed, 0 failed
