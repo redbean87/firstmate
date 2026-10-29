@@ -1,0 +1,219 @@
+Firstmate fork: PR readiness wake
+=================================
+
+Wakes Firstmate when a pull request it may merge on its own authority has
+finished: every required check reported green at the recorded head. It is the
+capability that closes the gap where a green pull request waits for the next
+heartbeat or for the captain to notice it.
+
+It is fork-owned. Everything lives under fork/pr-green/, upstream code stays
+byte-identical, and it reaches Firstmate through the same documented
+extension seam the Discord bridge uses: an external process-event adapter,
+registered in the home, emitting one ordinary process-event wake that
+Firstmate's existing supervision already consumes.
+
+Like fork/README, this file is plain text with no extension on purpose:
+upstream's documentation-audience check requires every tracked *.md, *.mdx,
+*.rst, and *.txt file to be registered in an upstream-owned inventory, and the
+fork does not edit that inventory.
+
+
+Advisory by construction
+------------------------
+
+The wake is advisory. It says "look at this pull request", never "merge it".
+
+  - bin/fm-pr-merge.sh remains the only merge authority. It re-reads every
+    required check at merge time and refuses a red pull request, a required
+    check that has not reported, an inconsistent head, and a draft.
+  - Nothing in this package merges, arms a merge, answers a finding, writes a
+    waiver, records approval, or records merge authority. It never rewrites a
+    task record.
+  - Because the readiness test cannot share core internals, it is an
+    independent, advisory implementation. A divergence from the merge gate can
+    cost a wasted wake or a missed one; it cannot cause a bad merge.
+  - Silence is the default. A missing required check, an unreadable or failed
+    read, a stale head, an unclear conclusion, or any doubt produces no wake,
+    never a claim of green.
+
+Only work Firstmate may land on its own authority is eligible, so a wake can
+only ever be a question Firstmate is already allowed to answer by itself.
+
+
+Supported scope
+---------------
+
+  Providers     GitHub only. gitlab, gerrit, and forgejo records can never
+                wake this source: a URL that is not a GitHub pull request URL
+                is refused before any readiness logic runs, and a GitHub
+                Enterprise host is accepted only when this home lists it in
+                config/github-hosts, exactly as upstream's own GitHub host
+                rule requires.
+  Delivery      mode=no-mistakes and mode=direct-PR. A local-only task is
+                never eligible, because its landing path is a local merge
+                firstmate does not get to decide alone.
+  Merge posture yolo=on only. A yolo=off task's pull request is merged only
+                after the captain's explicit word, so a readiness wake for it
+                would be an invitation firstmate may not act on.
+  Kind          Ships only in practice: secondmate records (kind=secondmate or
+                mode=secondmate) are refused, because a secondmate is
+                reconciled by its own home and is not itself a pull request
+                task.
+  Armed         state/<id>.meta must carry pr=<github pull URL> and
+                pr_head=<sha>, and the armed merge poll's state/<id>.check.sh
+                sidecar must still exist. Upstream writes those fields when it
+                arms the poll (bin/fm-pr-check.sh), so a pr= left behind by a
+                disarmed or finished poll is not eligible.
+
+A record that is not a plain regular file, that carries a duplicate key, that
+cannot be read, or whose task id is not path-safe is skipped silently. Each
+home reads only its own state directory: a secondmate home that wants this
+capability registers its own source against its own home, and no home ever
+evaluates another home's records.
+
+
+Files
+-----
+
+  extension/firstmate-extension.json  the process-event-adapter/1 manifest:
+                                      id org.firstmate.fork.pr-green, adapter
+                                      name "pr-green", consent task-metadata.
+  extension/fm-pr-green.mjs           the adapter: config_ref validation, the
+                                      scope gate above, the bounded long poll,
+                                      and the protocol verbs.
+  extension/readiness.mjs             the readiness seam. It is the whole of
+                                      the adapter's judgment and returns silence
+                                      today.
+  fork/tests/fm-fork-pr-green.test.sh the fork tests: the scope gate against a
+                                      fixture home, silence from the shipped
+                                      package, and the real binding, registration,
+                                      capture, wake, and acknowledgement path
+                                      through a package copy whose seam is a
+                                      fixture stub.
+
+
+The readiness seam
+------------------
+
+Slice T1 (this implementation) establishes the adapter and its registration
+contract and nothing more. The readiness predicate, the one-shot per-head
+latch, and the wake body belong to later slices, and all three live behind one
+explicit seam so no other part of the package can quietly acquire an opinion
+about a pull request:
+
+  decideWake(entry, ctx) -> null | {advisory: "<wake body>"}
+
+  entry is one task that already passed the scope gate above, with its
+  validated pull request identity and recorded head. ctx carries the absolute
+  home, state, and config paths and a stderr logger. Today the function
+  returns null for every entry, so a registered source listens and stays
+  silent.
+
+extension/readiness.mjs's header is the single owner of the contract a later
+slice must satisfy there, including the failure directions: it returns null
+for any uncertainty, it latches at most one wake per pull request per head,
+and an interrupted latch write fails toward one possible duplicate wake rather
+than a permanently suppressed one. The fork tests drive the seam with a stub
+package copy, which is what makes the seam real: replacing that one file is
+the only way to produce a wake, and it is how later slices will fill it in.
+
+Nothing has been installed at that seam yet, so registering the package today
+adds a silent, long-polling source and no behaviour. That is deliberate: the
+registration contract is testable before the predicate exists.
+
+
+Registration
+------------
+
+Registration is an operator step; this repository change activates nothing.
+The package must live outside every Git project, as upstream requires for any
+bound package. With FM_HOME exported as the home the source belongs to:
+
+  mkdir -p "$HOME/.local/share/firstmate-packages"
+  cp -R fork/pr-green/extension "$HOME/.local/share/firstmate-packages/pr-green"
+  bin/fm-extension.sh bind "$HOME/.local/share/firstmate-packages/pr-green" \
+    --adapter pr-green --trust-same-user-code --consent task-metadata
+  bin/fm-procevent.sh register-extension pr-green pr-green \
+    --config-ref "home:$FM_HOME"
+
+The consent is honest rather than sandboxing: the package reads task records
+under the registered home. The config reference is the private, non-secret
+statement of which home the source belongs to; it appears in envelopes and
+registrations and never holds a credential.
+
+`register-extension` prints the owner token and the exact retirement command.
+Keep the token. To change the package, withdraw and re-bind:
+
+  bin/fm-procevent.sh retire pr-green --if-owner <owner-token>
+  bin/fm-extension.sh retire-binding org.firstmate.fork.pr-green \
+    --if-binding-digest <binding-digest>
+  (then bind and register the new copy again)
+
+A registered source keeps Firstmate's supervision running and the watcher
+restarts it every cycle, so retire the source to stop it.
+
+
+Event delivery and acknowledgement
+----------------------------------
+
+When the seam reports a ready pull request, the adapter returns one result.
+Core captures it as external evidence and publishes the ordinary bounded
+process-event wake, so nothing new is introduced into Firstmate's supervision:
+
+  check: procevent pr-green pr-green <sequence>
+
+  classify    bin/fm-procevent.sh classify <result-file> prints
+              pr-ready-advisory, so the record is recognisable as advisory
+              readiness evidence rather than a merge or an approval.
+  terminal    no. The source never concludes itself, so it keeps listening for
+              the next pull request.
+  silent      no. An unhandled readiness result is re-announced until firstmate
+              acknowledges it, so a single wake is never lost to a missed turn.
+  acknowledge bin/fm-procevent.sh handled pr-green <sequence>
+
+The latch that keeps one wake per pull request per head lives in the seam, not
+in core, so a re-announced result and a re-polled head are different things: the
+first is core's ordinary retry until `handled`, the second is the seam's own
+deduplication. bin/fm-procevent.sh list shows the pending count.
+
+
+Latency
+-------
+
+The source holds one bounded long poll (up to 50 seconds) and re-scans the
+home's task records every 5 seconds inside it, which is what makes a wake
+prompt: a state change that arrives mid-poll is seen within about five seconds.
+When the poll returns no result the runner exits and the ordinary supervision
+cycle restarts it (FM_POLL, 15 seconds by default), so the worst case without a
+live scan is roughly one poll plus one cycle. Only tests shorten that wait:
+they set state/pr-green/poll-wait-ms (100-50000) to keep their runs fast.
+
+
+Adapter state
+-------------
+
+The fork's own adapter state belongs under <home>/state/pr-green/ and is the
+seam's to own. Slice T1 writes nothing there and creates nothing: the adapter
+is a pure reader of state/<id>.meta, state/<id>.check.sh, and
+config/github-hosts. A later slice's latch marker lives in that directory, and
+that marker is the only thing this capability ever writes.
+
+
+Known limits
+------------
+
+  - No predicate yet. Slice T1 ships the adapter, its registration, and this
+    documentation; every eligible pull request is silent until the readiness
+    predicate is installed at the seam.
+  - GitHub only, by design: gitlab needs a JSON-based required-check read,
+    forgejo needs paginated statuses, and gerrit has no merge path in firstmate
+    at all, so gerrit must never wake.
+  - A GitHub Enterprise host must be listed in this home's config/github-hosts.
+    An unlisted or unreadable list means silence for that host, never a guess.
+  - pr_head is recorded only by upstream's GitHub arming path, so a task whose
+    record has no head is skipped even when its pull request is green.
+  - Two local homes each maintain their own registration, source, and adapter
+    state; neither evaluates the other's records.
+  - Nothing here has been exercised against a live repository: the tests run
+    the real extension host, the real process-event runner, and real upstream
+    task records, with a stub seam and no network.

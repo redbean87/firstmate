@@ -1,0 +1,15 @@
+{
+  "schema": "firstmate.extension-manifest.v1",
+  "id": "org.firstmate.fork.pr-green",
+  "version": "0.1.0",
+  "host_protocols": [1],
+  "entrypoint": "fm-pr-green.mjs",
+  "capabilities": [
+    {
+      "name": "process-event-adapter",
+      "versions": [1],
+      "adapter_names": ["pr-green"]
+    }
+  ],
+  "required_consents": ["task-metadata"]
+}

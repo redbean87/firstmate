@@ -24,6 +24,9 @@ Ownership boundary
   Discord bridge      fork/discord/: gateway and outbox process, sender,
                       inbound process-event extension, optional reply hook,
                       Pi reply extension.
+  PR readiness wake   fork/pr-green/: process-event extension (adapter
+                      "pr-green") that wakes Firstmate when an eligible pull
+                      request's required checks are reported green.
   Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
                       fork/tests/.
   Fork CI             .github/workflows/fork-ci.yml.
@@ -38,6 +41,13 @@ through upstream's documented extension points - an external process-event
 adapter, the reply mirror, and the fleet ledger - and needs no upstream edits.
 On a Pi primary, replies arrive through the fork's own Pi reply extension
 instead of the mirror (fork/discord/README, "Pi replies").
+
+PR readiness wake: fork/pr-green/ (see fork/pr-green/README). A fork-owned
+process-event extension, registered through the same seam as the Discord
+inbound adapter, that wakes Firstmate when an armed GitHub pull request has
+every required check reported green at its recorded head. It is advisory: the
+wake only tells Firstmate to look, and bin/fm-pr-merge.sh remains the only
+merge authority and re-validates every check at merge time.
 
 Plan breakdown (the worker-construction step) is part of the ChatGPT channel,
 not the bridge: the bridge (codex-chatgpt-web, fm-chatgpt-bridge-lib.sh,
