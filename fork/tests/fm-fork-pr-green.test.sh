@@ -50,6 +50,9 @@ armed() {
   chmod 0600 "$1/state/$2.check.sh"
 }
 
+# now_ms: the wall clock in milliseconds, for the read-budget cases.
+now_ms() { node -e 'process.stdout.write(String(Date.now()))'; }
+
 # fast_poll <home>: a fixture poll wait, so a no-result poll returns quickly
 # instead of holding its ordinary 50 seconds.
 fast_poll() {
@@ -331,7 +334,7 @@ test_the_shipped_package_stays_silent_for_a_pull_request_that_is_not_green() {
 }
 
 test_one_poll_gives_every_task_its_own_read_inside_one_budget() {
-  local home pkg calls started elapsed
+  local home out calls started elapsed_ms
   home="$PTMP/budget/home"
   p_home "$home"
   record "$home" a-ship kind=ship harness=pi mode=no-mistakes yolo=on \
@@ -345,24 +348,22 @@ test_one_poll_gives_every_task_its_own_read_inside_one_budget() {
   armed "$home" c-ship
   fixture_forge "$home" green
   mkdir -p "$home/state/pr-green"
-  printf '2000\n' > "$home/state/pr-green/read-budget-ms"
+  printf '4000\n' > "$home/state/pr-green/read-budget-ms"
   printf '30\n' > "$home/forge/hang-pr-view"
   fast_poll "$home"
-  pkg="$PTMP/budget/packages/pr-green"
-  mkdir -p "$(dirname "$pkg")"
-  cp -R "$PKG_SRC" "$pkg"
-  install_package "$home" "$pkg"
   : > "$home/forge/calls.log"
-  started=$SECONDS
-  FM_HOME="$home" "$PROCEVENT" start pr-green >/dev/null 2>&1 || true
-  elapsed=$((SECONDS - started))
-  [ -z "$(result_files "$home")" ] || fail "a forge that never answers produces no readiness result"
+  started=$(now_ms)
+  out=$(adapter_poll "$ENTRY" "home:$home" 2>/dev/null) || fail "the adapter's poll must answer, not crash"
+  elapsed_ms=$(( $(now_ms) - started ))
+  [ "$(printf '%s' "$out" | jq -r .result.status)" = no-result ] \
+    || fail "a forge that never answers is silence, never a readiness result: $out"
+  [ "$(printf '%s' "$out" | jq -r .result.output)" = "" ] || fail "a no-result poll carries no output"
   calls=$(wc -l < "$home/forge/calls.log" | tr -d ' ')
   [ "$calls" = 3 ] \
     || fail "every eligible task gets its own forge read in one poll, whatever its id sorts after: $(cat "$home/forge/calls.log")"
-  [ "$elapsed" -lt 4 ] \
-    || fail "the per-entry reads stay inside the poll's one 2000ms budget instead of getting 2000ms each, took ${elapsed}s"
   assert_contains "$(cat "$home/forge/calls.log")" "pull/9" "the task that sorts last is read, not starved by the two before it"
+  [ "$elapsed_ms" -lt 5200 ] \
+    || fail "the three per-entry reads stay inside the poll's one 4000ms budget instead of taking a larger share each, took ${elapsed_ms}ms"
   pass "budget: one poll reads every eligible task once inside a single total budget, so a hang cannot cost a later task its read"
 }
 

@@ -133,8 +133,10 @@ part of the package can quietly acquire an opinion about a pull request:
 
   entry is one task that already passed the scope gate above, with its validated
   pull request identity and its recorded head - the state/<id>.meta pr_head= the
-  gate already validated. ctx carries the absolute home, state, and config paths
-  and a stderr logger.
+  gate already validated. ctx is built once per poll and carries the absolute
+  home, state, and config paths, the poll's clock, a stderr logger, and
+  evaluateCount: how many entries that poll offers the seam, which is what the
+  poll's one read budget is split across.
 
 A wake is produced only when all of this holds at once:
 
@@ -284,7 +286,9 @@ mid-poll rather than at the next cycle. That rescan is cheap and local: the forg
 is asked about each eligible pull request at most once per poll, so the rescan
 never multiplies network reads. When the poll returns no result the runner exits
 and the ordinary supervision cycle restarts it (FM_POLL, 15 seconds by default),
-so the worst case for a green pull request is roughly one poll plus one cycle.
+so a green pull request is normally announced within roughly one poll plus one
+cycle - as long as its own share of the read budget is enough for its forge
+reads, which the share limit under "Known limits" bounds.
 Only tests shorten those waits: they set state/pr-green/poll-wait-ms (100-50000)
 and state/pr-green/read-budget-ms (200-25000) to keep their runs fast.
 
@@ -313,7 +317,8 @@ Known limits
   - The read budget is split evenly, so with many entries, or a very slow host,
     an entry's own share can be too short for its read. That is silence for that
     entry in that poll, never a green verdict: it is a limit of the share, not of
-    the tasks that sort before it.
+    the tasks that sort before it, and a poll whose share never fits repeats that
+    silence rather than announcing the pull request late.
   - The predicate is a fork-owned re-expression, not the merge gate's own code.
     It is deliberately the stricter of the two where they can differ (an
     unreadable required-context source is silence here), so the failure it can
