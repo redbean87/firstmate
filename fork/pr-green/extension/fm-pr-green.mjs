@@ -3,12 +3,16 @@
 //
 // Registers the fork-owned source that will wake Firstmate when a pull request
 // it may merge on its own authority has finished: every required check reported
-// green at the recorded head. This slice ships the adapter, its scope gate, and
-// its registration; the readiness predicate and the wake it emits land at the
-// seam in a later slice, so the registered source listens and stays silent. It
-// is a fork-owned external package (docs/extension-bindings.md), so it edits no
-// upstream file and plugs in through the same extension seam the fork's Discord
-// bridge uses.
+// green at the recorded head. It is a fork-owned external package
+// (docs/extension-bindings.md), so it edits no upstream file and plugs in through
+// the same extension seam the fork's Discord bridge uses.
+//
+// Slice T1 shipped the adapter, its scope gate, and its registration with an
+// empty readiness seam. This slice installs the readiness evaluation at that
+// seam (see ./readiness.mjs), so an eligible open, non-draft pull request whose
+// live head still matches the record and whose every unwaived required check has
+// reported green at that head now produces the advisory result below. The latch
+// that keeps one wake per head is still owed by a later slice.
 //
 // ADVISORY BY CONSTRUCTION. This package merges nothing, arms nothing, records
 // no approval or merge authority, and never rewrites a task record. A wake only
@@ -37,9 +41,16 @@
 //                  pr-ready-error and never presented as a green pull request.
 //
 // The judgment - the readiness predicate, the one-shot per-head latch, and the
-// wake body - lives entirely in ./readiness.mjs, the documented seam later
-// slices fill in. It returns silence today, so with no seam installed this
-// adapter is registered, listening, and silent.
+// wake body - lives entirely in ./readiness.mjs, the documented seam. This slice
+// installs the conservative readiness predicate there; the latch is still owed,
+// so a pull request that keeps looking ready produces a fresh result and wake on
+// every poll: `handled` settles one result sequence, and the next poll captures a
+// new one. One result carries every pull request that poll finds ready, never
+// only the one that sorts first.
+//
+// The seam reads the forge, so it is asked about each pull request at most once
+// per invocation: the 5-second rescan below exists to notice a newly armed task
+// cheaply, not to spend a network read per entry every 5 seconds.
 //
 // Diagnostics go to stderr as bounded one-line records. The host captures and
 // discards extension stderr, so nothing here reaches a wake or an authority
@@ -50,7 +61,7 @@ import path from "node:path";
 import { decideWake } from "./readiness.mjs";
 
 const EXTENSION_ID = "org.firstmate.fork.pr-green";
-const EXTENSION_VERSION = "0.1.0";
+const EXTENSION_VERSION = "0.2.0";
 const MAX_INPUT_BYTES = 65536;
 const MAX_OUTPUT_BYTES = 30000;
 const MAX_RECORD_BYTES = 65536;
@@ -313,7 +324,14 @@ function classifyResult(content) {
 async function poll(request) {
   const dirs = homeDirs(request.input?.config_ref);
   const deadline = Date.now() + waitMs(dirs);
+  // One ctx for the whole poll: the seam prices its forge reads against it and
+  // splits that one budget across the entries the poll evaluates.
+  const ctx = { ...dirs, now: Date.now(), log };
   let announced = false;
+  // One readiness evaluation per task per recorded head per invocation, so a
+  // slow forge is read once rather than on every rescan. A head change inside
+  // the same poll is a new question and is evaluated again.
+  const evaluated = new Set();
   for (;;) {
     const scan = scanHome(dirs);
     if (!announced) {
@@ -322,8 +340,12 @@ async function poll(request) {
       log(`pr-green: poll ${scan.entries.length} eligible, ${scan.refused.length} refused`);
       announced = true;
     }
-    const ctx = { ...dirs, now: Date.now(), log };
-    for (const entry of scan.entries) {
+    const pending = scan.entries.filter((entry) => !evaluated.has(`${entry.id}\u0000${entry.head}`));
+    ctx.evaluateCount = pending.length;
+    const advisories = [];
+    let bytes = 0;
+    for (const entry of pending) {
+      evaluated.add(`${entry.id}\u0000${entry.head}`);
       const decided = decideWake(entry, ctx);
       if (decided === null || decided === undefined) continue;
       const advisory = decided && typeof decided.advisory === "string" ? decided.advisory : "";
@@ -331,13 +353,21 @@ async function poll(request) {
         log(`pr-green: seam-invalid ${entry.id} no advisory body`);
         continue;
       }
-      if (Buffer.byteLength(advisory) > MAX_OUTPUT_BYTES) {
+      const body = advisory.endsWith("\n") ? advisory : `${advisory}\n`;
+      const size = Buffer.byteLength(body);
+      if (size > MAX_OUTPUT_BYTES) {
         log(`pr-green: seam-invalid ${entry.id} advisory body is oversized`);
         continue;
       }
+      if (bytes + size > MAX_OUTPUT_BYTES) {
+        log(`pr-green: seam-invalid ${entry.id} result body is full`);
+        continue;
+      }
+      bytes += size;
+      advisories.push(body);
       log(`pr-green: ready ${entry.id}`);
-      return { status: "result", output: advisory.endsWith("\n") ? advisory : `${advisory}\n` };
     }
+    if (advisories.length > 0) return { status: "result", output: advisories.join("") };
     const left = deadline - Date.now();
     if (left <= 0) return { status: "no-result", output: "" };
     await sleep(Math.min(RESCAN_MS, left));
@@ -375,7 +405,9 @@ if (verb === "handshake") {
   // request, and a wake is acknowledged with `fm-procevent.sh handled`.
   respond(request.request_id, { value: false });
 } else if (verb === "invoke" && request.operation === "result.silent") {
-  // A readiness wake is re-announced until Firstmate acknowledges it.
+  // A readiness wake has no channel of its own: the runner publishes the
+  // ordinary wake for that result sequence and re-announces it until Firstmate
+  // acknowledges that sequence. A later poll is a new sequence.
   respond(request.request_id, { value: false });
 } else {
   throw new Error("unsupported extension verb or operation");

@@ -253,3 +253,52 @@ fork_lift_relaunch_fixture() {
     eval "$body"
   done
 }
+
+# --- fork PR-green fixture forge -------------------------------------------
+#
+# The readiness predicate reads GitHub through an absolute gh path, because the
+# extension host hands a bound package a minimal PATH. These two helpers install
+# the fixture CLI (fork/tests/pr-green-fake-gh) at such a path and record the
+# answer set it serves, so a caller reaches the real predicate with no network.
+
+# fork_fixture_gh <wrapper-path> <fixture-dir>: write an executable wrapper that
+# serves <fixture-dir> through the fixture CLI. The fixture directory and the call
+# log are pinned inside the wrapper rather than the environment, so the fake works
+# under the minimal environment a bound extension actually receives.
+fork_fixture_gh() {
+  mkdir -p "$(dirname "$1")" "$2"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'FAKE_GH_DIR=%q FAKE_GH_LOG=%q exec %q "$@"\n' "$2" "$2/calls.log" "$FORK_TESTS_DIR/pr-green-fake-gh"
+  } > "$1"
+  chmod +x "$1"
+}
+
+# fork_pr_green_forge <fixture-dir> <head>: one recorded GitHub answer set for a
+# pull request that is fully green at <head> - open, non-draft, one green check
+# run and one green status context, an unprotected base branch, and one active
+# ruleset requiring the check run. A test narrows or breaks one input at a time.
+fork_pr_green_forge() {
+  local forge=$1 head=$2
+  mkdir -p "$forge"
+  jq -cn --arg head "$head" '{state: "OPEN", isDraft: false, headRefOid: $head, baseRefName: "main",
+    statusCheckRollup: [
+      {__typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "SUCCESS", startedAt: "2026-01-01T00:00:00Z"},
+      {__typename: "StatusContext", context: "legacy", state: "SUCCESS"}]}' > "$forge/pr-view.json"
+  printf '%s\n' '{"protected": false}' > "$forge/branch.json"
+  printf '%s\n' '[[{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "ci", "integration_id": null}]}}]]' \
+    > "$forge/rules.json"
+}
+
+# fork_pr_pending_forge <fixture-dir> <head>: the same pull request with one check
+# still running, which is the ordinary not-ready shape.
+fork_pr_pending_forge() {
+  local forge=$1 head=$2
+  mkdir -p "$forge"
+  jq -cn --arg head "$head" '{state: "OPEN", isDraft: false, headRefOid: $head, baseRefName: "main",
+    statusCheckRollup: [
+      {__typename: "CheckRun", name: "ci", status: "IN_PROGRESS", conclusion: ""}]}' > "$forge/pr-view.json"
+  printf '%s\n' '{"protected": false}' > "$forge/branch.json"
+  printf '%s\n' '[[{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "ci", "integration_id": null}]}}]]' \
+    > "$forge/rules.json"
+}
