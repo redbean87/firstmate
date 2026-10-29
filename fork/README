@@ -19,7 +19,14 @@ Ownership boundary
                       fork edits to upstream files.
   Fork policy         fork/bin/fm-launch-policy: brief intake guard, consult
                       gate, project pins, machine/model resource capacity,
-                      Claude subscription.
+                      Claude subscription, and arming the ask-user
+                      self-answer guard below.
+  Ask-user guard      fork/bin/fm-askuser-guard: a fork-owned watcher check,
+                      armed by launch policy for every ship and scout, that
+                      compares a task's keyed ask-user decision closes and
+                      dispositions against the steering-inbox delivery
+                      firstmate's own answer path writes, and wakes firstmate
+                      on a mismatch.
   ChatGPT channel     fork/chatgpt/: consultation client, loop, plan
                       validator, audit/plan/result contract templates.
   Discord bridge      fork/discord/: gateway and outbox process, sender,
@@ -252,6 +259,65 @@ Malformed or unreadable reservations, an unresolvable root home or local home
 registry, or an unwritable reservation directory refuse the launch.
 
 Malformed JSON or schema in any of these files refuses the launch.
+
+
+Ask-user self-answer guard
+--------------------------
+
+A no-mistakes ask-user finding is a decision firstmate owes: the worker
+escalates it as a keyed `needs-decision` status line and may only apply the
+answer firstmate returns. Firstmate's answer is one act of
+bin/fm-send.sh --resolve-key: the steering-inbox record and the closing
+`resolved [key=...]: answered: <text>` status line are written together from
+the same text, at the same moment. Until this guard existed, nothing compared
+the two: a worker that answered its own finding was noticed only when a
+supervisor happened to read the status log, never by a gate.
+
+fork/bin/fm-askuser-guard makes that comparison mechanical. Launch policy
+arms it (its header, "Guard arming", owns when): for the spawn and relaunch
+phases of a ship or scout it writes the task's state/<id>.check.sh - a shim
+to `fm-askuser-guard check <id>` - and binds it with bin/fm-check-register.sh,
+so the watcher's existing slow-check sweep runs it on FM_CHECK_INTERVAL like
+any other custom check and any line it prints reaches firstmate as an
+ordinary `check:` wake. An arming failure refuses the launch. A secondmate
+launch never arms it, a home without config/fork-policies arms nothing, and
+bin/fm-teardown.sh retires the check with the task's other check artifacts.
+The check's header is the single owner of the rules and the exact evidence
+they read; in summary, from files in its own home only:
+
+  - Rule A: every `resolved [key=nm-...]: answered: <text>` line must be
+    backed by a steering-inbox record whose body carries that text after
+    fm-send's own normalisation; an unbacked close is a hand-written close of
+    a decision-gated finding and is surfaced at the next sweep, once per
+    answer text.
+  - Rule B: every still-open `needs-decision [key=nm-<run>-<step>]` must have
+    no ask-user disposition recorded for that run and step in the no-mistakes
+    run record; a close counts only when it is a backed `answered:` close or
+    a verified `captain-held` transfer, so a worker's prose wait note never
+    covers it.
+  - Rule C: every ask-user disposition the run record holds for the task's
+    branch (bounded to runs from this task's spawn incarnation) must have
+    been escalated or closed, so a disposition nobody was ever told about
+    cannot stay invisible.
+
+The run record is opened read-only, and an unreadable record behind an open
+keyed decision is itself surfaced once rather than passed silently; findings
+are remembered in data/<id>/askuser-guard.seen so a stable condition wakes
+once. Scope limits, stated plainly: only nm- keys are judged, a secondmate
+task is never evaluated (a remote secondmate's answer is delivered in the
+remote home while its close lands locally, so the pairing rule does not cross
+that boundary), Rule C reads run-to-task linkage by branch name so a
+same-named branch in another home can cost one advisory wake at worst, and a
+shell determined to forge BOTH sides by running bin/fm-send.sh itself is
+outside this guard's grade - exactly the confused-agent grade
+bin/fm-lease-lib.sh documents as out of scope. The guard stops the accidental
+self-answer, which is the violation no gate used to catch.
+
+Tests: fork/tests/fm-fork-askuser-guard.test.sh drives every rule against
+fixture homes and a fixture run record; fork/tests/fm-fork-askuser-guard-e2e
+test.sh drives the real bin/fm-spawn.sh through the real launch policy and
+then executes the registered check through bin/fm-check-lib.sh's snapshot
+path - the watcher's own read.
 
 
 Manual reservation recovery

@@ -63,6 +63,19 @@
 #                 Secondmates are not exempt.
 # Unknown policy names, unreadable or malformed files, and an empty policy list
 # all refuse.
+#
+# Guard arming (not a policy name): for the spawn and relaunch phases - never
+# the read-only relaunch preflight - and only for ships and scouts, the policy
+# arms the fork's ask-user self-answer guard for the task before it allows the
+# launch: fork/bin/fm-askuser-guard arm writes and registers the task's
+# state/<id>.check.sh, so the watcher's check sweep compares every keyed
+# ask-user decision close and disposition in that task's status log against
+# the steering-inbox delivery that firstmate's own answer path writes, and
+# wakes firstmate on a mismatch (fork/bin/fm-askuser-guard's header owns the
+# rules). An arming failure refuses the launch as unusable (exit 2), like
+# any other unusable input here. A home without config/fork-policies never
+# runs this script, so such a home arms nothing and behaves exactly as
+# upstream.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -548,4 +561,14 @@ enabled consult-gate && policy_consult_gate
 enabled project-pin && policy_project_pin
 enabled claude-subscription && policy_claude_subscription
 enabled resource && policy_resource
+
+# Ask-user self-answer guard (header, "Guard arming"): arm only where an agent
+# is actually about to launch, and only for the task kinds that run gates.
+case "$FM_LP_KIND:$FM_LP_PHASE" in
+  ship:spawn | ship:relaunch | scout:spawn | scout:relaunch)
+    FM_HOME="$FM_LP_HOME" FM_STATE_OVERRIDE="$FM_LP_STATE" FM_DATA_OVERRIDE="$FM_LP_DATA" \
+      "$FORK_ROOT/fork/bin/fm-askuser-guard" arm "$FM_LP_TASK" \
+      || unusable "the ask-user self-answer guard could not be armed for this task"
+    ;;
+esac
 exit 0
