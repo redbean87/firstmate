@@ -183,13 +183,13 @@ Read cost and the forge binary
 The common not-ready case costs exactly one forge read: the live pull request
 view. The required-context reads, and the check-run producer read a
 producer-bound requirement needs, happen only after that view already looks
-fully green at the recorded head. Every read of one poll shares one bounded
-budget of 25 seconds, well inside the binding's 300-second default invoke
-timeout, so a slow forge produces silence inside that budget instead of
-outliving it however many tasks the poll has to evaluate. The adapter also asks
-the seam about one pull request at most once per poll rather than once per
-internal rescan, and once one poll has evaluated its eligible tasks it returns
-them together as one result.
+fully green at the recorded head. One poll has one bounded read budget of 25
+seconds, well inside the binding's 300-second default invoke timeout, and that
+budget is split evenly across the entries the poll evaluates, so a hanging or
+very slow pull request spends only its own share instead of the share of every
+task that sorts after it. The adapter also asks the seam about one pull request
+at most once per poll rather than once per internal rescan, and once one poll
+has evaluated its eligible tasks it returns them together as one result.
 
 The extension host gives a bound package a minimal environment, so the gh on the
 operator's PATH is usually not resolvable inside it. The predicate therefore
@@ -310,6 +310,10 @@ Known limits
   - One result carries at most 30000 bytes of advisory blocks. A home with more
     simultaneously ready pull requests than fit leaves the ones past the bound
     out of that result instead of publishing a result the host would refuse.
+  - The read budget is split evenly, so with many entries, or a very slow host,
+    an entry's own share can be too short for its read. That is silence for that
+    entry in that poll, never a green verdict: it is a limit of the share, not of
+    the tasks that sort before it.
   - The predicate is a fork-owned re-expression, not the merge gate's own code.
     It is deliberately the stricter of the two where they can differ (an
     unreadable required-context source is silence here), so the failure it can

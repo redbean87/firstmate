@@ -330,7 +330,7 @@ test_the_shipped_package_stays_silent_for_a_pull_request_that_is_not_green() {
   pass "silence: the shipped package binds, registers, reads the forge, and produces no wake while a check is still running"
 }
 
-test_one_poll_shares_one_read_budget_across_its_tasks() {
+test_one_poll_gives_every_task_its_own_read_inside_one_budget() {
   local home pkg calls started elapsed
   home="$PTMP/budget/home"
   p_home "$home"
@@ -338,12 +338,15 @@ test_one_poll_shares_one_read_budget_across_its_tasks() {
     pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A"
   armed "$home" a-ship
   record "$home" b-ship kind=ship harness=pi mode=no-mistakes yolo=on \
-    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_B"
+    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_A"
   armed "$home" b-ship
+  record "$home" c-ship kind=ship harness=pi mode=no-mistakes yolo=on \
+    pr=https://github.com/acme/app/pull/9 pr_head="$HEAD_A"
+  armed "$home" c-ship
   fixture_forge "$home" green
   mkdir -p "$home/state/pr-green"
-  printf '400\n' > "$home/state/pr-green/read-budget-ms"
-  printf '5\n' > "$home/forge/hang-pr-view"
+  printf '2000\n' > "$home/state/pr-green/read-budget-ms"
+  printf '30\n' > "$home/forge/hang-pr-view"
   fast_poll "$home"
   pkg="$PTMP/budget/packages/pr-green"
   mkdir -p "$(dirname "$pkg")"
@@ -355,10 +358,12 @@ test_one_poll_shares_one_read_budget_across_its_tasks() {
   elapsed=$((SECONDS - started))
   [ -z "$(result_files "$home")" ] || fail "a forge that never answers produces no readiness result"
   calls=$(wc -l < "$home/forge/calls.log" | tr -d ' ')
-  [ "$calls" = 1 ] \
-    || fail "one poll spends one read budget across every task it evaluates, so the hanging forge is asked once: $(cat "$home/forge/calls.log")"
-  [ "$elapsed" -lt 3 ] || fail "a poll of hanging reads answers inside its budget, took ${elapsed}s"
-  pass "budget: one poll shares one bounded read budget across all eligible tasks, so a hang cannot be multiplied by the task count"
+  [ "$calls" = 3 ] \
+    || fail "every eligible task gets its own forge read in one poll, whatever its id sorts after: $(cat "$home/forge/calls.log")"
+  [ "$elapsed" -lt 4 ] \
+    || fail "the per-entry reads stay inside the poll's one 2000ms budget instead of getting 2000ms each, took ${elapsed}s"
+  assert_contains "$(cat "$home/forge/calls.log")" "pull/9" "the task that sorts last is read, not starved by the two before it"
+  pass "budget: one poll reads every eligible task once inside a single total budget, so a hang cannot cost a later task its read"
 }
 
 test_the_installed_predicate_delivers_a_readiness_wake_end_to_end() {

@@ -324,8 +324,8 @@ function classifyResult(content) {
 async function poll(request) {
   const dirs = homeDirs(request.input?.config_ref);
   const deadline = Date.now() + waitMs(dirs);
-  // One ctx for the whole poll: the seam prices its forge reads against it, so
-  // every eligible task this poll evaluates shares one read budget.
+  // One ctx for the whole poll: the seam prices its forge reads against it and
+  // splits that one budget across the entries the poll evaluates.
   const ctx = { ...dirs, now: Date.now(), log };
   let announced = false;
   // One readiness evaluation per task per recorded head per invocation, so a
@@ -340,12 +340,12 @@ async function poll(request) {
       log(`pr-green: poll ${scan.entries.length} eligible, ${scan.refused.length} refused`);
       announced = true;
     }
+    const pending = scan.entries.filter((entry) => !evaluated.has(`${entry.id}\u0000${entry.head}`));
+    ctx.evaluateCount = pending.length;
     const advisories = [];
     let bytes = 0;
-    for (const entry of scan.entries) {
-      const seen = `${entry.id}\u0000${entry.head}`;
-      if (evaluated.has(seen)) continue;
-      evaluated.add(seen);
+    for (const entry of pending) {
+      evaluated.add(`${entry.id}\u0000${entry.head}`);
       const decided = decideWake(entry, ctx);
       if (decided === null || decided === undefined) continue;
       const advisory = decided && typeof decided.advisory === "string" ? decided.advisory : "";

@@ -16,11 +16,12 @@
 //          The gate reads state/<id>.meta and the armed merge poll's
 //          state/<id>.check.sh sidecar; both are owned by upstream tasks and
 //          are never written here.
-//   ctx    {home, stateDir, configDir, now, log}: absolute paths resolved from
-//          the registration's config_ref, the current epoch milliseconds, and
-//          a stderr logger the host captures and discards. One ctx per poll,
-//          shared by every entry that poll evaluates, so the read budget below
-//          bounds the whole poll rather than each pull request in it.
+//   ctx    {home, stateDir, configDir, evaluateCount, now, log}: absolute paths
+//          resolved from the registration's config_ref, how many entries this
+//          poll offers the seam, the current epoch milliseconds, and a stderr
+//          logger the host captures and discards. One ctx per poll, shared by
+//          every entry that poll evaluates, so the read budget below is one
+//          total for the poll and is split across those entries.
 //   returns null, which is silence, or {advisory: "<wake body>"}.
 //
 // The predicate. A wake is produced only when every one of these holds:
@@ -56,12 +57,15 @@
 // Cost. The common not-ready case costs exactly one forge read (the initial
 // pull request view). The required-context reads, and the check-run producer
 // read a bound requirement needs, happen only after the initial read already
-// looks fully green and at the recorded head. Every read of one poll shares one
-// bounded budget (READ_BUDGET_MS, well inside the binding's 300-second default
-// invoke timeout) and one per-read timeout, so a slow forge produces silence
-// inside that budget rather than outliving it no matter how many tasks the poll
-// has to evaluate. state/pr-green/read-budget-ms may shorten the budget for
-// tests or a slow host; it can never lengthen it.
+// looks fully green and at the recorded head. One poll has one bounded read
+// budget (READ_BUDGET_MS, well inside the binding's 300-second default invoke
+// timeout) and that budget is split evenly across the entries the poll
+// evaluates, with a per-read timeout inside each share. A hanging or very slow
+// pull request therefore spends only its own share instead of the share of every
+// entry that sorts after it, and the shares still add up to the one total; a
+// share that runs out is silence for that entry, never a green verdict.
+// state/pr-green/read-budget-ms may shorten the total for tests or a slow host;
+// it can never lengthen it.
 //
 // Naming the forge binary. The extension host invokes this process with a
 // minimal environment whose PATH holds only the interpreter's own directory and
@@ -184,19 +188,22 @@ function readBudgetMs(ctx) {
   return READ_BUDGET_MS;
 }
 
-// The deadline belongs to the poll, not to the pull request: every decideWake
-// call that shares one ctx shares one budget, so N eligible tasks cost at most
-// READ_BUDGET_MS in total instead of N times it.
-const readDeadlines = new WeakMap();
+// The poll's read budget is one total, split evenly across the entries that poll
+// evaluates: a task that hangs or answers slowly spends only its own share, so
+// it cannot consume the share of every task that sorts after it, and the shares
+// still add up to that one total.
+const readSchedules = new WeakMap();
 
-// readDeadline <ctx> -> epoch milliseconds
-function readDeadline(ctx) {
-  let deadline = readDeadlines.get(ctx);
-  if (deadline === undefined) {
-    deadline = Date.now() + readBudgetMs(ctx);
-    readDeadlines.set(ctx, deadline);
+// readSchedule <ctx> -> {deadline, sliceMs}
+function readSchedule(ctx) {
+  let schedule = readSchedules.get(ctx);
+  if (schedule === undefined) {
+    const total = readBudgetMs(ctx);
+    const entries = Number.isInteger(ctx.evaluateCount) && ctx.evaluateCount > 0 ? ctx.evaluateCount : 1;
+    schedule = { deadline: Date.now() + total, sliceMs: Math.max(1, Math.floor(total / entries)) };
+    readSchedules.set(ctx, schedule);
   }
-  return deadline;
+  return schedule;
 }
 
 // ForgeReader: the bounded, read-only view of one pull request on one host.
@@ -209,7 +216,8 @@ function readDeadline(ctx) {
 function forgeReader(entry, ctx) {
   const gh = ghBinary(ctx);
   if (!gh) return null;
-  const deadline = readDeadline(ctx);
+  const schedule = readSchedule(ctx);
+  const deadline = Math.min(Date.now() + schedule.sliceMs, schedule.deadline);
   const env = { ...process.env, GH_PAGER: "cat", GH_NO_UPDATE_NOTIFIER: "1", GH_PROMPT_DISABLED: "1" };
   if (entry.host === "github.com") delete env.GH_HOST;
   else env.GH_HOST = entry.host;
