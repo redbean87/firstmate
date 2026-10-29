@@ -34,7 +34,10 @@
 //              counts only through its current run, with supersession, unnamed
 //              runs grouped alone, status contexts never grouped, and SUCCESS,
 //              NEUTRAL, and SKIPPED completions green while anything pending,
-//              queued, failed, cancelled, timed out, or malformed stays red.
+//              queued, failed, cancelled, timed out, or malformed stays red. A
+//              reported SKIPPED or NEUTRAL conclusion is green exactly as the
+//              merge gate reads it; a required context that never reported at
+//              all is not green and keeps the whole read silent.
 //   required   the applicable classic branch protection and active rulesets are
 //              both read completely, and every required context they name has
 //              reported at that live head, with a producer-app match for a

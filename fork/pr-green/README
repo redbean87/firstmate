@@ -154,6 +154,11 @@ A wake is produced only when all of this holds at once:
              reported at that live head, with a matching producer app for a
              producer-bound requirement that reported as a check run.
 
+A reported SKIPPED or NEUTRAL conclusion is green exactly as the merge gate reads
+it, because that gate is the authority that re-reads every requirement. A
+required context that never reported at all is the other case: it is not green,
+and it keeps the whole read silent.
+
 Silence is the answer to every other outcome: a lookup failure, a timeout, an
 incomplete or malformed answer, an unparsable document, a rollup entry outside
 the two shapes the rollup carries, an unreadable required-context source, a
@@ -183,7 +188,8 @@ budget of 25 seconds, well inside the binding's 300-second default invoke
 timeout, so a slow forge produces silence inside that budget instead of
 outliving it however many tasks the poll has to evaluate. The adapter also asks
 the seam about one pull request at most once per poll rather than once per
-internal rescan.
+internal rescan, and once one poll has evaluated its eligible tasks it returns
+them together as one result.
 
 The extension host gives a bound package a minimal environment, so the gh on the
 operator's PATH is usually not resolvable inside it. The predicate therefore
@@ -240,10 +246,12 @@ restarts it every cycle, so retire the source to stop it.
 Event delivery and acknowledgement
 ----------------------------------
 
-When the seam reports a ready pull request, the adapter returns one result. Core
-captures it as external evidence and publishes the ordinary bounded
-process-event wake, so nothing new is introduced into Firstmate's supervision.
-The path is the one the fork tests already drive with a stub seam:
+When the seam reports ready pull requests, the adapter returns one result
+carrying an advisory block for each of them - never only the pull request whose
+task id sorts first. Core captures it as external evidence and publishes the
+ordinary bounded process-event wake, so nothing new is introduced into
+Firstmate's supervision. The path is the one the fork tests already drive with a
+stub seam:
 
   check: procevent pr-green pr-green <sequence>
 
@@ -299,6 +307,9 @@ Known limits
   - No per-head latch yet: a green pull request keeps producing a fresh result
     and wake on every poll, including after an acknowledgement, which the
     process-event machinery absorbs but does not deduplicate.
+  - One result carries at most 30000 bytes of advisory blocks. A home with more
+    simultaneously ready pull requests than fit leaves the ones past the bound
+    out of that result instead of publishing a result the host would refuse.
   - The predicate is a fork-owned re-expression, not the merge gate's own code.
     It is deliberately the stricter of the two where they can differ (an
     unreadable required-context source is silence here), so the failure it can

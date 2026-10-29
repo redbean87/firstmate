@@ -206,17 +206,23 @@ install_package() {
   [ -n "$PKG_TOKEN" ] || fail "registration must print its owner token"
 }
 
-# run_source_once_until_result <home>: run the real runner once per attempt
-# until it has published a readiness result. `start` reports success when another
-# runner already owns the source, so an empty inbox alone is not proof.
-run_source_once_until_result() {
-  local home=$1 _
+# run_source_until_result <home> <result-file>: run the real runner once per
+# attempt until that exact result sequence exists. `start` reports success when
+# another runner already owns the source, so an empty inbox alone is not proof.
+run_source_until_result() {
+  local home=$1 file=$2 _
   for _ in $(seq 1 50); do
     FM_HOME="$home" "$PROCEVENT" start pr-green >/dev/null 2>&1 || true
-    [ -n "$(result_files "$home")" ] && return 0
+    [ -f "$file" ] && return 0
     sleep 0.2
   done
   return 1
+}
+
+# run_source_once_until_result <home>: run the real runner until it has published
+# the first readiness result.
+run_source_once_until_result() {  # <home>
+  run_source_until_result "$1" "$1/state/procevent-inbox/pr-green.1.result"
 }
 
 result_files() {  # <home>
@@ -385,6 +391,41 @@ test_the_installed_predicate_delivers_a_readiness_wake_end_to_end() {
   [ -z "$(find "$home/state" -name '*merge-authority*' -o -name '*.answer*' -o -name '*captain-hold*' -o -name '.pr-poll-merge-notified*')" ] \
     || fail "a readiness wake records no approval, decision answer, or merge authority"
   pass "predicate: the real readiness seam turns a fully green fixture pull request into one advisory process-event wake, and records no authority"
+}
+
+test_one_result_carries_every_simultaneously_ready_task() {
+  local home pkg first second
+  home="$PTMP/multi/home"
+  p_home "$home"
+  record "$home" a-ship kind=ship harness=pi mode=no-mistakes yolo=on \
+    pr=https://github.com/acme/app/pull/7 pr_head="$HEAD_A"
+  armed "$home" a-ship
+  record "$home" b-ship kind=ship harness=pi mode=no-mistakes yolo=on \
+    pr=https://github.com/acme/app/pull/8 pr_head="$HEAD_A"
+  armed "$home" b-ship
+  fixture_forge "$home" green
+  fast_poll "$home"
+  pkg="$PTMP/multi/packages/pr-green"
+  mkdir -p "$(dirname "$pkg")"
+  cp -R "$PKG_SRC" "$pkg"
+  install_package "$home" "$pkg"
+  run_source_once_until_result "$home" || fail "the installed predicate published no result for two green pull requests"
+  first="$home/state/procevent-inbox/pr-green.1.result"
+  assert_contains "$(cat "$first")" "a-ship https://github.com/acme/app/pull/7" \
+    "the result carries the advisory for the first ready task"
+  assert_contains "$(cat "$first")" "b-ship https://github.com/acme/app/pull/8" \
+    "the same result carries the advisory for the second simultaneously ready task"
+  [ "$(grep -c 'PR READINESS (advisory)' "$first")" = 2 ] \
+    || fail "one result carries exactly one advisory block per ready task: $(cat "$first")"
+  FM_HOME="$home" "$PROCEVENT" handled pr-green 1 >/dev/null || fail "acknowledging the first result failed"
+  run_source_until_result "$home" "$home/state/procevent-inbox/pr-green.2.result" \
+    || fail "a later poll published no result once the first was acknowledged"
+  second="$home/state/procevent-inbox/pr-green.2.result"
+  assert_contains "$(cat "$second")" "a-ship https://github.com/acme/app/pull/7" \
+    "the later poll still announces the first ready task"
+  assert_contains "$(cat "$second")" "b-ship https://github.com/acme/app/pull/8" \
+    "the later poll is not starved by the first ready task"
+  pass "multiplicity: every simultaneously ready pull request reaches the one advisory result, and a later poll announces all of them again"
 }
 
 fork_run_tests

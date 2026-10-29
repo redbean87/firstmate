@@ -345,10 +345,11 @@ test_a_bound_requirement_needs_its_producer_app() {
   rm -f "$dir/forge/check-runs.json"
   : > "$dir/forge/fail-check-runs"
   assert_silent "$dir" "$entry" "an unreadable producer read is silence"
+  rm -f "$dir/forge/fail-check-runs"
 
   printf '%s\n' 'not json' > "$dir/forge/raw-check-runs"
   assert_silent "$dir" "$entry" "a producer answer that is not JSON is silence"
-  rm -f "$dir/forge/fail-check-runs" "$dir/forge/raw-check-runs"
+  rm -f "$dir/forge/raw-check-runs"
 
   printf '%s\n' '{"protected": true, "protection": {"required_status_checks": {"checks": [{"context": "ci", "app_id": -1}], "contexts": []}}}' \
     > "$dir/forge/branch.json"

@@ -43,7 +43,10 @@
 // The judgment - the readiness predicate, the one-shot per-head latch, and the
 // wake body - lives entirely in ./readiness.mjs, the documented seam. This slice
 // installs the conservative readiness predicate there; the latch is still owed,
-// so a ready pull request is re-announced every poll until firstmate handles it.
+// so a pull request that keeps looking ready produces a fresh result and wake on
+// every poll: `handled` settles one result sequence, and the next poll captures a
+// new one. One result carries every pull request that poll finds ready, never
+// only the one that sorts first.
 //
 // The seam reads the forge, so it is asked about each pull request at most once
 // per invocation: the 5-second rescan below exists to notice a newly armed task
@@ -337,6 +340,8 @@ async function poll(request) {
       log(`pr-green: poll ${scan.entries.length} eligible, ${scan.refused.length} refused`);
       announced = true;
     }
+    const advisories = [];
+    let bytes = 0;
     for (const entry of scan.entries) {
       const seen = `${entry.id}\u0000${entry.head}`;
       if (evaluated.has(seen)) continue;
@@ -348,13 +353,21 @@ async function poll(request) {
         log(`pr-green: seam-invalid ${entry.id} no advisory body`);
         continue;
       }
-      if (Buffer.byteLength(advisory) > MAX_OUTPUT_BYTES) {
+      const body = advisory.endsWith("\n") ? advisory : `${advisory}\n`;
+      const size = Buffer.byteLength(body);
+      if (size > MAX_OUTPUT_BYTES) {
         log(`pr-green: seam-invalid ${entry.id} advisory body is oversized`);
         continue;
       }
+      if (bytes + size > MAX_OUTPUT_BYTES) {
+        log(`pr-green: seam-invalid ${entry.id} result body is full`);
+        continue;
+      }
+      bytes += size;
+      advisories.push(body);
       log(`pr-green: ready ${entry.id}`);
-      return { status: "result", output: advisory.endsWith("\n") ? advisory : `${advisory}\n` };
     }
+    if (advisories.length > 0) return { status: "result", output: advisories.join("") };
     const left = deadline - Date.now();
     if (left <= 0) return { status: "no-result", output: "" };
     await sleep(Math.min(RESCAN_MS, left));
