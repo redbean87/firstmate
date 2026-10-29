@@ -17,7 +17,7 @@
 // between this adapter and that gate can cost a wasted wake or a missed one,
 // never a bad merge.
 //
-// This file owns three things and nothing else:
+// This file owns four things and nothing else:
 //   config_ref     home:/absolute/firstmate-home. Both the task records and the
 //                  fork's own state are resolved from it. A malformed or
 //                  unusable reference is an error response, never a wake.
@@ -30,6 +30,11 @@
 //   Poll shape     re-scan inside one bounded long poll and return no-result
 //                  before the host's own invocation bound, so the source keeps
 //                  its ordinary long-poll cadence instead of hot-looping.
+//   Result label   what a captured result of this source is called. Core
+//                  captures this source's own host failure evidence under the
+//                  same adapter, so only a body that is not that evidence is
+//                  labelled pr-ready-advisory; failure evidence is labelled
+//                  pr-ready-error and never presented as a green pull request.
 //
 // The judgment - the readiness predicate, the one-shot per-head latch, and the
 // wake body - lives entirely in ./readiness.mjs, the documented seam later

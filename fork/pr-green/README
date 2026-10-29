@@ -40,9 +40,13 @@ them.
   - Because the readiness test cannot share core internals, it will be an
     independent, advisory implementation. A divergence from the merge gate can
     cost a wasted wake or a missed one; it cannot cause a bad merge.
-  - Silence must be the default. A missing required check, an unreadable or
-    failed read, a stale head, an unclear conclusion, or any doubt must produce
-    no wake, never a claim of green.
+  - Silence must be the default for the readiness judgment: a missing required
+    check, an unreadable or failed check read, a stale head, an unclear
+    conclusion, or any doubt must produce no readiness wake, never a claim of
+    green. A failure of the adapter's own read is not that case: it is captured
+    as host failure evidence and classified apart from readiness evidence (see
+    "Event delivery and acknowledgement" below), never as a green pull
+    request.
 
 Only work Firstmate may land on its own authority is eligible, so a wake can
 only ever be a question Firstmate is already allowed to answer by itself.
@@ -93,7 +97,9 @@ Files
                                       the adapter's judgment and returns silence
                                       today.
   fork/tests/fm-fork-pr-green.test.sh the fork tests: the scope gate against a
-                                      fixture home, silence from the shipped
+                                      fixture home, a malformed or unusable
+                                      config_ref and the classification of the
+                                      failure it captures, silence from the shipped
                                       package, and the real binding, registration,
                                       capture, wake, and acknowledgement path
                                       through a package copy whose seam is a
@@ -206,9 +212,10 @@ Adapter state
 
 The fork's own adapter state belongs under <home>/state/pr-green/ and is the
 seam's to own. Slice T1 writes nothing there and creates nothing: the adapter
-is a pure reader of state/<id>.meta, state/<id>.check.sh, and
-config/github-hosts. A later slice's latch marker lives in that directory, and
-that marker is the only thing this capability ever writes.
+is a pure reader of state/<id>.meta, state/<id>.check.sh, config/github-hosts,
+and the optional poll-wait knob in "Latency" above. A later slice's latch marker
+lives in that directory, and that marker is the only thing this capability ever
+writes.
 
 
 Known limits
