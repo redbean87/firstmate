@@ -1,0 +1,380 @@
+#!/usr/bin/env bash
+# fm-askuser-guard - the fork's ask-user self-answer guard.
+#
+# A no-mistakes ask-user finding is a decision firstmate owes: the worker
+# escalates it as `needs-decision [key=nm-<run>-<step>]` in its status log and
+# may only apply the answer firstmate returns.  Firstmate's answer arrives as
+# ONE act of bin/fm-send.sh --resolve-key: the durable steering-inbox record
+# and the closing `resolved [key=...]: answered: <text>` status line are
+# written together from the same text, at the same moment, by firstmate's own
+# process.  A worker that answers its own finding can fabricate either artifact
+# alone - an echo-ed close line with its own decision text, or a reply to the
+# gate while the keyed decision sits open - but the paired delivery is the
+# part it does not produce.  Nothing in the pipeline used to compare the two;
+# the violation was noticed only when a supervisor happened to read the status
+# log.  This guard makes that comparison mechanically, on the watcher's own
+# check sweep, and surfaces a mismatch as an ordinary `check:` wake.
+#
+# Usage:
+#   fm-askuser-guard check <task-id>   run the guard for one task (the watcher
+#                                      runs it through state/<id>.check.sh)
+#   fm-askuser-guard arm <task-id>     write and register that task's watcher
+#                                      check (called by fork/bin/fm-launch-policy)
+#   fm-askuser-guard --help
+#
+# `check` enforces three rules against files it may read in its own home:
+#
+#   Rule A (close integrity).  Every
+#   `resolved [key=nm-...]: answered: <text>` line in state/<id>.status must
+#   be backed by a steering-inbox record (state/<id>.inbox/*.msg or
+#   .../handled/*.msg) whose body carries that same answer text, after the
+#   exact normalisation bin/fm-send.sh applies before it writes the excerpt.
+#   An unbacked close means somebody hand-wrote firstmate's closing line.
+#
+#   Rule B (open decision dispositioned).  For every
+#   `needs-decision [key=nm-<run>-<step>]` with no covering close for exactly
+#   that key, the no-mistakes run record must not show that ask-user gate
+#   dispositioned.  A covering selection of an ask-user finding, a
+#   user-declined round, or an approval/skip on a step that presented ask-user
+#   findings counts as a disposition.  Disposition without any close means the
+#   gate was answered while the decision was still open.  A close covers only
+#   when it is a backed `answered:` close or a `captain-held [key=...]`
+#   transfer line (bin/fm-captain-hold.sh writes that after verifying the
+#   durable record); a prose `resolved [key=nm-...]: ...` note is a worker's
+#   own wait note and never covers a decision.
+#
+#   Rule C (disposition with no keyed decision at all).  Every ask-user
+#   disposition the run record holds for this task's branch must be covered by
+#   a keyed close or an escalated `needs-decision` for that run and step, so a
+#   worker that answers the gate without escalating anyone cannot stay
+#   invisible.  Runs are linked to the task by the recorded branch name and
+#   only those created no earlier than the task's spawn epoch (meta
+#   spawn_gen=) minus 600s, so a reused task id or an older same-named branch
+#   in another home cannot be mistaken for this task's run; a relaunch moves
+#   spawn_gen forward, so Rule C then reaches only runs from that incarnation.
+#
+# Rules and scope:
+#   - Only nm- keys are guarded; other keyed decisions are outside this seam.
+#   - A task whose record says kind=secondmate is never evaluated: a remote
+#     secondmate's answer message is delivered into the remote home's inbox
+#     while its close line is appended locally, so the pairing rule does not
+#     hold across that boundary, and secondmates reconcile in their own home.
+#   - Absent task records produce silence, so a check outliving a task that
+#     upstream refused after launch policy ran costs nothing.
+#   - Each finding prints once, remembered in data/<id>/askuser-guard.seen;
+#     a changed answer text or key produces a new line.  When the run record
+#     is required and cannot be read, that degradation is itself printed once
+#     (silently passing is worse than a visible gap).
+#   - Deliberately forging BOTH sides (a worker running bin/fm-send.sh itself
+#     to manufacture the delivery) is outside this guard's grade, exactly the
+#     confused-agent grade bin/fm-lease-lib.sh documents: guards stop
+#     accidental self-answering, not a shell determined to impersonate
+#     firstmate.  That residue is recorded in fork/README.
+#
+# The run record read is the shared no-mistakes state database, opened
+# read-only; FM_ASKUSER_GUARD_DB overrides its path (the tests use that).
+# Exit: 0 = checked (printed lines are wake candidates); 2 = unusable input.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+usage() {
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+die() { printf 'fm-askuser-guard: %s\n' "$*" >&2; exit 2; }
+
+# sha_fp <text>: short stable fingerprint for the once-per-finding record.
+sha_fp() {
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256 | cut -c1-24
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | cut -c1-24
+  else
+    printf '%s' "$1" | cksum | tr ' ' '-'
+  fi
+}
+
+# Normalise text exactly as bin/fm-send.sh normalises an answer before it
+# excerpts it into the closing line: newlines/CR/tabs to spaces, then the
+# remaining control bytes removed.
+normalize_text() {
+  tr '\n\r\t' '   ' | LC_ALL=C tr -d '\000-\037\177'
+}
+
+task_id_valid() {
+  case "$1" in '' | .* | *[!A-Za-z0-9._-]*) return 1 ;; esac
+  return 0
+}
+
+# --- arm --------------------------------------------------------------------
+
+arm() {
+  local id=$1 home state data guard tmp check
+  task_id_valid "$id" || die "task id is not a firstmate task id"
+  home=${FM_HOME:-}
+  case "$home" in /*) ;; *) die "FM_HOME must be an absolute path to arm" ;; esac
+  state=${FM_STATE_OVERRIDE:-$home/state}
+  data=${FM_DATA_OVERRIDE:-$home/data}
+  guard="$SCRIPT_DIR/fm-askuser-guard"
+  [ -d "$state" ] && [ ! -L "$state" ] || die "state directory is unavailable"
+  [ -f "$guard" ] && [ ! -L "$guard" ] || die "guard script is unavailable"
+  [ -x "$FM_ROOT/bin/fm-check-register.sh" ] || die "bin/fm-check-register.sh is unavailable"
+  ( umask 077 && mkdir -p "$state" ) || die "state directory is unavailable"
+  check="$state/$id.check.sh"
+  [ ! -d "$check" ] || die "a directory occupies $check; refusing to replace it"
+  [ ! -L "$check" ] || die "a symlink occupies $check; refusing to replace it"
+  tmp=$(mktemp "$state/.fm-askuser-guard-shim.XXXXXX") || die "cannot create the check shim"
+  trap '[ -z "${tmp:-}" ] || rm -f -- "$tmp"' EXIT HUP INT TERM
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'export FM_HOME=%q\n' "$home"
+    printf 'export FM_STATE_OVERRIDE=%q\n' "$state"
+    printf 'export FM_DATA_OVERRIDE=%q\n' "$data"
+    printf 'exec %q check %q\n' "$guard" "$id"
+  } > "$tmp" || die "cannot write the check shim"
+  chmod 700 "$tmp" || die "cannot set the check shim permissions"
+  mv -f -- "$tmp" "$check" || die "cannot publish the check shim"
+  tmp=
+  if ! FM_HOME="$home" FM_STATE_OVERRIDE="$state" \
+      "$FM_ROOT/bin/fm-check-register.sh" "$id" >/dev/null; then
+    rm -f -- "$check"
+    die "bin/fm-check-register.sh refused the check shim"
+  fi
+  trap - EXIT HUP INT TERM
+  return 0
+}
+
+# --- check ------------------------------------------------------------------
+
+# disposition_rows <db> <scope-sql>: one "<run id>\t<step name>" line per
+# ask-user disposition the run record holds inside the given runs scope (a
+# condition on the runs table's alias rd).  A disposition is a selection that
+# names an ask-user finding, a user-declined round over ask-user findings, or
+# an approval/skip recorded on a step that presented ask-user findings.
+# Read-only; nonzero exit means the run record could not be consulted.
+disposition_rows() {
+  sqlite3 -readonly -cmd '.timeout 2000' "$1" \
+    "SELECT DISTINCT rd.id || char(9) || s.step_name FROM step_rounds j JOIN step_results s ON s.id = j.step_result_id JOIN runs rd ON rd.id = s.run_id WHERE $2 AND json_valid(j.findings_json) AND EXISTS (SELECT 1 FROM json_each(j.findings_json, '\$.findings') f WHERE json_extract(f.value, '\$.action') = 'ask-user') AND ((j.selected_finding_ids IS NOT NULL AND json_valid(j.selected_finding_ids) AND EXISTS (SELECT 1 FROM json_each(j.findings_json, '\$.findings') f2 WHERE json_extract(f2.value, '\$.action') = 'ask-user' AND EXISTS (SELECT 1 FROM json_each(j.selected_finding_ids) sid WHERE sid.value = json_extract(f2.value, '\$.id')))) OR j.selection_source = 'user_declined')
+UNION
+SELECT DISTINCT rd.id || char(9) || s.step_name FROM step_results s JOIN runs rd ON rd.id = s.run_id WHERE $2 AND (COALESCE(s.approval_reason, '') <> '' OR COALESCE(s.skip_reason, '') <> '') AND EXISTS (SELECT 1 FROM step_rounds j WHERE j.step_result_id = s.id AND json_valid(j.findings_json) AND EXISTS (SELECT 1 FROM json_each(j.findings_json, '\$.findings') f WHERE json_extract(f.value, '\$.action') = 'ask-user'));" \
+    2>/dev/null
+}
+
+main_check() {
+  local id=$1 status meta kind seen line rest excerpt key verb tail
+  local runid db steps s matched f body cover has_nm=0 run_db=0 qrc
+  local branch spawn_epoch rows row r
+  local -a inbox_norm=() needs_keys=() covered_keys=()
+  task_id_valid "$id" || die "task id is not a firstmate task id"
+  [ -n "${FM_HOME:-}" ] || die "FM_HOME is not set"
+  case "$FM_HOME" in /*) ;; *) die "FM_HOME must be an absolute path" ;; esac
+  local state=${FM_STATE_OVERRIDE:-$FM_HOME/state}
+  local data=${FM_DATA_OVERRIDE:-$FM_HOME/data}
+  status="$state/$id.status"
+  meta="$state/$id.meta"
+
+  # Task gone or not yet recorded: silent (a check may outlive a refused or
+  # finished launch).
+  [ -f "$status" ] && [ ! -L "$status" ] || return 0
+  if [ -f "$meta" ] && [ ! -L "$meta" ]; then
+    kind=$(sed -n 's/^kind=//p' "$meta" | head -1)
+    [ "$kind" = secondmate ] && return 0
+  fi
+
+  seen="$data/$id/askuser-guard.seen"
+
+  # report <fingerprint> <line>: print a finding once per fingerprint; an
+  # unwritable record degrades to printing every sweep rather than hiding.
+  report() {
+    local fp=$1 out=$2
+    if [ -f "$seen" ] && grep -Fqx -- "$fp" "$seen" 2>/dev/null; then
+      return 0
+    fi
+    if mkdir -p -- "$data/$id" 2>/dev/null; then
+      printf '%s\n' "$fp" >> "$seen" 2>/dev/null || true
+    fi
+    printf '%s\n' "$out"
+  }
+
+  # One steering-inbox body per element, already normalised.
+  for f in "$state/$id.inbox"/*.msg "$state/$id.inbox"/handled/*.msg; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    body=$(awk 'p{print} /^--$/{p=1}' "$f" 2>/dev/null) || body=
+    [ -n "$body" ] || continue
+    inbox_norm+=("$(printf '%s' "$body" | normalize_text)")
+  done
+
+  while IFS= read -r line; do
+    case "$line" in *'[key=nm-'*) has_nm=1 ;; *) continue ;; esac
+    verb=${line%% *}
+    rest=${line%%:*}
+    key=$(printf '%s' "$rest" | sed -n 's/.*\[key=\([^]]*\)\].*/\1/p')
+    [ -n "$key" ] || continue
+    case "$key" in nm-*) ;; *) continue ;; esac
+    case "$verb" in
+      needs-decision)
+        needs_keys+=("$key")
+        continue
+        ;;
+      captain-held)
+        covered_keys+=("$key")
+        continue
+        ;;
+      resolved) : ;;
+      *) continue ;;
+    esac
+
+    # Rule A: an answered close must be backed by the inbox delivery.
+    rest=${line#*:}
+    rest=${rest# }
+    case "$rest" in
+      answered:\ *) ;;
+      *) continue ;;
+    esac
+    excerpt=${rest#answered: }
+    excerpt=${excerpt# }
+    matched=0
+    if [ -n "$excerpt" ]; then
+      for body in ${inbox_norm+"${inbox_norm[@]}"}; do
+        if [ "${body#"$excerpt"}" != "$body" ]; then
+          matched=1
+          break
+        fi
+      done
+    fi
+    if [ "$matched" -eq 1 ]; then
+      covered_keys+=("$key")
+      continue
+    fi
+    report "A|$key|$(sha_fp "$excerpt")" \
+      "askuser-guard: $id: the answer close for $key has no steering-inbox delivery behind it (hand-written close of a decision-gated ask-user finding?)"
+  done <<EOF
+$(grep -E '^(resolved|captain-held|needs-decision) ' "$status" 2>/dev/null || true)
+EOF
+
+  # Rules B and C need the run record.  When it is required (the status log
+  # shows keyed no-mistakes decisions) but unavailable, say so once instead of
+  # passing silently.
+  db=${FM_ASKUSER_GUARD_DB:-${HOME:-}/.no-mistakes/state.sqlite}
+  if command -v sqlite3 >/dev/null 2>&1 && [ -f "$db" ]; then
+    run_db=1
+  elif [ "$has_nm" -eq 1 ]; then
+    report "D|runrecord" \
+      "askuser-guard: $id: the no-mistakes run record cannot be read, so keyed decisions in this status log cannot be verified against dispositions"
+  fi
+
+  # Rule B: an open keyed decision may not have been dispositioned in the run.
+  if [ "$run_db" -eq 1 ] && [ "${#needs_keys[@]}" -gt 0 ]; then
+    for key in ${needs_keys+"${needs_keys[@]}"}; do
+      cover=0
+      for s in ${covered_keys+"${covered_keys[@]}"}; do
+        if [ "$key" = "$s" ]; then
+          cover=1
+          break
+        fi
+      done
+      [ "$cover" -eq 0 ] || continue
+
+      tail=${key#nm-}
+      runid=${tail%%-*}
+      tail=${tail#*-}
+      case "$runid" in
+        '' | *[!A-Za-z0-9]*)
+          report "D|badkey|$key" \
+            "askuser-guard: $id: the decision key $key names no readable run id, so its answer cannot be verified"
+          continue
+          ;;
+      esac
+      case "$tail" in '' | *[!A-Za-z0-9._-]*) continue ;; esac
+
+      steps=$(disposition_rows "$db" "rd.id = '$runid'")
+      qrc=$?
+      if [ "$qrc" -ne 0 ]; then
+        report "D|runread|$key" \
+          "askuser-guard: $id: the run record for $key cannot be read, so its disposition cannot be verified"
+        run_db=0
+        break
+      fi
+      [ -n "$steps" ] || continue
+      matched=0
+      while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        r=${row%%$'\t'*}
+        s=${row#*$'\t'}
+        [ "$r" = "$runid" ] || continue
+        case "$tail" in
+          "$s" | "$s"-*) matched=1; break ;;
+        esac
+      done <<EOF
+$steps
+EOF
+      [ "$matched" -eq 1 ] || continue
+      report "B|$key" \
+        "askuser-guard: $id: the ask-user decision $key was dispositioned in run $runid while no firstmate close exists in the status log"
+    done
+  fi
+
+  # Rule C: every ask-user disposition for this task's branch must have been
+  # escalated or closed; an invisible self-answer has neither.
+  [ "$run_db" -eq 1 ] || return 0
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 0
+  branch=$(sed -n 's/^branch=//p' "$meta" | head -1)
+  case "$branch" in
+    '' | *[!A-Za-z0-9._/-]*) return 0 ;;
+  esac
+  spawn_epoch=$(sed -n 's/^spawn_gen=s\([0-9]*\).*/\1/p' "$meta" | head -1)
+  case "$spawn_epoch" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  rows=$(disposition_rows "$db" "rd.branch = '$branch' AND rd.created_at >= $((spawn_epoch - 600))")
+  qrc=$?
+  if [ "$qrc" -ne 0 ]; then
+    report "D|runread|branch" \
+      "askuser-guard: $id: the run record for branch $branch cannot be read, so its dispositions cannot be verified"
+    return 0
+  fi
+  [ -n "$rows" ] || return 0
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    r=${row%%$'\t'*}
+    s=${row#*$'\t'}
+    cover=0
+    for key in ${covered_keys+"${covered_keys[@]}"}; do
+      case "$key" in
+        "nm-$r-$s" | "nm-$r-$s"-*) cover=1; break ;;
+      esac
+    done
+    [ "$cover" -eq 0 ] || continue
+    for key in ${needs_keys+"${needs_keys[@]}"}; do
+      case "$key" in
+        "nm-$r-$s" | "nm-$r-$s"-*) cover=1; break ;;
+      esac
+    done
+    [ "$cover" -eq 0 ] || continue
+    report "C|$r|$s" \
+      "askuser-guard: $id: run $r records an ask-user disposition at step $s with no keyed decision or firstmate close anywhere in the status log (unescalated self-answer?)"
+  done <<EOF
+$rows
+EOF
+  return 0
+}
+
+case "${1:-}" in
+  check)
+    [ "$#" -eq 2 ] || die "check needs exactly one task id"
+    main_check "$2"
+    ;;
+  arm)
+    [ "$#" -eq 2 ] || die "arm needs exactly one task id"
+    arm "$2"
+    ;;
+  -h | --help | help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
