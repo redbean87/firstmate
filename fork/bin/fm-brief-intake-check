@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# fm-brief-intake-check - the Firstmate fork's dispatch preflight for written
+# ship and scout briefs. It refuses a brief that still carries one of the
+# three intake defects that cost real review rounds (2026-10-29 post-mortem:
+# a slice intent that reads as the whole capability, an unnamed project check
+# set, and conflicting bounded promises with no stated composition), and it
+# says exactly which element the brief needs instead.
+#
+# Usage: fm-brief-intake-check <brief-file>
+#
+# Firstmate's brief-intake policy (fork/bin/fm-launch-policy) calls this
+# before every ship and scout launch - fresh spawn, relaunch, and relaunch
+# preflight - and firstmate can run it standalone against a written brief
+# before dispatch. The markers are lines, so the verdict is a grep rather
+# than a judgement call.
+#
+# Required brief elements. Each is one line anywhere in the file; optional
+# leading whitespace or a markdown bullet (-, *, +) before the marker is
+# accepted, and the value must sit on that same line:
+#
+#   Delivers: <what this slice delivers>
+#       The slice's own behaviour - never the whole capability, or review
+#       re-files "it cannot do the thing" every round.
+#   Defers: <what this slice defers, or nothing>
+#       The complement, so a partial slice cannot read as the whole ask.
+#   Checks: <the project's full check set>
+#       Named explicitly, resolved at intake from the project's own scripts
+#       or CI and never from memory. This check proves the brief NAMES a
+#       check set; completeness of that set stays firstmate's intake duty
+#       (fork/brief-intake-note states the fill rule).
+#   Bound: <one bounded promise - a for-every guarantee or a shared budget>
+#       Repeatable: one line per bounded promise or rate limit. Two or more
+#       Bound: lines additionally require the composition element below.
+#   Composition: <how those bounded promises compose when they conflict, and
+#                 the test that pins that combined promise>
+#       Without it, review discovers one starvation route per round while
+#       each fix passes its own mechanism test.
+#
+# Scope. Ship and scout briefs (data/<task-id>/brief.md). A secondmate
+# charter is a standing contract, not a slice brief, and never reaches this
+# check. A brief that does not exist is not judged here: bin/fm-spawn.sh's
+# own brief check owns absence and prints its own refusal.
+#
+# Exit codes:
+#   0  the brief carries every element it must; stdout says so.
+#   1  an element is missing; stdout lists every missing element with the
+#      exact line to add.
+#   2  bad usage, or the file exists but cannot be read as a regular file;
+#      stdout says why (a refusal either way when called from the policy).
+set -u
+
+usage() {
+  printf 'usage: fm-brief-intake-check <brief-file>\n' >&2
+  exit 2
+}
+
+[ "$#" -eq 1 ] || usage
+BRIEF=$1
+
+[ -e "$BRIEF" ] || {
+  printf 'brief intake cannot judge %s: no such file\n' "$BRIEF"
+  exit 2
+}
+[ -f "$BRIEF" ] && [ -r "$BRIEF" ] || {
+  printf 'brief intake cannot judge %s: not a readable regular file\n' "$BRIEF"
+  exit 2
+}
+
+# A marker line: optional indentation and markdown bullet, the exact marker,
+# then a non-blank value on the same line.
+BULLET='^[[:space:]]*(-[[:space:]]+|\*[[:space:]]+|\+[[:space:]]+)?'
+
+# has_marker <regex>: HAS=1 when the brief carries the marker line, HAS=0
+# when it does not. A grep that cannot read the file refuses the run.
+HAS=0
+has_marker() {
+  grep -E -q -- "$1" "$BRIEF"
+  case "$?" in
+    0) HAS=1 ;;
+    1) HAS=0 ;;
+    *)
+      printf 'brief intake cannot judge %s: it could not be read while checking\n' "$BRIEF"
+      exit 2
+      ;;
+  esac
+}
+
+has_marker "$BULLET"'Delivers:[[:space:]]*[^[:space:]]'
+delivers=$HAS
+has_marker "$BULLET"'Defers:[[:space:]]*[^[:space:]]'
+defers=$HAS
+has_marker "$BULLET"'Checks:[[:space:]]*[^[:space:]]'
+checks=$HAS
+has_marker "$BULLET"'Composition:[[:space:]]*[^[:space:]]'
+composition=$HAS
+
+bounds=$(grep -E -c -- "$BULLET"'Bound:[[:space:]]*[^[:space:]]' "$BRIEF")
+case "$?" in
+  0|1) ;;
+  *)
+    printf 'brief intake cannot judge %s: it could not be read while checking\n' "$BRIEF"
+    exit 2
+    ;;
+esac
+
+violations=()
+if [ "$delivers" -eq 0 ] && [ "$defers" -eq 0 ]; then
+  violations+=("slice scope: the brief states neither what this slice delivers nor what it defers - add one line 'Delivers: <what this slice delivers>' and one line 'Defers: <what this slice defers, or nothing>'")
+elif [ "$delivers" -eq 0 ]; then
+  violations+=("slice scope: the brief does not state what this slice delivers - add one line 'Delivers: <what this slice delivers>'")
+elif [ "$defers" -eq 0 ]; then
+  violations+=("slice scope: the brief does not state what this slice defers - add one line 'Defers: <what this slice defers, or nothing>'")
+fi
+if [ "$checks" -eq 0 ]; then
+  violations+=("project check set: the brief names no check set - add one line 'Checks: <the project's full check set, resolved at intake from the project's own scripts or CI, never from memory>'")
+fi
+if [ "$bounds" -ge 2 ] && [ "$composition" -eq 0 ]; then
+  violations+=("promise composition: the brief states $bounds bounded promises (Bound:) but no composition for them - add one line 'Composition: <how those bounded promises compose when they conflict, and the test that pins that combined promise>'")
+fi
+
+if [ "${#violations[@]}" -gt 0 ]; then
+  detail=
+  for v in "${violations[@]}"; do
+    detail="$detail${detail:+; }$v"
+  done
+  printf 'brief intake refused %s: %s\n' "$BRIEF" "$detail"
+  exit 1
+fi
+printf 'ok: brief intake elements present: %s\n' "$BRIEF"
+exit 0

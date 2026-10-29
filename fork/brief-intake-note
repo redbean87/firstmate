@@ -1,0 +1,64 @@
+Firstmate: what the brief-intake preflight needs from you
+=========================================================
+
+fork/bin/fm-launch-policy's `brief-intake` policy refuses a ship or scout
+launch whose brief still carries one of the three intake defects from the
+2026-10-29 post-mortem (a slice intent that reads as the whole capability,
+an unnamed project check set, and conflicting bounded promises with no
+stated composition).
+The refusal message names every missing element with the exact line to add,
+so a refused launch is fixed by editing the brief and dispatching again.
+Nothing outside fork/ changes; the check rides the existing HK1/HK2 seam.
+
+Two things must be in place before a launch meets the check.
+
+
+1. Enable the policy (once per home)
+------------------------------------
+
+config/fork-policies is home config, not tracked code.
+Add the line:
+
+  brief-intake
+
+The hooks only run the launch policy when that file exists, and the policy
+only judges briefs when the name is enabled there.
+With it absent or the name missing, launches behave exactly as before.
+
+
+2. Supply the markers in every ship and scout brief
+---------------------------------------------------
+
+`bin/fm-brief.sh` scaffolds the sections; a correct fill adds these lines
+anywhere in the brief (leading indentation or a markdown bullet before the
+marker is fine, but the value must sit on the same line):
+
+  Delivers: <what this slice delivers>
+      The slice's own behaviour, never the whole capability - the defect
+      that made review re-file "it cannot do the thing" every round.
+  Defers: <what this slice defers, or nothing>
+      The complement, so a partial slice cannot read as the whole ask.
+  Checks: <the project's full check set>
+      Resolve the project's full check set at intake from its own scripts
+      or CI (package.json scripts, the CI workflow), never from memory,
+      and list every check the worker must pass before reporting done
+      (the bowling slice lost a CI round to a missing format:check).
+      A report-only scout may write `Checks: none - report-only`.
+  Bound: <one bounded promise - a for-every guarantee or a shared budget>
+      One line per bounded promise or rate limit the brief states.
+      Fewer than two needs no composition line.
+  Composition: <how those bounded promises compose when they conflict, and
+                the test that pins that combined promise>
+      Required as soon as two or more Bound: lines appear - the defect
+      that cost three review rounds finding one starvation route each time.
+
+Secondmate charters are exempt: a charter is a standing contract, not a
+slice brief, and the policy never checks one.
+A brief that does not exist is also left to upstream's own brief check.
+
+The checker runs standalone too, for a pre-dispatch dry run:
+
+  fork/bin/fm-brief-intake-check data/<task-id>/brief.md
+
+Exit 0 means the brief carries every element it must; exit 1 lists the
+missing elements; exit 2 means the file could not be judged.

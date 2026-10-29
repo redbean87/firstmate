@@ -17,8 +17,9 @@ Ownership boundary
   Hook blocks (2)     HK1 in bin/fm-spawn.sh and HK2 in bin/fm-control.sh.
                       Canonical copies: fork/hooks/*.block. They are the only
                       fork edits to upstream files.
-  Fork policy         fork/bin/fm-launch-policy: consult gate, project pins,
-                      machine/model resource capacity, Claude subscription.
+  Fork policy         fork/bin/fm-launch-policy: brief intake guard, consult
+                      gate, project pins, machine/model resource capacity,
+                      Claude subscription.
   ChatGPT channel     fork/chatgpt/: consultation client, loop, plan
                       validator, audit/plan/result contract templates.
   Discord bridge      fork/discord/: gateway and outbox process, sender,
@@ -103,8 +104,8 @@ bin/fm-worker-account-lib.sh (which sources bin/fm-timeout-lib.sh) and uses
 fm_worker_account_config, fm_worker_account_resolve, and fm_run_timed; a
 missing library or function refuses the launch (exit 2).
 
-Upstream helper dependencies of the resource policy (the consult gate and
-pins use none). The policy sources bin/fm-wake-lib.sh,
+Upstream helper dependencies of the resource policy (the consult gate, pins,
+and brief-intake use none). The policy sources bin/fm-wake-lib.sh,
 bin/fm-secondmate-registry-lib.sh, and bin/fm-backend.sh, and refuses the
 launch if any of them cannot be loaded. It then uses:
   agent state       fm_backend_agent_state, fm_backend_of_meta,
@@ -135,9 +136,22 @@ Policies and configuration
 --------------------------
 
 config/fork-policies - one policy name per line (# comments allowed):
-  consult-gate | project-pin | resource | claude-subscription
+  brief-intake | consult-gate | project-pin | resource | claude-subscription
 An empty list, an unknown name, or an unreadable file refuses every launch.
 Delete the file to turn fork policy off for a home.
+
+brief-intake - ship and scout briefs must carry three intake markers before
+any launch (fresh spawn, relaunch, relaunch preflight), so a brief cannot
+silently leave firstmate's hands with one of the three defects the
+2026-10-29 post-mortem cost review rounds on: slice scope on 'Delivers:' and
+'Defers:' lines, the project's check set named on a 'Checks:' line, and a
+'Composition:' line saying how bounded promises compose, required once the
+brief carries two or more 'Bound:' lines. The refusal names every missing
+element with the exact line to add. Secondmate charters are not task briefs
+and are never checked; a missing brief is upstream's own refusal.
+fork/bin/fm-brief-intake-check owns the markers, and
+fork/brief-intake-note states what firstmate must supply in config and in
+each brief.
 
 consult-gate - ship and scout launches need one of:
   data/<id>/chatgpt-loop.json        a prompt for the stage its phase puts in
