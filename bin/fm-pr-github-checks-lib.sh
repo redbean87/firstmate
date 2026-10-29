@@ -268,12 +268,12 @@ github_read_required_producers() {  # <head>
 # check refusal. The two _LIST values are the same red and unreported names
 # joined for its summary lines.
 FM_PR_GITHUB_VERDICT_STATUS=unreadable
-FM_PR_GITHUB_VERDICT_RED=
+FM_PR_GITHUB_VERDICT_RED=  # red check names, one per line; the readiness caller consumes this set.
 FM_PR_GITHUB_VERDICT_RED_LIST=
-FM_PR_GITHUB_VERDICT_UNREPORTED=
+FM_PR_GITHUB_VERDICT_UNREPORTED=  # unreported requirement names, one per line; the readiness caller consumes this set.
 FM_PR_GITHUB_VERDICT_UNREPORTED_LIST=
 FM_PR_GITHUB_VERDICT_LINES=
-FM_PR_GITHUB_VERDICT_INCOMPLETE=false
+FM_PR_GITHUB_VERDICT_INCOMPLETE=false  # a required-context read failed; the readiness caller consumes this to stay silent.
 fm_pr_github_check_verdict() {  # <json> <base> <head> [--allow-red <name>] [--allow-missing <name>]
   local json=$1 base=$2 head=$3
   local waived_red='' waived_missing='' json_head=''

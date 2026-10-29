@@ -192,8 +192,8 @@ assert_green() {  # dir label
     || fail "$label: expected a green verdict"$'\n'"$(cat "$dir/verdict.out" "$dir/verdict.err")"
   grep -qx 'status=green' "$dir/verdict.out" || fail "$label: status is not green"
   grep -qx 'incomplete=false' "$dir/verdict.out" || fail "$label: a green verdict cannot be incomplete"
-  assert_no_grep 'red=' "$dir/verdict.out" || fail "$label: a green verdict named a red check"
-  assert_no_grep 'unreported=' "$dir/verdict.out" || fail "$label: a green verdict named an unreported requirement"
+  assert_no_grep 'red=' "$dir/verdict.out" "$label: a green verdict named a red check"
+  assert_no_grep 'unreported=' "$dir/verdict.out" "$label: a green verdict named an unreported requirement"
   [ ! -s "$dir/lines" ] || fail "$label: a green verdict produced refusal lines: $(cat "$dir/lines")"
 }
 
@@ -201,16 +201,16 @@ assert_green() {  # dir label
 # read and something refuses.
 assert_blocked() {  # dir label
   local dir=$1 label=$2
-  assert_grep 'rc=1' "$dir/verdict.out" || fail "$label: expected a refusal"$'\n'"$(cat "$dir/verdict.out")"
-  assert_grep 'status=blocked' "$dir/verdict.out" || fail "$label: expected a blocked verdict, got: $(cat "$dir/verdict.out")"
+  assert_grep 'rc=1' "$dir/verdict.out" "$label: expected a refusal"$'\n'"$(cat "$dir/verdict.out")"
+  assert_grep 'status=blocked' "$dir/verdict.out" "$label: expected a blocked verdict, got: $(cat "$dir/verdict.out")"
 }
 
 # The payload or its rollup could not be read at all: a failed read, never an
 # empty red set and never green.
 assert_unreadable() {  # dir label
   local dir=$1 label=$2
-  assert_grep 'rc=1' "$dir/verdict.out" || fail "$label: expected the read to fail"$'\n'"$(cat "$dir/verdict.out")"
-  assert_grep 'status=unreadable' "$dir/verdict.out" || fail "$label: expected an unreadable verdict, got: $(cat "$dir/verdict.out")"
+  assert_grep 'rc=1' "$dir/verdict.out" "$label: expected the read to fail"$'\n'"$(cat "$dir/verdict.out")"
+  assert_grep 'status=unreadable' "$dir/verdict.out" "$label: expected an unreadable verdict, got: $(cat "$dir/verdict.out")"
 }
 
 # --- the predicate ----------------------------------------------------------
@@ -242,11 +242,11 @@ test_required_check_that_never_reported_is_not_green() {
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "unreported-required"
   assert_grep 'unreported=deploy' "$dir/verdict.out" \
-    || fail "unreported-required: the absent requirement was not reported"
+    "unreported-required: the absent requirement was not reported"
   assert_grep "required check 'deploy' has not reported at head $HEAD" "$dir/lines" \
-    || fail "unreported-required: the refusal did not name the absent requirement at the head"
+    "unreported-required: the refusal did not name the absent requirement at the head"
   assert_no_grep 'incomplete=true' "$dir/verdict.out" \
-    || fail "unreported-required: an absent requirement is a refusal, not an unreadable read"
+    "unreported-required: an absent requirement is a refusal, not an unreadable read"
   pass "a required check that never reported stays not green while every read succeeded"
 }
 
@@ -271,10 +271,10 @@ test_pending_and_failed_checks_are_never_green() {
     "$(status_context legacy PENDING)"
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "pending-failed"
-  assert_grep 'red=ci' "$dir/verdict.out" || fail "pending-failed: a pending check was not named"
-  assert_grep 'red=lint' "$dir/verdict.out" || fail "pending-failed: a failed check was not named"
-  assert_grep 'red=legacy' "$dir/verdict.out" || fail "pending-failed: a pending status context was not named"
-  assert_grep "check 'ci' is not green" "$dir/lines" || fail "pending-failed: the pending check was not refused"
+  assert_grep 'red=ci' "$dir/verdict.out" "pending-failed: a pending check was not named"
+  assert_grep 'red=lint' "$dir/verdict.out" "pending-failed: a failed check was not named"
+  assert_grep 'red=legacy' "$dir/verdict.out" "pending-failed: a pending status context was not named"
+  assert_grep "check 'ci' is not green" "$dir/lines" "pending-failed: the pending check was not refused"
   pass "a pending or failed check, status context included, is never green"
 }
 
@@ -298,7 +298,7 @@ test_unfinished_rerun_keeps_the_check_red() {
     "$(check_run ci IN_PROGRESS - 2026-01-01T10:05:00Z)"
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "unfinished-rerun"
-  assert_grep 'red=ci' "$dir/verdict.out" || fail "unfinished-rerun: a rerun that has not finished must keep the check red"
+  assert_grep 'red=ci' "$dir/verdict.out" "unfinished-rerun: a rerun that has not finished must keep the check red"
   pass "a re-run that has not finished neither supersedes nor is superseded"
 }
 
@@ -311,7 +311,7 @@ test_status_contexts_are_never_superseded() {
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "status-context"
   assert_grep 'red=ci' "$dir/verdict.out" \
-    || fail "status-context: a check run must never supersede a non-green status context"
+    "status-context: a check run must never supersede a non-green status context"
   pass "a non-green status context is reported independently and never superseded"
 }
 
@@ -328,9 +328,9 @@ test_unreadable_required_source_is_not_green() {
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "required-unreadable"
   assert_grep 'incomplete=true' "$dir/verdict.out" \
-    || fail "required-unreadable: the verdict did not report incomplete input"
+    "required-unreadable: the verdict did not report incomplete input"
   assert_grep "the branch protection summary for base branch $BASE could not be read, so a required check that has not reported cannot be ruled out" \
-    "$dir/lines" || fail "required-unreadable: the unreadable source was not refused"
+    "$dir/lines" "required-unreadable: the unreadable source was not refused"
   pass "a green rollup with an unreadable requirement source is never green"
 }
 
@@ -341,9 +341,9 @@ test_unreadable_rules_and_producer_reads_are_not_green() {
   write_view "$dir" "$HEAD" "$(check_run ci COMPLETED SUCCESS)"
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "rules-unreadable"
-  assert_grep 'incomplete=true' "$dir/verdict.out" || fail "rules-unreadable: incomplete input was not reported"
+  assert_grep 'incomplete=true' "$dir/verdict.out" "rules-unreadable: incomplete input was not reported"
   assert_grep "the branch rules for base branch $BASE could not be read" "$dir/lines" \
-    || fail "rules-unreadable: the unreadable rules were not refused"
+    "rules-unreadable: the unreadable rules were not refused"
 
   dir=$(new_case producers-unreadable)
   write_required "$dir" bound:ci:5
@@ -351,9 +351,9 @@ test_unreadable_rules_and_producer_reads_are_not_green() {
   : > "$dir/runs-fail"
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "producers-unreadable"
-  assert_grep 'incomplete=true' "$dir/verdict.out" || fail "producers-unreadable: incomplete input was not reported"
+  assert_grep 'incomplete=true' "$dir/verdict.out" "producers-unreadable: incomplete input was not reported"
   assert_grep "required check producers at head $HEAD could not be read" "$dir/lines" \
-    || fail "producers-unreadable: the unreadable producer read was not refused"
+    "producers-unreadable: the unreadable producer read was not refused"
   pass "a failed ruleset read and a failed producer read are refusals, never green"
 }
 
@@ -364,14 +364,14 @@ test_malformed_payloads_are_never_green() {
   printf '{"name":"main","protected":true,"protection":{}}\n' > "$dir/branch.json"
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "malformed-branch"
-  assert_grep 'incomplete=true' "$dir/verdict.out" || fail "malformed-branch: incomplete input was not reported"
+  assert_grep 'incomplete=true' "$dir/verdict.out" "malformed-branch: incomplete input was not reported"
 
   dir=$(new_case malformed-rules)
   write_view "$dir" "$HEAD" "$(check_run ci COMPLETED SUCCESS)"
   printf '{not json\n' > "$dir/rules.json"
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "malformed-rules"
-  assert_grep 'incomplete=true' "$dir/verdict.out" || fail "malformed-rules: incomplete input was not reported"
+  assert_grep 'incomplete=true' "$dir/verdict.out" "malformed-rules: incomplete input was not reported"
   pass "a branch-protection summary without its required-status object and an unparseable rules payload are both refusals"
 }
 
@@ -437,7 +437,7 @@ test_bound_requirement_needs_its_own_producer_at_head() {
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "bound-other-app"
   assert_grep 'unreported=ci' "$dir/verdict.out" \
-    || fail "bound-other-app: a same-named run from another app must not satisfy the requirement"
+    "bound-other-app: a same-named run from another app must not satisfy the requirement"
 
   dir=$(new_case bound-own-app)
   write_required "$dir" bound:ci:5
@@ -456,7 +456,7 @@ test_waivers_change_the_gate_verdict_but_not_readiness() {
   write_view "$dir" "$HEAD" "$(check_run lint COMPLETED FAILURE)" "$(check_run ci COMPLETED SUCCESS)"
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "waived-red-readiness"
-  assert_grep 'red=lint' "$dir/verdict.out" || fail "waived-red-readiness: the red check was not named without a waiver"
+  assert_grep 'red=lint' "$dir/verdict.out" "waived-red-readiness: the red check was not named without a waiver"
 
   run_verdict "$dir" "$HEAD" --allow-red lint
   assert_green "$dir" "waived-red-gate"
@@ -467,7 +467,7 @@ test_waivers_change_the_gate_verdict_but_not_readiness() {
   write_view "$dir" "$HEAD" "$(check_run ci COMPLETED SUCCESS)"
   run_verdict "$dir" "$HEAD"
   assert_blocked "$dir" "waived-missing-readiness"
-  assert_grep 'unreported=deploy' "$dir/verdict.out" || fail "waived-missing-readiness: the absent requirement was not named"
+  assert_grep 'unreported=deploy' "$dir/verdict.out" "waived-missing-readiness: the absent requirement was not named"
 
   run_verdict "$dir" "$HEAD" --allow-missing deploy
   assert_green "$dir" "waived-missing-gate"
