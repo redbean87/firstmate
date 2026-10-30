@@ -85,6 +85,11 @@ result classifies as discord-untrusted-input, is re-announced until
 is recorded under its request id before its messages leave pending/, so a
 retried request id returns the same batch; the first request with a new id
 marks earlier batches captured (docs/extension-bindings.md, request ids).
+A host timeout on the long poll is an empty quiet-period poll: the host's
+own `firstmate.process-event-extension-error.v1` record for a timed-out
+source.poll is the one result the extension's result.silent verdict accepts,
+so it is recorded handled without a wake, while every other captured result
+still wakes Firstmate.
 
 Replies. With DISCORD_REPLIES_SOURCE=mirror (default) the bridge reads
 `main` entries from state/.host-mirror.jsonl, which upstream's Claude and
