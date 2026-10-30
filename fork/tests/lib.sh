@@ -275,13 +275,14 @@ fork_fixture_gh() {
 }
 
 # fork_pr_green_forge <fixture-dir> <head>: one recorded GitHub answer set for a
-# pull request that is fully green at <head> - open, non-draft, one green check
-# run and one green status context, an unprotected base branch, and one active
-# ruleset requiring the check run. A test narrows or breaks one input at a time.
+# pull request that is fully green at <head> - open, non-draft, provably
+# mergeable, one green check run and one green status context, an unprotected
+# base branch, and one active ruleset requiring the check run. A test narrows or
+# breaks one input at a time.
 fork_pr_green_forge() {
   local forge=$1 head=$2
   mkdir -p "$forge"
-  jq -cn --arg head "$head" '{state: "OPEN", isDraft: false, headRefOid: $head, baseRefName: "main",
+  jq -cn --arg head "$head" '{state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: $head, baseRefName: "main",
     statusCheckRollup: [
       {__typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "SUCCESS", startedAt: "2026-01-01T00:00:00Z"},
       {__typename: "StatusContext", context: "legacy", state: "SUCCESS"}]}' > "$forge/pr-view.json"
@@ -295,7 +296,7 @@ fork_pr_green_forge() {
 fork_pr_pending_forge() {
   local forge=$1 head=$2
   mkdir -p "$forge"
-  jq -cn --arg head "$head" '{state: "OPEN", isDraft: false, headRefOid: $head, baseRefName: "main",
+  jq -cn --arg head "$head" '{state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: $head, baseRefName: "main",
     statusCheckRollup: [
       {__typename: "CheckRun", name: "ci", status: "IN_PROGRESS", conclusion: ""}]}' > "$forge/pr-view.json"
   printf '%s\n' '{"protected": false}' > "$forge/branch.json"

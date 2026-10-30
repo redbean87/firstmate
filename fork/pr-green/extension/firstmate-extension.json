@@ -1,7 +1,7 @@
 {
   "schema": "firstmate.extension-manifest.v1",
   "id": "org.firstmate.fork.pr-green",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "host_protocols": [1],
   "entrypoint": "fm-pr-green.mjs",
   "capabilities": [

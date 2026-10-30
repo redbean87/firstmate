@@ -14,7 +14,13 @@ wake. Slice T3 gave that wake memory: the same seam keeps one readiness latch
 marker per task, so a pull request that stays open and green wakes Firstmate
 once per head instead of once per poll, a changed head re-arms, and an
 interrupted marker write can only ever repeat a wake - never swallow one
-("One wake per head: the latch").
+("One wake per head: the latch"). Slice T4 closed the last false green: a pull
+request GitHub never ran checks for. A head that is not provably mergeable
+(conflicting or unknown), and a rollup that reports no check at all while the
+repository has an active workflow that triggers on pull_request, now stay
+silent, because GitHub skips required and CI checks on a head that conflicts
+with its base - an all-green or empty rollup there is the artifact of checks
+that never ran, never evidence that they passed.
 
 It is fork-owned. Everything lives under fork/pr-green/, upstream code stays
 byte-identical, and it reaches Firstmate through the same documented
@@ -45,9 +51,10 @@ seam, and the shipped code keeps them.
     independent, advisory implementation. A divergence from the merge gate can
     cost a wasted wake or a missed one; it cannot cause a bad merge.
   - Silence must be the default for the readiness judgment: a missing required
-    check, an unreadable or failed check read, a stale head, an unclear
-    conclusion, or any doubt must produce no readiness wake, never a claim of
-    green. A failure of the adapter's own read is not that case: it is captured
+    check, an unreadable or failed check read, a stale head, an unprovable
+    mergeability, a rollup reporting no checks beside an active pull-request
+    workflow, an unclear conclusion, or any doubt must produce no readiness
+    wake, never a claim of green. A failure of the adapter's own read is not that case: it is captured
     as host failure evidence and classified apart from readiness evidence (see
     "Event delivery and acknowledgement" below), never as a green pull
     request.
@@ -130,6 +137,15 @@ Files
                                       producer-app binding, the read budget, and
                                       the read cost of each case, all against the
                                       fixture CLI.
+  fork/tests/fm-fork-pr-green-evidence.test.sh
+                                      the missing-evidence guards' own suite: a
+                                      pull request that is not provably
+                                      mergeable, a rollup reporting no checks
+                                      beside the repository's active
+                                      pull-request workflows, every unreadable
+                                      workflow input, and the real adapter
+                                      polled end to end through the same two
+                                      guards.
   fork/tests/fm-fork-pr-green-latch.test.sh
                                       the latch's own suite: two consults of one
                                       head producing one wake, a changed head
@@ -163,6 +179,12 @@ part of the package can quietly acquire an opinion about a pull request:
 A wake is produced only when all of this holds at once:
 
   open       the live pull request state is OPEN and isDraft is exactly false.
+  mergeable  the live mergeability is exactly MERGEABLE. A conflicting head,
+             an unknown mergeability (GitHub has not computed it), and a
+             missing or malformed field are all silence: GitHub skips required
+             and CI checks on a head that conflicts with its base, so an
+             all-green or empty rollup there is the artifact of checks that
+             never ran, never evidence that they passed.
   head       the live head is a valid commit id and equals the recorded head. A
              head the record does not carry is never inferred, and a
              disagreement is silence rather than a guess.
@@ -177,6 +199,16 @@ A wake is produced only when all of this holds at once:
              both read completely, and every required context they name has
              reported at that live head, with a matching producer app for a
              producer-bound requirement that reported as a check run.
+  reported   a rollup that reports no check at all is missing evidence, not
+             green: it stays silent while this repository has at least one
+             active workflow that triggers on pull_request. The workflow list
+             carries state and path but never triggers, so every active
+             workflow's own file is read and scanned for a pull_request
+             trigger (pull_request_target is a different trigger), bounded at
+             40 files; an unreadable workflow list, path, file, or trigger
+             block is silence too, never "no such workflow". Only a
+             repository with no active pull-request workflow can report zero
+             checks and keep looking green.
 
 A reported SKIPPED or NEUTRAL conclusion is green exactly as the merge gate reads
 it, because that gate is the authority that re-reads every requirement. A
@@ -185,8 +217,8 @@ and it keeps the whole read silent.
 
 Silence is the answer to every other outcome: a lookup failure, a timeout, an
 incomplete or malformed answer, an unparsable document, a rollup entry outside
-the two shapes the rollup carries, an unreadable required-context source, a
-partially successful read, or any doubt at all. A
+the two shapes the rollup carries, an unreadable required-context source, an
+unreadable workflow input, a partially successful read, or any doubt at all. A
 green-looking rollup beside an unreadable required-context source is silence,
 never green. The merge gate's narrow "rulesets unavailable on this plan"
 exception is deliberately not mirrored: here an unreadable required set is not
@@ -269,7 +301,12 @@ Read cost and the forge binary
 The common not-ready case costs exactly one forge read: the live pull request
 view. The required-context reads, and the check-run producer read a
 producer-bound requirement needs, happen only after that view already looks
-fully green at the recorded head. One poll has one bounded read budget of 25
+fully green at the recorded head. A rollup that reports no check at all pays,
+only after those, two more kinds of reads: the repository's workflow list, and
+one read per active workflow file (bounded at 40) that must be scanned for its
+triggers; a pull request with any reported check never pays for the workflow
+reads, and a non-empty required set already keeps an empty rollup silent
+through the unreported-required rule. One poll has one bounded read budget of 25
 seconds, well inside the binding's 300-second default invoke timeout, and that
 budget is split evenly across the entries the poll evaluates, so a hanging or
 very slow pull request spends only its own share instead of the share of every
@@ -436,6 +473,12 @@ Known limits
   - GitHub only, by design: gitlab needs a JSON-based required-check read,
     forgejo needs paginated statuses, and gerrit has no merge path in firstmate
     at all, so gerrit must never wake.
+  - The zero-check guard scans each active workflow file for a literal
+    pull_request trigger. A trigger block the scan cannot read (a YAML anchor,
+    an exotic but valid spelling, an empty block) is silence for that poll,
+    never a claim that the workflow does not trigger; its flow-mapping scan can
+    only over-report, which costs a missed wake, never a false one. More than
+    40 active workflow files is silence rather than a sample.
   - A GitHub Enterprise host must be listed in this home's config/github-hosts.
     An unlisted or unreadable list means silence for that host, never a guess.
   - pr_head is recorded only by upstream's GitHub arming path, so a task whose

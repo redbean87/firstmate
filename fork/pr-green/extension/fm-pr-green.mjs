@@ -68,7 +68,7 @@ import path from "node:path";
 import { decideWake, pruneReadinessMarkers } from "./readiness.mjs";
 
 const EXTENSION_ID = "org.firstmate.fork.pr-green";
-const EXTENSION_VERSION = "0.3.0";
+const EXTENSION_VERSION = "0.4.0";
 const MAX_INPUT_BYTES = 65536;
 const MAX_OUTPUT_BYTES = 30000;
 const MAX_RECORD_BYTES = 65536;

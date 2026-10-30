@@ -16,8 +16,11 @@
 #   hang-<key>    the number of seconds to sleep before answering (the sleep
 #                 replaces this process, so a caller's timeout kills it)
 #
-# Keys: pr-view, branch, rules, check-runs. Anything else is a call shape the
-# predicate must not make, and it fails rather than guessing.
+# Keys: pr-view, branch, rules, check-runs, workflows-list, workflow-file.
+# Anything else is a call shape the predicate must not make, and it fails rather
+# than guessing. A workflow-file read is additionally keyed by its file's own
+# basename - workflow-file-<basename> wins over the shared workflow-file - so
+# one case can answer two different workflow files.
 set -u
 
 dir=${FAKE_GH_DIR-}
@@ -34,6 +37,8 @@ case "${1-}" in
   api)
     case "$last" in
       */rules/branches/*) key=rules ;;
+      */actions/workflows) key=workflows-list ;;
+      */contents/*) key=workflow-file ;;
       */check-runs) key=check-runs ;;
       */branches/*) key=branch ;;
       *) key=unexpected ;;
@@ -47,17 +52,24 @@ if [ "$key" = unexpected ]; then
   exit 2
 fi
 
-[ ! -f "$dir/fail-$key" ] || { echo "fixture gh: $key is unavailable" >&2; exit 1; }
-if [ -f "$dir/hang-$key" ]; then
-  exec sleep "$(cat "$dir/hang-$key")"
-fi
-if [ -f "$dir/raw-$key" ]; then
-  cat "$dir/raw-$key"
-  exit 0
-fi
-if [ -f "$dir/$key.json" ]; then
-  cat "$dir/$key.json"
-  exit 0
-fi
+# A per-file named fixture lets one case answer two different workflow files:
+# workflow-file-<basename> is tried before the shared workflow-file.
+named=
+[ "$key" != workflow-file ] || named="workflow-file-${last##*/}"
+
+for candidate in $named $key; do
+  [ ! -f "$dir/fail-$candidate" ] || { echo "fixture gh: $candidate is unavailable" >&2; exit 1; }
+  if [ -f "$dir/hang-$candidate" ]; then
+    exec sleep "$(cat "$dir/hang-$candidate")"
+  fi
+  if [ -f "$dir/raw-$candidate" ]; then
+    cat "$dir/raw-$candidate"
+    exit 0
+  fi
+  if [ -f "$dir/$candidate.json" ]; then
+    cat "$dir/$candidate.json"
+    exit 0
+  fi
+done
 echo "fixture gh: no fixture for $key" >&2
 exit 1
