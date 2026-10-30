@@ -31,6 +31,12 @@
 // The predicate. A wake is produced only when every one of these holds:
 //
 //   open       the live pull request state is OPEN and isDraft is exactly false;
+//   mergeable  the live mergeability is exactly MERGEABLE. A CONFLICTING head,
+//              an UNKNOWN (GitHub has not computed it), and a missing or
+//              malformed field are all silence: GitHub skips required and CI
+//              checks on a head that conflicts with its base, so an all-green
+//              or empty rollup there is the artifact of checks that never ran,
+//              never evidence that they passed.
 //   head       the live headRefOid is a valid commit id and equals the recorded
 //              head (entry.head). A head the record does not carry is never
 //              inferred, and a disagreement is silence rather than a guess.
@@ -47,11 +53,20 @@
 //              both read completely, and every required context they name has
 //              reported at that live head, with a producer-app match for a
 //              bound requirement reported as a check run.
+//   reported   a rollup that reports no check at all is missing evidence, not
+//              green: it is silence while this repository has at least one
+//              ACTIVE workflow that triggers on pull_request. The workflow
+//              list carries state and path but never triggers, so every active
+//              workflow's own file is read and scanned (pullRequestWorkflows
+//              below); an unreadable workflow list, file, or trigger block is
+//              silence too. Only a repository with no active pull-request
+//              workflow can report zero checks and keep looking green.
 //
 // Silence is the answer to every other outcome: a lookup failure, a timeout, an
 // incomplete or malformed response, an unparsable document, an unreadable
-// required-context source, a partially successful read, an unknown
-// __typename, or any doubt at all. A green-looking rollup beside an unreadable
+// required-context source, an unreadable workflow input, a partially successful
+// read, an unknown __typename, or any doubt at all. A green-looking rollup
+// beside an unreadable
 // required-context source is silence, never green: no input can be partly
 // missing and still be green. This predicate re-expresses only what an advisory
 // verdict needs, from bin/fm-pr-merge.sh's documented semantics; it never calls
@@ -61,7 +76,10 @@
 // Cost. The common not-ready case costs exactly one forge read (the initial
 // pull request view). The required-context reads, and the check-run producer
 // read a bound requirement needs, happen only after the initial read already
-// looks fully green and at the recorded head. One poll has one bounded read
+// looks fully green and at the recorded head; the workflow-list read and the
+// one read per active workflow file a zero-check rollup needs happen only after
+// those too, so a pull request with reported checks never pays for them. One
+// poll has one bounded read
 // budget (READ_BUDGET_MS, well inside the binding's 300-second default invoke
 // timeout) and that budget is split evenly across the entries the poll
 // evaluates, with a per-read timeout inside each share. A hanging or very slow
@@ -154,6 +172,8 @@ const MAX_READ_BYTES = 8 * 1024 * 1024;
 const MAX_CONFIG_BYTES = 4096;
 const MAX_ROLLUP_ENTRIES = 2000;
 const MAX_REQUIREMENTS = 500;
+const MAX_WORKFLOW_FILES = 40;
+const MAX_WORKFLOW_BYTES = 256 * 1024;
 
 const HEAD = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 // The delivery modes this fork may merge on its own authority. Re-checked here
@@ -178,6 +198,9 @@ const MAX_RECORD_BYTES = 65536;
 // disappear.
 const SETTLED_AT = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
 const GREEN_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
+// GitHub's own mergeability enum: only MERGEABLE is evidence, while CONFLICTING
+// and UNKNOWN (not yet computed) are missing evidence.
+const MERGEABLE = "MERGEABLE";
 const DEFAULT_GH = "/opt/homebrew/bin/gh";
 const STANDARD_GH = ["/usr/local/bin/gh", "/usr/bin/gh", "/bin/gh"];
 
@@ -303,7 +326,7 @@ function forgeReader(entry, ctx) {
     view() {
       return run([
         "pr", "view", entry.pr, "--json",
-        "state,isDraft,headRefOid,baseRefName,statusCheckRollup",
+        "state,isDraft,mergeable,headRefOid,baseRefName,statusCheckRollup",
       ]);
     },
     api(resource, paginate = false) {
@@ -517,6 +540,164 @@ function unreportedRequired(requirements, rollup, producers) {
   return unreported;
 }
 
+// --- the zero-check guard ---------------------------------------------------
+//
+// A rollup that reports no check at all is missing evidence, not green: GitHub
+// starts required and CI checks when it can, so an empty rollup beside a
+// repository whose workflows run on pull requests means the checks never ran -
+// the shape a conflicting head used to produce - rather than that they passed.
+// The functions below own that question; evaluate asks it only after every
+// other input already looks green.
+
+// workflowFilePath <listed> -> the path's URL form | null
+//
+// A workflow file path the repository listed, segment-by-segment validated and
+// percent-encoded for the contents read. Anything else makes the whole workflow
+// list unreadable, and unreadable is silence - never "no such workflow".
+function workflowFilePath(listed) {
+  if (typeof listed !== "string" || listed === "" || listed.length > 512) return null;
+  const segments = listed.split("/");
+  for (const segment of segments) {
+    if (segment === "" || segment === "." || segment === "..") return null;
+    if (!/^[A-Za-z0-9._-]+$/.test(segment)) return null;
+  }
+  return segments.map(encodeURIComponent).join("/");
+}
+
+// scalarToken <text> -> the unquoted token | null
+function scalarToken(text) {
+  const value = text.trim();
+  if (value.length >= 2 && (value.startsWith('"') || value.startsWith("'"))) {
+    if (value.at(-1) !== value[0]) return null;
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+// flowTriggersPullRequest <text> -> boolean | null
+//
+// The flow forms of a trigger block: [push, pull_request] lists and
+// {pull_request: {...}} mappings. A mapping scan can only ever over-report - a
+// nested key literally named pull_request counts - which costs a missed wake,
+// never a false one.
+function flowTriggersPullRequest(text) {
+  if (text.startsWith("[")) {
+    if (!text.endsWith("]")) return null;
+    const inner = text.slice(1, -1);
+    for (const item of inner.split(",")) {
+      const token = scalarToken(item);
+      if (token === null) return null;
+      if (token === "pull_request") return true;
+    }
+    return false;
+  }
+  if (!text.endsWith("}")) return null;
+  const mappingKey = /[{,]\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*:/g;
+  let found = false;
+  for (let match = mappingKey.exec(text); match !== null; match = mappingKey.exec(text)) {
+    if ((match[1] ?? match[2] ?? match[3]) === "pull_request") found = true;
+  }
+  return found;
+}
+
+// workflowTriggersPullRequest <source> -> boolean | null
+//
+// Whether one workflow file's own trigger block names pull_request - and only
+// pull_request: pull_request_target is a different trigger. The scan is
+// deliberately literal: a trigger block it cannot read with confidence (no
+// top-level on:, a merge key, an empty block, a flow form that does not close)
+// is null, and null keeps the whole readiness read silent. A file the scan
+// cannot place on: inside is unreadable, never "does not trigger".
+function workflowTriggersPullRequest(source) {
+  const lines = source.split("\n");
+  let start = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^(?:"on"|'on'|on):/.test(lines[index])) {
+      start = index;
+      break;
+    }
+  }
+  if (start === -1) return null;
+  const rest = lines[start].slice(lines[start].indexOf(":") + 1).replace(/\s+#.*$/, "").trim();
+  if (rest !== "") {
+    if (rest.startsWith("[") || rest.startsWith("{")) return flowTriggersPullRequest(rest);
+    return scalarToken(rest) === "pull_request";
+  }
+  let expect = -1;
+  let entries = 0;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index].replace(/\s+#.*$/, "");
+    if (line.trim() === "") continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) break;
+    if (expect === -1) expect = indent;
+    else if (indent !== expect) continue;
+    entries += 1;
+    const content = line.trim();
+    if (content.startsWith("- ")) {
+      if (scalarToken(content.slice(2)) === "pull_request") return true;
+      continue;
+    }
+    const colon = content.indexOf(":");
+    if (colon <= 0) return null;
+    const key = scalarToken(content.slice(0, colon));
+    if (key === null || key === "") return null;
+    if (key === "pull_request") return true;
+    if (key === "<<") return null;
+  }
+  return entries > 0 ? false : null;
+}
+
+// readWorkflowSource <reader> <entry> <file> -> source | null
+//
+// One workflow file's source from the contents read its path names. A body that
+// is not one small base64 text file is unreadable, and unreadable is silence.
+function readWorkflowSource(reader, entry, file) {
+  const body = reader.api(`repos/${entry.owner}/${entry.repo}/contents/${file}`);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
+  if (body.type !== "file" || body.encoding !== "base64" || typeof body.content !== "string") return null;
+  if (Number.isInteger(body.size) && body.size > MAX_WORKFLOW_BYTES) return null;
+  const source = Buffer.from(body.content, "base64").toString("utf8");
+  if (Buffer.byteLength(source, "utf8") > MAX_WORKFLOW_BYTES) return null;
+  return source;
+}
+
+// pullRequestWorkflows <reader> <entry> -> boolean | null
+//
+// Whether this repository has at least one ACTIVE workflow that triggers on
+// pull_request. The workflow list carries each workflow's state and file path
+// but never its triggers, so every active workflow's own file is read and
+// scanned. An unreadable list, an unusable path, an unscannable trigger block,
+// or an unreadable file makes the whole question unreadable - silence, never
+// "no such workflow". The file reads are bounded by MAX_WORKFLOW_FILES; a
+// longer list is unreadable rather than sampled.
+function pullRequestWorkflows(reader, entry) {
+  const pages = reader.api(`repos/${entry.owner}/${entry.repo}/actions/workflows`, true);
+  if (!Array.isArray(pages)) return null;
+  const active = [];
+  for (const page of pages) {
+    if (page === null || typeof page !== "object" || Array.isArray(page)) return null;
+    if (!Array.isArray(page.workflows)) return null;
+    for (const workflow of page.workflows) {
+      if (workflow === null || typeof workflow !== "object" || Array.isArray(workflow)) return null;
+      if (typeof workflow.state !== "string") return null;
+      if (workflow.state !== "active") continue;
+      const file = workflowFilePath(workflow.path);
+      if (file === null) return null;
+      active.push(file);
+      if (active.length > MAX_WORKFLOW_FILES) return null;
+    }
+  }
+  for (const file of active) {
+    const source = readWorkflowSource(reader, entry, file);
+    if (source === null) return null;
+    const triggers = workflowTriggersPullRequest(source);
+    if (triggers === null) return null;
+    if (triggers) return true;
+  }
+  return false;
+}
+
 // evaluate <entry> <ctx> -> {head, base, required} | null
 function evaluate(entry, ctx) {
   const reader = forgeReader(entry, ctx);
@@ -535,6 +716,14 @@ function evaluate(entry, ctx) {
   }
   if (view.isDraft !== false) {
     ctx.log(`pr-green: not-ready ${entry.id} draft-unconfirmed`);
+    return null;
+  }
+  // A pull request that is not provably mergeable is missing evidence, never
+  // green: GitHub skips required and CI checks on a head that conflicts with
+  // its base (or while mergeability is still UNKNOWN), so a fully green or
+  // empty rollup there is the artifact of checks that never ran.
+  if (view.mergeable !== MERGEABLE) {
+    ctx.log(`pr-green: not-ready ${entry.id} not-mergeable`);
     return null;
   }
   const head = view.headRefOid;
@@ -593,6 +782,23 @@ function evaluate(entry, ctx) {
   if (unreported.length > 0) {
     ctx.log(`pr-green: not-ready ${entry.id} required-unreported`);
     return null;
+  }
+  // Every reported check is green and every requirement has reported - but a
+  // rollup that reports NOTHING at all is still missing evidence while this
+  // repository has an active workflow that triggers on pull_request. This is
+  // the last guard, so a rollup with reported checks never pays for the
+  // workflow reads, and a non-empty required set already silenced an empty
+  // rollup above.
+  if (view.statusCheckRollup.length === 0) {
+    const workflows = pullRequestWorkflows(reader, entry);
+    if (workflows === null) {
+      ctx.log(`pr-green: not-ready ${entry.id} workflows-unreadable`);
+      return null;
+    }
+    if (workflows) {
+      ctx.log(`pr-green: not-ready ${entry.id} checks-missing`);
+      return null;
+    }
   }
   return { head, base, required: required.length };
 }

@@ -116,7 +116,7 @@ green_pr() {
 
 rollup() {  # <case-dir> <rollup-json>
   jq -cn --arg head "$HEAD_A" --argjson rollup "$2" \
-    '{state: "OPEN", isDraft: false, headRefOid: $head, baseRefName: "main", statusCheckRollup: $rollup}' \
+    '{state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: $head, baseRefName: "main", statusCheckRollup: $rollup}' \
     > "$1/forge/pr-view.json"
 }
 
@@ -132,8 +132,8 @@ test_a_green_pull_request_at_the_recorded_head_is_ready() {
   assert_contains "$DECISION" "The single required check has reported at that head." \
     "the advisory body names the one required check it counted, in a sentence that reads"
   [ "$(calls "$dir")" = 3 ] || fail "a ready pull request costs the pull read, the branch read, and the rules read: $(cat "$dir/forge/calls.log")"
-  assert_contains "$(cat "$dir/forge/calls.log")" "pr view $PR_URL --json state,isDraft,headRefOid,baseRefName,statusCheckRollup" \
-    "the pull read keeps the live state, draft flag, head, base, and rollup fields"
+  assert_contains "$(cat "$dir/forge/calls.log")" "pr view $PR_URL --json state,isDraft,mergeable,headRefOid,baseRefName,statusCheckRollup" \
+    "the pull read keeps the live state, draft flag, mergeability, head, base, and rollup fields"
   assert_contains "$(cat "$dir/forge/calls.log")" "api repos/acme/app/branches/main" "classic branch protection is read at the pull request's own base"
   assert_contains "$(cat "$dir/forge/calls.log")" "api --paginate --slurp repos/acme/app/rules/branches/main" "active rulesets are read at that base"
   assert_not_contains "$(cat "$dir/forge/calls.log")" "check-runs" "an unbound required check needs no producer read"
