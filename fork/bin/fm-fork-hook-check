@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm-fork-hook-check - prove the fork's two upstream integration points are
+# fm-fork-hook-check - prove the fork's three upstream integration points are
 # present, unmodified, and at their lifecycle positions, and (with --base) that
 # no other upstream-owned file differs from upstream.
 #
@@ -15,9 +15,16 @@
 #     fork/hooks/hk2-control.block, inside do_relaunch() after
 #     resolve_relaunch_profile and before safe_checkpoint and do_exit; the
 #     upstream names it reads exist in that file.
-#   - No upstream-owned bin/ file other than these two references the fork.
+#   - HK3 appears exactly once in bin/fm-watch.sh, byte-identical to
+#     fork/hooks/hk3-watch.block, inside resurface_after_downtime() immediately
+#     after the ordinary branch's recovery check and before that branch's fi
+#     and trailing wake; the upstream helper the block calls,
+#     handling_successor_has_queued_row, exists and is defined before the
+#     function.
+#   - No upstream-owned bin/ file other than the two launch-policy hook files
+#     references fork code.
 #   - --base: `git diff <ref>` outside fork/ and the fork CI workflow touches
-#     only those two files, and only by adding exactly the two blocks.
+#     only the three hooked files, and only by adding exactly the three blocks.
 # Prints one `ok:` or `FAIL:` line per check; exits 1 if any check fails.
 set -u
 
@@ -27,7 +34,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT=$(cd "${2:?--root needs a path}" && pwd); shift 2 ;;
     --base) BASE=${2:?--base needs a ref}; shift 2 ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "fm-fork-hook-check: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -38,9 +45,11 @@ bad() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
 
 SPAWN="$ROOT/bin/fm-spawn.sh"
 CONTROL="$ROOT/bin/fm-control.sh"
+WATCH="$ROOT/bin/fm-watch.sh"
 HK1="$ROOT/fork/hooks/hk1-spawn.block"
 HK2="$ROOT/fork/hooks/hk2-control.block"
-for f in "$SPAWN" "$CONTROL" "$HK1" "$HK2"; do
+HK3="$ROOT/fork/hooks/hk3-watch.block"
+for f in "$SPAWN" "$CONTROL" "$WATCH" "$HK1" "$HK2" "$HK3"; do
   [ -f "$f" ] || { bad "missing file ${f#"$ROOT"/}"; exit 1; }
 done
 
@@ -147,6 +156,41 @@ if find_block "$CONTROL" "$HK2" HK2; then
   fi
 fi
 
+# --- HK3: bin/fm-watch.sh resurface guard -------------------------------------
+if find_block "$WATCH" "$HK3" HK3; then
+  fn_start=$(grep -nE '^resurface_after_downtime\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
+  fn_end=
+  if [ -n "$fn_start" ]; then
+    fn_end=$(awk -v s="$fn_start" 'NR > s && /^}/ { print NR; exit }' "$WATCH")
+  fi
+  # The ordinary branch's recover check: the handling-successor branch has the
+  # same line, so the anchor is the LAST such line inside the function - the
+  # one whose branch falls through to the trailing wake.
+  # shellcheck disable=SC2016 # literal upstream source line
+  recover_line=$(grep -nxF -- '    [ "$FM_RECOVERY_MARKER_ACTION" = recover ] || return 0' "$WATCH" \
+    | awk -F: -v s="${fn_start:-0}" -v e="${fn_end:-0}" '$1 > s && $1 < e { last = $1 } END { print last }')
+  if [ -z "$fn_start" ] || [ -z "$fn_end" ]; then
+    bad "HK3: upstream function resurface_after_downtime() not found; re-anchor the block"
+  elif [ "$BLOCK_BEGIN" -le "$fn_start" ] || [ "$BLOCK_END" -ge "$fn_end" ]; then
+    bad "HK3: block must sit inside resurface_after_downtime() (lines $fn_start-$fn_end)"
+  elif [ -z "$recover_line" ] || [ "$BLOCK_BEGIN" -ne "$((recover_line + 1))" ]; then
+    bad "HK3: block must immediately follow the ordinary branch's recover check${recover_line:+ (line $recover_line)} in resurface_after_downtime()"
+  elif [ "$(sed -n "$((BLOCK_END + 1))p" "$WATCH")" != '  fi' ] \
+    || [ "$(sed -n "$((BLOCK_END + 2))p" "$WATCH")" != '  wake "check: rearm-resurface"' ]; then
+    bad "HK3: block must sit between that recover check and the trailing wake (line $((BLOCK_END + 1)) must be '  fi' followed by the wake)"
+  else
+    ok "HK3: inside resurface_after_downtime(), after the recover check ($recover_line), before the trailing wake ($((BLOCK_END + 2)))"
+  fi
+  helper=$(grep -nE '^handling_successor_has_queued_row\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
+  if [ -z "$helper" ]; then
+    bad "HK3: upstream helper handling_successor_has_queued_row() not found; the block calls it"
+  elif [ -n "$fn_start" ] && [ "$helper" -ge "$fn_start" ]; then
+    bad "HK3: handling_successor_has_queued_row must be defined before resurface_after_downtime() (line $helper)"
+  else
+    ok "HK3: the helper the block calls exists before resurface_after_downtime() (line $helper)"
+  fi
+fi
+
 # --- no other fork reference in upstream-owned bin/ ---------------------------
 others=$(grep -lE 'fork/bin/|FM_LP_[A-Z]' "$ROOT"/bin/* 2>/dev/null | grep -vxF -e "$SPAWN" -e "$CONTROL" || true)
 if [ -n "$others" ]; then
@@ -155,19 +199,29 @@ else
   ok "no fork reference in any other upstream bin/ file"
 fi
 
-# --- --base: nothing upstream-owned differs except the two blocks ------------
+# --- --base: nothing upstream-owned differs except the three blocks -----------
 if [ -n "$BASE" ]; then
   if ! git -C "$ROOT" rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
     bad "--base $BASE is not a commit in $ROOT"
   else
-    changed=$(git -C "$ROOT" diff --name-only "$BASE" -- . ':(exclude)fork' ':(exclude).github/workflows/fork-ci.yml' | sort | tr '\n' ' ')
-    if [ "$changed" != "bin/fm-control.sh bin/fm-spawn.sh " ]; then
-      bad "--base $BASE: upstream-owned files differing: ${changed:-none} (expected exactly bin/fm-control.sh bin/fm-spawn.sh)"
+    changed=$(git -C "$ROOT" diff --name-only "$BASE" -- . ':(exclude)fork' ':(exclude).github/workflows/fork-ci.yml' | sort)
+    outside=
+    for f in $changed; do
+      case "$f" in
+        bin/fm-control.sh|bin/fm-spawn.sh|bin/fm-watch.sh) ;;
+        *) outside="$outside $f" ;;
+      esac
+    done
+    if [ -n "$outside" ]; then
+      bad "--base $BASE: upstream-owned files differing:${outside# } (expected only bin/fm-control.sh bin/fm-spawn.sh bin/fm-watch.sh)"
     else
       extra=
-      for pair in "bin/fm-spawn.sh:$HK1" "bin/fm-control.sh:$HK2"; do
+      for pair in "bin/fm-spawn.sh:$HK1" "bin/fm-control.sh:$HK2" "bin/fm-watch.sh:$HK3"; do
         file=${pair%%:*}
         block=${pair#*:}
+        # A hooked file absent from the diff is caught by find_block above;
+        # only files that differ need their delta equal to exactly the block.
+        printf '%s\n' "$changed" | grep -qxF -- "$file" || continue
         diff_out=$(git -C "$ROOT" diff -U0 "$BASE" -- "$file")
         deleted=$(printf '%s\n' "$diff_out" | grep -cE '^-([^-]|$)' || true)
         added=$(printf '%s\n' "$diff_out" | grep -E '^\+' | grep -vE '^\+\+\+ ' | sed 's/^+//')
@@ -176,7 +230,7 @@ if [ -n "$BASE" ]; then
       if [ -n "$extra" ]; then
         bad "--base $BASE: these upstream files differ by more than their hook block:$extra"
       else
-        ok "--base $BASE: upstream-owned files differ only by the two hook blocks"
+        ok "--base $BASE: upstream-owned files differ only by the three hook blocks"
       fi
     fi
   fi

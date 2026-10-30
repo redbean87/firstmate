@@ -10,12 +10,12 @@ CHECK="$ROOT/fork/bin/fm-fork-hook-check"
 TMP_ROOT=$(fm_test_tmproot fm-fork-hook-wiring)
 mkdir -p "$TMP_ROOT"
 
-# copy_tree <name>: a minimal tree holding the two hooked files, the canonical
+# copy_tree <name>: a minimal tree holding the three hooked files, the canonical
 # blocks, and one other upstream bin file. Echoes its root.
 copy_tree() {
   local t="$TMP_ROOT/$1"
   mkdir -p "$t/bin" "$t/fork/hooks"
-  cp "$ROOT/bin/fm-spawn.sh" "$ROOT/bin/fm-control.sh" "$ROOT/bin/fm-send.sh" "$t/bin/"
+  cp "$ROOT/bin/fm-spawn.sh" "$ROOT/bin/fm-control.sh" "$ROOT/bin/fm-watch.sh" "$ROOT/bin/fm-send.sh" "$t/bin/"
   cp "$ROOT/fork/hooks/"*.block "$t/fork/hooks/"
   printf '%s\n' "$t"
 }
