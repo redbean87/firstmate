@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# fm-fork-workflow-guard - fail when any workflow outside the fork's
+# allowlist is active on this repository.
+#
+# Since main became the fork setup, upstream's ci.yml sits in this repository
+# verbatim with no scope gate, so an enabled ci.yml runs upstream's whole test
+# suite on every fork PR. The repository settings disable it; this guard is
+# what stops a re-enable - or a workflow file an upstream sync installs -
+# from coming back unnoticed. Fork CI runs it as a step with
+# `permissions: actions: read` and GH_TOKEN from github.token, and the run
+# fails, naming each active workflow outside the allowlist and the exact
+# command that disables it.
+#
+# Usage:
+#   fm-fork-workflow-guard [--repo <owner/name>]
+#
+# The repository comes from --repo or GITHUB_REPOSITORY. The workflow list
+# comes from `gh api repos/<repo>/actions/workflows?per_page=100` (auth as gh
+# reads it: GH_TOKEN or GITHUB_TOKEN). The allowlist is
+#
+#   fork-ci.yml  no-mistakes-required.yml  windows-herdr-spike.yml
+#
+# Fail-closed: a failed or empty API call, invalid JSON, an entry whose state
+# is unreadable, an active entry without a string name/path, or a list whose
+# total_count exceeds the entries read all fail rather than pass. Exit 0 when
+# every active workflow is allowlisted, 1 otherwise (including every
+# unreadable answer), 2 usage errors.
+set -u
+
+ALLOWLIST='fork-ci.yml no-mistakes-required.yml windows-herdr-spike.yml'
+
+die() { printf 'FAIL: %s\n' "$*"; exit "${2:-1}"; }
+
+repo=${GITHUB_REPOSITORY:-}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo) repo=${2:?--repo needs <owner/name>}; shift 2 ;;
+    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf 'fm-fork-workflow-guard: unknown argument %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+[ -n "$repo" ] || { printf 'fm-fork-workflow-guard: no repository (GITHUB_REPOSITORY is unset and no --repo given)\n' >&2; exit 2; }
+command -v gh >/dev/null 2>&1 || die "gh is not installed; the workflow list cannot be read - refusing to pass"
+command -v jq >/dev/null 2>&1 || die "jq is not installed; the workflow list cannot be read - refusing to pass"
+
+err_file=$(mktemp) || die "cannot create a temp file; the workflow list cannot be read - refusing to pass"
+trap 'rm -f "$err_file"' EXIT
+if ! body=$(gh api "repos/$repo/actions/workflows?per_page=100" 2>"$err_file"); then
+  die "cannot read the workflow list for $repo - refusing to pass: $(tr '\n' ' ' <"$err_file")"
+fi
+[ -n "$body" ] || die "the workflow list for $repo came back empty - refusing to pass"
+
+if ! printf '%s' "$body" | jq -e '
+  (type == "object")
+  and ((.total_count | type) == "number")
+  and ((.workflows | type) == "array")
+  and all(.workflows[];
+    ((.state | type) == "string")
+    and (if .state == "active"
+      then (((.name | type) == "string") and ((.path | type) == "string"))
+      else true end))
+' >/dev/null 2>&1; then
+  die "malformed workflow list from the GitHub API - refusing to pass: $(printf '%s' "$body" | head -c 300)"
+fi
+
+total=$(printf '%s' "$body" | jq -r '.total_count')
+read_count=$(printf '%s' "$body" | jq -r '.workflows | length')
+[ "$total" = "$read_count" ] \
+  || die "incomplete workflow list (total_count=$total but $read_count entries read) - refusing to pass"
+
+offenders=$(printf '%s' "$body" | jq -r --arg allow "$ALLOWLIST" '
+  .workflows[]
+  | select(.state == "active")
+  | (.path | split("/") | last) as $file
+  | select(($allow | split(" ") | index($file)) == null)
+  | [.name, .path, $file] | @tsv')
+[ -n "$offenders" ] || {
+  printf 'ok: every active workflow on %s is on the allowlist (%s workflows listed)\n' "$repo" "$read_count"
+  exit 0
+}
+printf 'FAIL: workflow(s) active on %s that are not on the Fork CI allowlist:\n' "$repo"
+while IFS=$'\t' read -r name path file; do
+  printf 'FAIL:   %s (%s) is active - disable it: gh workflow disable %s\n' "$name" "$path" "$file"
+  printf 'FAIL:     (or repository Settings > Actions > General, set it to disabled)\n'
+done <<<"$offenders"
+printf 'FAIL: allowlist: %s\n' "$ALLOWLIST"
+exit 1

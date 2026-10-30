@@ -32,6 +32,10 @@
 #          against <upstream-commit>, for review. Exit 0 only if all pass.
 # lint     the fork's ShellCheck set, shared with .github/workflows/fork-ci.yml.
 #
+# prepare and check print the ci.yml reminder: re-enable ci.yml only for
+#          a sync PR that names a compatibility risk, then disable it again
+#          (fork/README "Upstream sync procedure").
+#
 # Nothing here fast-forwards, pushes, deletes a branch or worktree, aborts a
 # merge, or resolves a conflict; those steps stay manual (fork/README).
 set -u
@@ -48,6 +52,12 @@ owner_of() {  # <path>: fork-owned | hook file | upstream
   esac
 }
 
+# ci_reminder: printed by prepare and check so the one ci.yml rule of the sync
+# procedure cannot be forgotten mid-sync (fork/README "Upstream sync procedure").
+ci_reminder() {
+  printf '%s\n' 'reminder: re-enable ci.yml only for a sync PR that names a compatibility risk, then disable it again (fork/README "Upstream sync procedure")'
+}
+
 cmd_prepare() {
   local commit=${1:-} from=fork/stage1-enforcement wt='' short sha branch backup out rc conflicts f
   [ -n "$commit" ] || usage
@@ -59,6 +69,7 @@ cmd_prepare() {
       *) die "unknown argument $1" 2 ;;
     esac
   done
+  ci_reminder
   sha=$(git -C "$SELF_ROOT" rev-parse --verify --quiet "$commit^{commit}") \
     || die "$commit is not a commit here; fetch it first: git fetch --no-tags upstream <ref-or-sha>"
   git -C "$SELF_ROOT" rev-parse --verify --quiet "refs/heads/$from" >/dev/null || die "no local branch $from"
@@ -97,6 +108,7 @@ cmd_lint() {
   [ "${1:-}" = --root ] && root=$(cd "${2:?--root needs a path}" && pwd)
   command -v shellcheck >/dev/null 2>&1 || die "shellcheck is not installed (bin/fm-install-shellcheck.sh)"
   (cd "$root" && shellcheck -x fork/bin/fm-launch-policy fork/bin/fm-brief-intake-check fork/bin/fm-fork-hook-check fork/bin/fm-fork-sync \
+    fork/bin/fm-fork-workflow-guard \
     fork/bin/fm-askuser-guard \
     fork/bin/fm-discord-release fork/bin/fm-pr-green-teardown fork/chatgpt/*.sh fork/discord/*.sh \
     fork/discord/fm-discord-service fork/tests/run fork/tests/*.sh) || rc=1
@@ -116,6 +128,7 @@ cmd_check() {
       *) die "unknown argument $1" 2 ;;
     esac
   done
+  ci_reminder
   sha=$(git -C "$root" rev-parse --verify --quiet "$commit^{commit}") || die "$commit is not a commit in $root"
   git -C "$root" merge-base --is-ancestor "$sha" HEAD || die "$root HEAD does not contain $commit; merge it first"
   [ -z "$(git -C "$root" diff --name-only --diff-filter=U)" ] || die "$root has unresolved conflicts"
@@ -134,6 +147,6 @@ case "${1:-}" in
   prepare) shift; cmd_prepare "$@" ;;
   check) shift; cmd_check "$@" ;;
   lint) shift; cmd_lint "$@" ;;
-  -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) usage ;;
 esac
