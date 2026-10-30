@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+# fm-budget-mode - decide which paid plan the fleet dispatches on, from live
+# quota evidence, and write the single marker that fork/bin/fm-launch-policy
+# reads on every launch and relaunch. Nobody edits dispatch configuration by
+# hand during an outage: this script decides, the marker records, the launch
+# policy follows.
+#
+# Usage:
+#   fm-budget-mode [--config <dir>] [--quiet]
+#   fm-budget-mode --help
+#
+# Evidence. One bounded `quota-axi --json --provider opencode-go --provider
+# claude --max-age 15m` read (no other provider, no new provider, no paid API
+# call, no authentication change), bounded by upstream's fm_run_timed. The
+# OpenCode Go row carries the rolling, weekly, and monthly windows; the Claude
+# row's window is recorded where a reading is available but never flips the
+# decision, because Claude is the fallback plan rather than the one being
+# chosen between.
+#
+# Decision (FM_BUDGET_TIGHT_PERCENT sets the tight floor, default 10):
+#   opencode  OpenCode Go has headroom (known availability at or above the
+#             floor).
+#   claude    OpenCode Go is exhausted (0% left), tight (below the floor), or
+#             its credential is rejected (row notSetUp, or state
+#             auth_required).
+#   claude    The OpenCode Go reading is unmeasurable or missing - the
+#             snapshot is absent, unparseable, schema-invalid, carries no
+#             opencode-go row, reports no known availability, or carries no
+#             usable timestamp for its age. That uncertainty is written into
+#             the marker and the fallback to Claude is stated with its why;
+#             an unreadable reading is never silently read as "plenty left"
+#             and never silently read as "exhausted".
+# Freshness comes from the row's state.refreshedAt, else the snapshot's
+# generatedAt; when neither parses, the reading's age is recorded as unknown
+# (and, for an otherwise measurable OpenCode Go row, the reading counts as
+# unmeasurable, so a decision never rests on evidence that cannot be aged).
+#
+# Output. <config>/budget-mode is written atomically (temp file in the same
+# directory, then rename) and printed to stdout unless --quiet. The config
+# directory is --config, else $FM_HOME/config. A stderr warning accompanies a
+# marker that recorded uncertainty.
+#
+# Marker schema v1 - fork/bin/fm-launch-policy validates exactly this, and is
+# the consumer half of this contract:
+#   version=1
+#   harness=opencode | claude     the decided harness the fleet dispatches on
+#   decided_at=<epoch seconds>    when this decision was written
+#   reason=<one plain-words line> why this plan, including any fallback
+#   reading=<one line>            the evidence the decision was based on:
+#                                 the OpenCode Go windows, their limiting
+#                                 window and refresh time, then the Claude
+#                                 window (or that it was absent/unmeasurable)
+#   reading_age_seconds=<non-negative integer | unknown>
+#                                 age of the reading the decision was based
+#                                 on when this marker was written
+#   uncertainty=<one line | none> every reading that was unmeasurable or
+#                                 missing plus the fallback taken; an age of
+#                                 "unknown" always comes with a line saying
+#                                 so, never with "none"
+# Values are single lines with no tabs or control characters. Blank lines,
+# unknown fields, duplicate fields, missing fields, or a bad value refuse the
+# consumer loudly instead of being guessed around.
+#
+# Exit: 0 - a marker was written, including a marker whose evidence was
+#          uncertain (the uncertainty is the record).
+#       2 - no marker could be written at all: unusable arguments, no config
+#          directory, missing jq or upstream libraries, or a failed write.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORK_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+die() { printf 'fm-budget-mode: %s\n' "$*" >&2; exit 2; }
+
+CONFIG='' QUIET=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --config) [ $# -ge 2 ] || die "--config needs a directory"
+      CONFIG=$2; shift 2 ;;
+    --quiet) QUIET=1; shift ;;
+    -h|--help)
+      sed -n '2,/^set -u/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^set -u/d' >&2
+      exit 0 ;;
+    *) die "unknown argument $1 (try --help)" ;;
+  esac
+done
+
+if [ -z "$CONFIG" ]; then
+  [ -n "${FM_HOME:-}" ] \
+    || die "neither --config nor FM_HOME names the home whose config/budget-mode should be written"
+  CONFIG=$FM_HOME/config
+fi
+[ -d "$CONFIG" ] && [ -w "$CONFIG" ] \
+  || die "config directory $CONFIG does not exist or is not writable"
+
+TIGHT=${FM_BUDGET_TIGHT_PERCENT:-10}
+case "$TIGHT" in ''|*[!0-9]*) die "FM_BUDGET_TIGHT_PERCENT must be a whole percentage, got '$TIGHT'" ;; esac
+[ "$TIGHT" -le 100 ] || die "FM_BUDGET_TIGHT_PERCENT must not exceed 100, got '$TIGHT'"
+TIMEOUT=${FM_BUDGET_QUOTA_TIMEOUT:-15}
+case "$TIMEOUT" in ''|*[!0-9]*|0) die "FM_BUDGET_QUOTA_TIMEOUT must be a positive whole number of seconds, got '$TIMEOUT'" ;; esac
+
+command -v jq >/dev/null 2>&1 || die "jq is required"
+
+# shellcheck source=bin/fm-quota-axi-lib.sh
+. "$FORK_ROOT/bin/fm-quota-axi-lib.sh" || die "upstream bin/fm-quota-axi-lib.sh could not be loaded"
+# shellcheck source=bin/fm-timeout-lib.sh
+. "$FORK_ROOT/bin/fm-timeout-lib.sh" || die "upstream bin/fm-timeout-lib.sh could not be loaded"
+for fn in fm_quota_json_valid fm_run_timed; do
+  declare -F "$fn" >/dev/null || die "upstream helper $fn is missing"
+done
+
+# --- evidence ----------------------------------------------------------------
+
+SNAP=$(mktemp "${TMPDIR:-/tmp}/fm-budget-mode.XXXXXX") || die "cannot create a temporary file"
+ERRF=$(mktemp "${TMPDIR:-/tmp}/fm-budget-mode-err.XXXXXX") || die "cannot create a temporary file"
+trap 'rm -f "$SNAP" "$ERRF"' EXIT
+
+QUOTA_RC=0
+if command -v quota-axi >/dev/null 2>&1; then
+  fm_run_timed "$TIMEOUT" quota-axi --json --provider opencode-go --provider claude \
+    --max-age 15m >"$SNAP" 2>"$ERRF"
+  QUOTA_RC=$?
+else
+  QUOTA_RC=127
+  printf '%s\n' 'quota-axi is not installed' >"$ERRF"
+fi
+
+# first_line <file>: the first line of the file, made safe for one marker line.
+first_line() {
+  [ -s "$1" ] || return 0
+  head -n 1 "$1" | cut -c1-200 | tr -d '\000-\037'
+}
+
+STDERR_NOTE=$(first_line "$ERRF")
+
+# iso_epoch <timestamp>: the epoch seconds of a UTC ISO-8601 timestamp with
+# optional fractional seconds, in Z or +00:00 spelling; fails when unparseable
+# (or when this host's date cannot parse it, GNU and BSD spellings both).
+iso_epoch() {
+  local ts=$1
+  [ -n "$ts" ] || return 1
+  # Drop fractional seconds only, keeping the timezone spelling, then accept
+  # UTC only: Z as printed, or a +00:00 offset restated as Z.
+  ts=$(printf '%s' "$ts" | sed -E 's/\.[0-9]+//')
+  case "$ts" in *+00:00) ts=${ts%+00:00}Z ;; esac
+  case "$ts" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) return 1 ;;
+  esac
+  if date -u -d "$ts" +%s 2>/dev/null; then return 0; fi
+  date -j -u -f '%Y-%m-%dT%H:%M:%S' "${ts%Z}" +%s 2>/dev/null
+}
+
+UNMEASURABLE=''   # why the OpenCode Go reading cannot carry a decision
+REJECTED=''       # non-empty: the OpenCode Go credential is rejected
+STATE_ERROR=''     # the rejected row's state.error, when present
+OPC_ROW='' CLAUDE_ROW=''
+OPC_PCT='' OPC_LIMIT='' OPC_TIME='' GEN_AT=''
+OPC_SEG='' CLAUDE_SEG='' CLAUDE_UNC=''
+CLAUDE_LIMIT='' CLAUDE_TIME=''
+
+# windows_segment <row>: the row's windows as `label pct%, ...`, falling back
+# to its known availability when no window carries a percent.
+windows_segment() {
+  jq -r '([.windows[]? | select(.percentRemaining != null)
+            | ((.label // .id) + " " + (.percentRemaining | tostring) + "%")]
+          | join(", ")) as $w
+         | if $w != "" then $w
+           else ([.quotaSemantics.effectiveAvailability[]?
+                  | select(.status == "known")
+                  | (.scope + " " + (.effectivePercentRemaining | tostring) + "%")]
+                 | join(", ")) end' <<<"$1" 2>/dev/null
+}
+
+# limiting_window <row>: the known all_models limiting window id, if any.
+limiting_window() {
+  jq -r '([.quotaSemantics.effectiveAvailability[]?
+           | select(.status == "known" and .scope == "all_models")]
+          | first // {}) | (.limitingWindowIds // []) | first // empty' <<<"$1" 2>/dev/null
+}
+
+# known_percent <row>: the known all_models percent remaining, if any.
+known_percent() {
+  jq -r '([.quotaSemantics.effectiveAvailability[]?
+           | select(.status == "known" and .scope == "all_models")]
+          | first // {}) | .effectivePercentRemaining // empty' <<<"$1" 2>/dev/null
+}
+
+# refreshed_at <row>: the row's state.refreshedAt, if any.
+refreshed_at() { jq -r '.state.refreshedAt // empty' <<<"$1" 2>/dev/null; }
+
+# row_for <snapshot> <provider>: the provider's row (default lane preferred).
+row_for() {
+  jq -c --arg p "$2" '[.providers[]? | select(.provider == $p)]
+    | (map(select((.accountKey // "default") == "default")) | first) // first // empty' \
+    "$1" 2>/dev/null
+}
+
+if [ ! -s "$SNAP" ]; then
+  UNMEASURABLE="quota-axi printed no reading (exit $QUOTA_RC)${STDERR_NOTE:+: $STDERR_NOTE}"
+elif ! jq -e 'type == "object"' "$SNAP" >/dev/null 2>&1; then
+  UNMEASURABLE="quota-axi printed no parseable reading (exit $QUOTA_RC)${STDERR_NOTE:+: $STDERR_NOTE}"
+elif ! fm_quota_json_valid < "$SNAP"; then
+  UNMEASURABLE="the quota snapshot did not validate (exit $QUOTA_RC)"
+else
+  GEN_AT=$(jq -r '.generatedAt // empty' "$SNAP" 2>/dev/null) || GEN_AT=
+  OPC_ROW=$(row_for "$SNAP" opencode-go)
+  CLAUDE_ROW=$(row_for "$SNAP" claude)
+  if [ -z "$OPC_ROW" ]; then
+    UNMEASURABLE='the snapshot carries no opencode-go reading'
+  elif jq -e '(.notSetUp == true) or (.state.status == "auth_required")' \
+      <<<"$OPC_ROW" >/dev/null 2>&1; then
+    REJECTED=1
+    STATE_ERROR=$(jq -r '.state.error // empty' <<<"$OPC_ROW") || STATE_ERROR=
+  else
+    OPC_PCT=$(known_percent "$OPC_ROW") || OPC_PCT=
+    OPC_LIMIT=$(limiting_window "$OPC_ROW") || OPC_LIMIT=
+    OPC_TIME=$(refreshed_at "$OPC_ROW") || OPC_TIME=
+    # The decision compares whole percentages; a fractional reading is
+    # truncated toward zero (0.9% reads exhausted, 5.9% reads tight).
+    OPC_PCT=${OPC_PCT%.*}
+    case "$OPC_PCT" in
+      ''|*[!0-9]*)
+        OPC_PCT=
+        [ -n "$UNMEASURABLE" ] || UNMEASURABLE='the opencode-go reading reports no known availability'
+        ;;
+    esac
+  fi
+fi
+
+# Evidence time for the age: the OpenCode Go row's own refresh, else the
+# snapshot's generation time.
+AGE_BASIS=$OPC_TIME
+[ -n "$AGE_BASIS" ] || AGE_BASIS=$GEN_AT
+NOW=$(date +%s)
+AGE='unknown'
+AGE_UNCERTAIN=''
+if AGE_EPOCH=$(iso_epoch "$AGE_BASIS"); then
+  AGE=$((NOW - AGE_EPOCH))
+  [ "$AGE" -ge 0 ] || AGE=0
+else
+  AGE_UNCERTAIN=1
+fi
+# A measurable decision never rests on evidence that cannot be aged.
+if [ -z "$UNMEASURABLE" ] && [ -z "$REJECTED" ] && [ -n "$OPC_ROW" ] && [ -n "$AGE_UNCERTAIN" ]; then
+  UNMEASURABLE='the opencode-go reading carries no usable timestamp, so its age is unknown'
+fi
+
+# --- the reading, in plain words --------------------------------------------
+
+if [ -z "$OPC_ROW" ]; then
+  OPC_SEG='opencode-go reading absent from the snapshot'
+elif [ -n "$REJECTED" ]; then
+  OPC_SEG="opencode-go credential rejected${STATE_ERROR:+ ($STATE_ERROR)}, refreshed ${OPC_TIME:-${GEN_AT:-unknown}}"
+else
+  OPC_SEG="opencode-go $(windows_segment "$OPC_ROW")${OPC_LIMIT:+ (limiting: $OPC_LIMIT)}, refreshed ${OPC_TIME:-${GEN_AT:-unknown}}"
+fi
+
+if [ -z "$CLAUDE_ROW" ]; then
+  CLAUDE_SEG='claude reading absent from the snapshot'
+  CLAUDE_UNC='the claude reading is missing'
+elif [ -z "$(known_percent "$CLAUDE_ROW")" ]; then
+  CLAUDE_SEG='claude reading present but reports no known availability'
+  CLAUDE_UNC='the claude reading is unmeasurable'
+else
+  CLAUDE_SEG="claude $(windows_segment "$CLAUDE_ROW")"
+  CLAUDE_LIMIT=$(limiting_window "$CLAUDE_ROW") || CLAUDE_LIMIT=
+  [ -z "$CLAUDE_LIMIT" ] || CLAUDE_SEG="$CLAUDE_SEG (limiting: $CLAUDE_LIMIT)"
+  CLAUDE_TIME=$(refreshed_at "$CLAUDE_ROW") || CLAUDE_TIME=
+  CLAUDE_SEG="$CLAUDE_SEG, refreshed ${CLAUDE_TIME:-unknown}"
+fi
+READING="$OPC_SEG | $CLAUDE_SEG"
+
+# --- the decision ------------------------------------------------------------
+
+if [ -n "$REJECTED" ]; then
+  HARNESS=claude
+  REASON="OpenCode Go's credential was rejected${STATE_ERROR:+: $STATE_ERROR}; the fleet moves to Claude"
+elif [ -n "$UNMEASURABLE" ]; then
+  HARNESS=claude
+  REASON="OpenCode Go reading unmeasurable ($UNMEASURABLE); the fleet falls back to Claude so an unreadable window cannot leave the fleet idling on an exhausted plan"
+elif [ "$OPC_PCT" -le 0 ]; then
+  HARNESS=claude
+  REASON='OpenCode Go is exhausted: 0% left; the fleet moves to Claude'
+elif [ "$OPC_PCT" -lt "$TIGHT" ]; then
+  HARNESS=claude
+  REASON="OpenCode Go is tight: ${OPC_PCT}% left, below the ${TIGHT}% floor; the fleet moves to Claude"
+else
+  HARNESS=opencode
+  REASON="OpenCode Go has headroom: ${OPC_PCT}% left${OPC_LIMIT:+, the $OPC_LIMIT window is the limit}; the fleet stays on the OpenCode Go plan"
+fi
+
+UNCERTAIN_PARTS=()
+if [ -n "$UNMEASURABLE" ]; then
+  UNCERTAIN_PARTS+=("OpenCode Go reading unmeasurable: $UNMEASURABLE; fell back to Claude")
+fi
+if [ -n "$AGE_UNCERTAIN" ]; then
+  UNCERTAIN_PARTS+=("the reading's age could not be established when this marker was written")
+fi
+if [ -n "$CLAUDE_UNC" ]; then
+  UNCERTAIN_PARTS+=("$CLAUDE_UNC")
+fi
+if [ "${#UNCERTAIN_PARTS[@]}" -gt 0 ]; then
+  UNCERTAINTY=$(printf '%s; ' "${UNCERTAIN_PARTS[@]}")
+  UNCERTAINTY=${UNCERTAINTY%; }
+else
+  UNCERTAINTY=none
+fi
+
+# --- write the marker --------------------------------------------------------
+
+# one_line <value>: a single marker-safe line (no control characters).
+one_line() { printf '%s' "$1" | tr -d '\000-\037'; }
+
+MARKER=$CONFIG/budget-mode
+TMP_MARKER=$(mktemp "$CONFIG/.budget-mode.XXXXXX") \
+  || die "cannot create a temporary marker in $CONFIG"
+{
+  printf 'version=1\n'
+  printf 'harness=%s\n' "$HARNESS"
+  printf 'decided_at=%s\n' "$NOW"
+  printf 'reason=%s\n' "$(one_line "$REASON")"
+  printf 'reading=%s\n' "$(one_line "$READING")"
+  printf 'reading_age_seconds=%s\n' "$AGE"
+  printf 'uncertainty=%s\n' "$(one_line "$UNCERTAINTY")"
+} > "$TMP_MARKER" || { rm -f "$TMP_MARKER"; die "cannot write the marker in $CONFIG"; }
+mv -f -- "$TMP_MARKER" "$MARKER" \
+  || { rm -f "$TMP_MARKER"; die "cannot move the marker into place at $MARKER"; }
+
+if [ "$UNCERTAINTY" != none ]; then
+  printf 'fm-budget-mode: warning: recorded uncertainty: %s\n' "$UNCERTAINTY" >&2
+fi
+[ "$QUIET" -eq 1 ] || cat "$MARKER"
+exit 0
