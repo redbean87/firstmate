@@ -3,7 +3,7 @@ Firstmate fork layer
 
 This directory holds everything the Firstmate fork adds on top of upstream
 firstmate (https://github.com/kunchenguid/firstmate). Upstream code stays
-byte-identical except for two small hook blocks. This file is plain text with
+byte-identical except for three small hook blocks. This file is plain text with
 no extension on purpose: upstream's documentation-audience check requires every
 tracked *.md, *.mdx, *.rst, and *.txt file to be registered in an upstream-owned
 inventory, and the fork does not edit that inventory.
@@ -13,8 +13,12 @@ Ownership boundary
 ------------------
 
   Upstream core       everything outside fork/ and .github/workflows/fork-ci.yml,
-                      unchanged except the two hook blocks below.
-  Hook blocks (2)     HK1 in bin/fm-spawn.sh and HK2 in bin/fm-control.sh.
+                      unchanged except the three hook blocks below.
+  Hook blocks (3)     HK1 in bin/fm-spawn.sh, HK2 in bin/fm-control.sh, and
+                      HK3 in bin/fm-watch.sh - the resurface guard that makes a
+                      recovery wake fire only while a wake row is actually
+                      queued, so an episode whose row was already handled no
+                      longer costs main an empty "watching resumed" turn.
                       Canonical copies: fork/hooks/*.block. They are the only
                       fork edits to upstream files.
   Fork policy         fork/bin/fm-launch-policy: brief intake guard, consult
@@ -91,7 +95,7 @@ has passed (fork/chatgpt/README "Plan breakdown"). Exclusive-area
 enforcement is not built. Both live under fork/ and need no upstream edits.
 
 
-The two hook points
+The three hook points
 -------------------
 
   HK1  bin/fm-spawn.sh, directly after upstream's project-capacity admission
@@ -102,21 +106,31 @@ The two hook points
        and before safe_checkpoint/do_exit. A refused relaunch never stops the
        running agent; upstream stops the old agent before calling
        fm-spawn --relaunch, which is why HK1 alone cannot cover relaunch.
+  HK3  bin/fm-watch.sh, inside resurface_after_downtime() immediately after the
+       ordinary branch's recover check and before that branch's fi and trailing
+       wake. It adds one line: handling_successor_has_queued_row || return 0,
+       the same guard the handling-successor branch already carries, so a
+       recovery marker that reported downtime for a row since handled no longer
+       wakes main with nothing queued.
 
-Both blocks call fork/bin/fm-launch-policy only when the home has
+HK1 and HK2 call fork/bin/fm-launch-policy only when the home has
 config/fork-policies. A home without that file behaves exactly as upstream.
 With the file present, any non-zero exit refuses - including a missing or
-unexecutable policy script.
+unexecutable policy script. HK3 has no policy gate: it calls no fork script,
+its guard is unconditional, and a row still queued at that moment resurfaces
+exactly as upstream.
 
-Hook contract (environment the blocks pass; see the policy script header):
+Hook contract (environment HK1 and HK2 pass; see the policy script header):
 FM_LP_PHASE, FM_LP_TASK, FM_LP_KIND, FM_LP_PROJECT, FM_LP_HARNESS, FM_LP_MODEL,
 FM_LP_EFFORT, FM_LP_RAW_LAUNCH, FM_LP_HOME, FM_LP_STATE, FM_LP_DATA,
 FM_LP_CONFIG, and from HK1 only FM_LP_OWNER_PID ($$, the launching fm-spawn).
-The blocks read these upstream names: in fm-spawn.sh ID KIND PROJ_ABS HARNESS
-MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG FM_HOME FM_ROOT; in
-fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT META KIND STATE DATA
-FM_HOME FM_ROOT, fm_meta_get, die. fm-fork-hook-check verifies these hook
-inputs and the integration boundary (below).
+The launch-policy blocks read these upstream names: in fm-spawn.sh ID KIND
+PROJ_ABS HARNESS MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG
+FM_HOME FM_ROOT; in fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT
+META KIND STATE DATA FM_HOME FM_ROOT, fm_meta_get, die. HK3 reads only
+upstream's handling_successor_has_queued_row, defined earlier in fm-watch.sh.
+fm-fork-hook-check verifies these hook inputs and the integration boundary
+(below).
 
 Upstream helper dependencies of claude-subscription: it sources
 bin/fm-worker-account-lib.sh (which sources bin/fm-timeout-lib.sh) and uses
@@ -473,19 +487,22 @@ Fork CI tests the fork's code and its integration with upstream, not upstream:
                       It never calls bin/fm-test-run.sh, and fork tests live
                       outside tests/, so upstream's selector, lanes, and
                       coverage guard never see them.
-  Hook wiring         fm-fork-hook-check verifies both blocks are present once,
-                      identical to fork/hooks/*.block, and at their lifecycle
-                      positions, that the upstream names they read exist, and
-                      that no other upstream bin/ file references the fork;
-                      with --base it verifies nothing else upstream-owned
-                      differs from upstream. It does not check the policy's
-                      upstream helper dependencies (see "The two hook
-                      points"); the fork test suites exercise those.
+  Hook wiring         fm-fork-hook-check verifies all three blocks are present
+                      once, identical to fork/hooks/*.block, and at their
+                      lifecycle positions, that the upstream names they read
+                      exist, and that no other upstream bin/ file references
+                      the fork; with --base it verifies nothing else
+                      upstream-owned differs from upstream. It does not check
+                      the policy's upstream helper dependencies (see "The
+                      three hook points"); the fork test suites exercise those.
   Behaviour           spawn and relaunch tests drive the REAL upstream scripts
                       through upstream's shared test libraries (tests/lib.sh,
                       tests/fixtures.sh); the relaunch tests also lift four
                       fixture functions from tests/fm-control-relaunch.test.sh
-                      and stop with FIXTURE-DRIFT if those disappear.
+                      and stop with FIXTURE-DRIFT if those disappear. The
+                      resurface test drives the real bin/fm-watch.sh end to
+                      end: an empty queue must produce no recovery wake, a
+                      queued row exactly one.
 
 Upstream tests are never modified for the fork. Routine fork CI does not run
 the upstream suite. Run targeted upstream tests only for a named compatibility
@@ -543,7 +560,7 @@ cleanup stay manual. Commands run from the active checkout
      upstream tests only for a named risk, and record why.
   5. Review before landing:
        git -C "$W" log --oneline fork/stage1-enforcement..HEAD
-       git -C "$W" diff "$C" HEAD -- bin/          # only the two hook blocks
+       git -C "$W" diff "$C" HEAD -- bin/          # only the three hook blocks
        git -C "$W" diff fork/stage1-enforcement HEAD --stat
   6. Land and publish (needs the captain's go; this updates the code the
      running session executes, as any self-update does):
