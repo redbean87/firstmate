@@ -13,13 +13,17 @@
 // under its request id before its messages leave pending/, and a repeated
 // request id returns that same batch. The first request with a new id marks
 // every earlier returned batch captured.
-// Results never terminate the source and are never silent.
+// Results never terminate the source. The one silent result is the host's own
+// timeout evidence for source.poll: a quiet-period long poll the host stopped
+// waiting for carried no message, so it is recorded handled without a wake.
+// Every other result - a real batch or any other failure - keeps its wake.
 
 import fs from "node:fs";
 import path from "node:path";
 
 const EXTENSION_ID = "org.firstmate.fork.discord-inbound";
 const EXTENSION_VERSION = "1.0.0";
+const ERROR_EVIDENCE_SCHEMA = "firstmate.process-event-extension-error.v1";
 const MAX_INPUT_BYTES = 65536;
 const MAX_OUTPUT_BYTES = 30000;
 const WAIT_MS = 50000;
@@ -195,6 +199,27 @@ async function poll(request) {
   return { status: "no-result", output: "" };
 }
 
+// isQuietPollTimeout <content> -> boolean
+//
+// A host-produced source.poll timeout is an empty quiet-period poll: the
+// runner captured the host's failure evidence instead of a batch, so there is
+// no message content to wake anyone about. The check is exact - this schema,
+// this code, this operation - so a real batch (whose content never parses as
+// one JSON object) and every other host failure still announce as before.
+function isQuietPollTimeout(content) {
+  if (typeof content !== "string") return false;
+  let record;
+  try {
+    record = JSON.parse(content);
+  } catch {
+    return false;
+  }
+  return record !== null && typeof record === "object"
+    && record.schema === ERROR_EVIDENCE_SCHEMA
+    && record.code === "timeout"
+    && record.operation === "source.poll";
+}
+
 const verb = process.argv[2] || "";
 const request = await readRequest();
 if (verb === "handshake") {
@@ -219,7 +244,7 @@ if (verb === "handshake") {
 } else if (verb === "invoke" && request.operation === "result.terminal") {
   respond(request.request_id, { value: false });
 } else if (verb === "invoke" && request.operation === "result.silent") {
-  respond(request.request_id, { value: false });
+  respond(request.request_id, { value: isQuietPollTimeout(request.input?.content) });
 } else {
   throw new Error("unsupported extension verb or operation");
 }
