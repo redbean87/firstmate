@@ -64,6 +64,23 @@
 # Unknown policy names, unreadable or malformed files, and an empty policy list
 # all refuse.
 #
+# Budget mode marker (not a policy name, never listed in config/fork-policies):
+# whenever the home has config/budget-mode - the single plan marker
+# fork/bin/fm-budget-mode writes from live quota evidence - every launch and
+# relaunch reads it. An absent marker changes nothing, so a home without one
+# behaves exactly as today. A marker that exists but is not a readable regular
+# file, or does not validate exactly against the schema version in
+# fork/bin/fm-budget-mode's header (one key=value per line, the seven fields,
+# version 1, harness opencode or claude), refuses the launch as unusable
+# (exit 2) rather than guessing the plan. A marker deciding claude then
+# refuses a launch whose harness is opencode (exit 1), naming the marker's own
+# reason, so dispatch follows the decision without hand-editing
+# config/crew-dispatch.json; every other launch - claude and any other
+# harness under either decision - proceeds unchanged, because the marker
+# gates only the plan being switched off (OpenCode Go), while Claude is both
+# the fallback plan and an independently paid plan this marker never refuses.
+# A raw launch is judged by its first word when the hook passes no harness.
+#
 # Guard arming (not a policy name): for the spawn and relaunch phases - never
 # the read-only relaunch preflight - and only for ships and scouts, the policy
 # arms the fork's ask-user self-answer guard for the task before it allows the
@@ -179,6 +196,68 @@ policy_brief_intake() {
     1) refuse "$detail" ;;
     *) unusable "${detail:-brief intake check failed to run (exit $rc)}" ;;
   esac
+}
+
+# budget-mode. Read the plan marker fork/bin/fm-budget-mode writes
+# (schema v1, owned by that script's header) and enforce its decision. The
+# marker exists -> validate every line and field loudly (unusable, exit 2);
+# malformed or unreadable never degrades into a guess. The marker decides
+# claude -> a launch on opencode is refused (exit 1) with the marker's own
+# reason; anything else proceeds unchanged. See the header's budget-mode
+# paragraph for the full contract.
+policy_budget_mode() {
+  local marker="$FM_LP_CONFIG/budget-mode" line key value n=0
+  local harness_plan launch_harness raw
+  local -A seen=()
+  [ -e "$marker" ] || return 0
+  [ -f "$marker" ] && [ -r "$marker" ] \
+    || unusable "config/budget-mode exists but is not a readable regular file; refusing rather than guessing the plan"
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    [ -n "$line" ] || continue
+    case "$line" in *=*) ;; *) unusable "config/budget-mode line $n is not key=value" ;; esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in [a-z]*) ;; *) unusable "config/budget-mode line $n has a bad field name '$key'" ;; esac
+    case "$key" in *[!a-z0-9_]*) unusable "config/budget-mode line $n has a bad field name '$key'" ;; esac
+    case "$key" in
+      version|harness|decided_at|reason|reading|reading_age_seconds|uncertainty) ;;
+      *) unusable "config/budget-mode line $n names unknown field '$key'" ;;
+    esac
+    [ -z "${seen[$key]+x}" ] || unusable "config/budget-mode repeats field '$key'"
+    seen[$key]=$value
+  done < "$marker"
+  for key in version harness decided_at reason reading reading_age_seconds uncertainty; do
+    [ -n "${seen[$key]+x}" ] || unusable "config/budget-mode is missing its $key field"
+  done
+  [ "${seen[version]}" = 1 ] || unusable "config/budget-mode has version '${seen[version]}', not 1"
+  case "${seen[harness]}" in
+    opencode|claude) harness_plan=${seen[harness]} ;;
+    *) unusable "config/budget-mode names harness '${seen[harness]}', not opencode or claude" ;;
+  esac
+  case "${seen[decided_at]}" in ''|*[!0-9]*) unusable "config/budget-mode decided_at is not a timestamp" ;; esac
+  case "${seen[reading_age_seconds]}" in
+    ''|*[!0-9]*)
+      [ "${seen[reading_age_seconds]}" = unknown ] \
+        || unusable "config/budget-mode reading_age_seconds is neither a number nor 'unknown'"
+      ;;
+  esac
+  for key in reason reading uncertainty; do
+    value=${seen[$key]}
+    case "${value//[[:space:]]/}" in '') unusable "config/budget-mode $key is empty" ;; esac
+    case "$value" in *$'\t'*) unusable "config/budget-mode $key must not contain a tab" ;; esac
+  done
+  [ "${seen[reading_age_seconds]}" != unknown ] || [ "${seen[uncertainty]}" != none ] \
+    || unusable "config/budget-mode records an unknown reading age but no uncertainty"
+
+  [ "$harness_plan" = claude ] || return 0
+  launch_harness=${FM_LP_HARNESS:-}
+  if [ -z "$launch_harness" ]; then
+    raw=${FM_LP_RAW_LAUNCH:-}
+    launch_harness=${raw%% *}
+  fi
+  [ "$launch_harness" = opencode ] || return 0
+  refuse "budget mode puts the fleet on the Claude plan: ${seen[reason]} (config/budget-mode, decided at ${seen[decided_at]})"
 }
 
 policy_consult_gate() {
@@ -557,6 +636,11 @@ EOF
 }
 
 enabled brief-intake && policy_brief_intake
+
+# Budget mode runs for every home that has the marker, policy list or not:
+# it is marker-driven, not a config/fork-policies name.
+policy_budget_mode
+
 enabled consult-gate && policy_consult_gate
 enabled project-pin && policy_project_pin
 enabled claude-subscription && policy_claude_subscription

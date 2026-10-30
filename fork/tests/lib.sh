@@ -47,6 +47,85 @@ fork_waiver() {
     '{origin: $origin, reason: $reason}' > "$1/data/$2/fork-consult-waiver.json"
 }
 
+# --- budget-mode fixtures ----------------------------------------------------
+
+# fork_quota_snapshot <dest> <opencode> <opencode-refreshed> <claude>
+#                     <claude-refreshed> <generated-at>
+# One schema-5 quota-axi snapshot for the real fm-budget-mode to read.
+# <opencode>/<claude> is a whole-number percent remaining; "rejected" (the
+# opencode-go row only) is a credential-rejected reading, and "absent" omits
+# the row. An empty timestamp omits that field entirely, which is how a test
+# makes a reading unageable.
+fork_quota_snapshot() {
+  jq -n --arg opc "$2" --arg opcref "$3" --arg cld "$4" --arg cldref "$5" --arg gen "$6" '
+  def known($p; $wins; $ref; $lim):
+    {provider: $p, windows: $wins,
+     state: ({status: "fresh", stale: false}
+             + (if $ref == "" then {} else {refreshedAt: $ref} end)),
+     quotaSemantics: {status: "known", effectiveAvailability:
+       [{scope: "all_models", status: "known",
+         effectivePercentRemaining: $wins[1].percentRemaining,
+         runway: {status: "through_reset"},
+         limitingWindowIds: [$lim]}]}};
+  def rejected($p):
+    {provider: $p, windows: [],
+     state: {status: "auth_required", stale: false,
+             error: ($p + "_credential_rejected")},
+     notSetUp: true,
+     quotaSemantics: {status: "unknown", effectiveAvailability: []}};
+  (if $gen == "" then {} else {generatedAt: $gen} end)
+  + {schemaVersion: 5,
+     providers:
+       ((if $opc == "absent" then []
+         elif $opc == "rejected" then [rejected("opencode-go")]
+         else [known("opencode-go";
+                  [{id: "rolling", label: "rolling", kind: "unknown", percentRemaining: 98},
+                   {id: "weekly", label: "weekly", kind: "weekly", percentRemaining: ($opc | tonumber)},
+                   {id: "monthly", label: "monthly", kind: "monthly", percentRemaining: 89}];
+                  $opcref; "weekly")]
+         end)
+        + (if $cld == "absent" then []
+           else [known("claude";
+                    [{id: "five_hour", label: "session", kind: "session", percentRemaining: 100},
+                     {id: "seven_day", label: "week", kind: "weekly", percentRemaining: ($cld | tonumber)}];
+                    $cldref; "seven_day")]
+           end))}' > "$1"
+}
+
+# fork_quota_fake <fakebin> <fakedir>: a fake quota-axi that prints
+# <fakedir>/out and exits with <fakedir>/rc (default 0), so a test drives the
+# real fm-budget-mode without contacting a vendor.
+fork_quota_fake() {
+  mkdir -p "$1" "$2"
+  cat > "$1/quota-axi" <<SH
+#!/usr/bin/env bash
+FAKE='$2'
+SH
+  cat >> "$1/quota-axi" <<'SH'
+rc=0
+[ ! -f "$FAKE/rc" ] || rc=$(cat "$FAKE/rc")
+[ ! -f "$FAKE/out" ] || cat "$FAKE/out"
+exit "$rc"
+SH
+  chmod +x "$1/quota-axi"
+}
+
+# fork_budget_marker <config-dir> <harness> [reason]: write a valid schema-v1
+# config/budget-mode marker (the consumer fixture; the writer is exercised by
+# its own suite through real fm-budget-mode).
+fork_budget_marker() {
+  mkdir -p "$1"
+  {
+    printf 'version=1\n'
+    printf 'harness=%s\n' "$2"
+    printf 'decided_at=%s\n' "$(date +%s)"
+    printf 'reason=%s\n' "${3-the fixture marker reason}"
+    printf 'reading=fixture reading\n'
+    printf 'reading_age_seconds=42\n'
+    printf 'uncertainty=none\n'
+  } > "$1/budget-mode"
+}
+
 # Liveness fixture for resource holders. Holders live in tmux session
 # FORK_HOLDER_SESSION; a fake tmux answers that session's inventory and pane
 # reads, and a fake ps answers their foreground process, so upstream's own

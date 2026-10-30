@@ -21,6 +21,12 @@ Ownership boundary
                       gate, project pins, machine/model resource capacity,
                       Claude subscription, and arming the ask-user
                       self-answer guard below.
+  Budget mode         fork/bin/fm-budget-mode: decides which paid plan the
+                      fleet dispatches on from live quota evidence (one
+                      bounded quota-axi read of opencode-go and claude) and
+                      writes the single config/budget-mode marker; launch
+                      policy above follows that marker on every launch and
+                      relaunch.
   Ask-user guard      fork/bin/fm-askuser-guard: a fork-owned watcher check,
                       armed by launch policy for every ship and scout, that
                       compares a task's keyed ask-user decision closes and
@@ -46,7 +52,8 @@ Ownership boundary
   Fork CI             .github/workflows/fork-ci.yml; its workflow-guard step
                       runs fork/bin/fm-fork-workflow-guard.
   Home configuration  config/fork-policies, config/fork-project-pins.json,
-                      config/fork-resources.json (gitignored, per home).
+                      config/fork-resources.json, config/budget-mode
+                      (gitignored, per home).
 
 ChatGPT consultation channel: fork/chatgpt/ (see fork/chatgpt/README); it
 writes the consult gate's relaunch delivery proof and needs no upstream edits.
@@ -151,6 +158,22 @@ config/fork-policies - one policy name per line (# comments allowed):
   brief-intake | consult-gate | project-pin | resource | claude-subscription
 An empty list, an unknown name, or an unreadable file refuses every launch.
 Delete the file to turn fork policy off for a home.
+
+config/budget-mode - written by fork/bin/fm-budget-mode, never listed in
+config/fork-policies. That script reads one bounded quota-axi snapshot
+(opencode-go with its rolling, weekly, and monthly windows, plus claude) and
+decides the plan: opencode while OpenCode Go has headroom; claude when it is
+exhausted, tight (below FM_BUDGET_TIGHT_PERCENT, default 10), or its credential
+is rejected; and claude as the stated fallback whenever the reading is
+unmeasurable or missing - the uncertainty and the fallback are written into
+the marker, never silently read as "plenty left" or as "exhausted". Every
+launch and relaunch validates the marker: absent keeps today's behaviour, a
+malformed or unreadable marker refuses the launch as unusable, and a claude
+decision refuses an opencode launch with the marker's own reason, so dispatch
+follows the decision without hand-editing dispatch configuration. The schema
+is owned by fork/bin/fm-budget-mode's header, the consuming rule by
+fork/bin/fm-launch-policy's header, and the fork/tests/fm-fork-budget-mode*
+suites exercise both ends.
 
 brief-intake - ship and scout briefs must carry three intake markers before
 any launch (fresh spawn, relaunch, relaunch preflight), so a brief cannot

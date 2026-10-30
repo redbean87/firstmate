@@ -107,7 +107,7 @@ cmd_lint() {
   local root=$SELF_ROOT rc=0
   [ "${1:-}" = --root ] && root=$(cd "${2:?--root needs a path}" && pwd)
   command -v shellcheck >/dev/null 2>&1 || die "shellcheck is not installed (bin/fm-install-shellcheck.sh)"
-  (cd "$root" && shellcheck -x fork/bin/fm-launch-policy fork/bin/fm-brief-intake-check fork/bin/fm-fork-hook-check fork/bin/fm-fork-sync \
+  (cd "$root" && shellcheck -x fork/bin/fm-budget-mode fork/bin/fm-launch-policy fork/bin/fm-brief-intake-check fork/bin/fm-fork-hook-check fork/bin/fm-fork-sync \
     fork/bin/fm-fork-workflow-guard \
     fork/bin/fm-askuser-guard \
     fork/bin/fm-discord-release fork/bin/fm-pr-green-teardown fork/chatgpt/*.sh fork/discord/*.sh \
