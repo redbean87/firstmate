@@ -1,7 +1,12 @@
 # Fork CI: tests the Firstmate fork's own code and its two upstream
 # integration points. It never runs upstream's test suite; upstream's own
 # workflow (ci.yml) is unchanged and owns upstream regression. See fork/README
-# "Testing ownership".
+# "Testing ownership". Its first step also guards the workflow list itself:
+# if any workflow outside the allowlist (fork-ci.yml,
+# no-mistakes-required.yml, windows-herdr-spike.yml) is active on the
+# repository - a re-enabled ci.yml or a workflow an upstream sync installed -
+# the run fails and names it, so upstream's suite can never come back by
+# accident (fork/bin/fm-fork-workflow-guard).
 name: Fork CI
 
 on:
@@ -13,6 +18,9 @@ on:
 
 permissions:
   contents: read
+  # actions: read lets the workflow-guard step list this repository's
+  # workflows so it can fail while a non-allowlisted one is active.
+  actions: read
 
 concurrency:
   group: fork-ci-${{ github.ref }}
@@ -27,6 +35,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Only allowlisted workflows are active
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: fork/bin/fm-fork-workflow-guard
       - name: Install pinned ShellCheck
         run: |
           bin/fm-install-shellcheck.sh "$RUNNER_TEMP/bin"

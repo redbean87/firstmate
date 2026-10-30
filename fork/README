@@ -40,8 +40,9 @@ Ownership boundary
                       each such head wake once (fork/bin/fm-pr-green-teardown is
                       the fork-owned teardown for that latch state).
   Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
-                      fork/tests/.
-  Fork CI             .github/workflows/fork-ci.yml.
+                      fork/bin/fm-fork-workflow-guard, fork/tests/.
+  Fork CI             .github/workflows/fork-ci.yml; its workflow-guard step
+                      runs fork/bin/fm-fork-workflow-guard.
   Home configuration  config/fork-policies, config/fork-project-pins.json,
                       config/fork-resources.json (gitignored, per home).
 
@@ -463,6 +464,16 @@ Upstream tests are never modified for the fork. Routine fork CI does not run
 the upstream suite. Run targeted upstream tests only for a named compatibility
 risk, and record the reason.
 
+That rule is enforced, not just written down: Fork CI's workflow-guard step
+(fork/bin/fm-fork-workflow-guard) reads the repository's workflow list and
+fails the run whenever a workflow outside the allowlist - fork-ci.yml,
+no-mistakes-required.yml, and the manual-only windows-herdr spike - is active
+on it, naming the workflow and the command that disables it. A re-enabled
+ci.yml or a workflow file an upstream sync installed therefore turns every
+fork CI run red instead of quietly costing hours on upstream shards, and an
+API answer the guard cannot read fails the run rather than passing it. The
+guard's own header owns the exact allowlist and mechanics.
+
 
 Upstream sync procedure
 -----------------------
@@ -471,6 +482,14 @@ fork/bin/fm-fork-sync (its header owns exact behaviour) does the
 non-destructive steps; fetching, resolving, fast-forwarding, pushing, and any
 cleanup stay manual. Commands run from the active checkout
 (~/Projects/firstmate-next); C is the upstream commit to import.
+
+  ci.yml stays disabled in the repository settings between syncs. Re-enable it
+  only for a sync PR that names a compatibility risk - so that one PR runs the
+  upstream suite for that named risk - and then disable it again as soon as
+  that PR is done. fm-fork-sync prints this reminder from both prepare and
+  check so it cannot be forgotten, and Fork CI's workflow guard fails while
+  ci.yml is enabled, so the open window cannot pass unnoticed: the failing
+  run names ci.yml and the command that disables it.
 
   1. Fetch the commit (the only network step besides the push):
        git fetch --no-tags upstream <sha or main>
