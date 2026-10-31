@@ -535,6 +535,13 @@ cleanup stay manual. Commands run from the active checkout
   ci.yml is enabled, so the open window cannot pass unnoticed: the failing
   run names ci.yml and the command that disables it.
 
+  A sync PR is never squash-merged: it must land as a true merge commit,
+  because the merge method is what preserves the fork's upstream ancestry.
+  A squash replaces the merge commit with a single-parent commit, so the
+  imported upstream commit stops being an ancestor of main and the boundary
+  check's merge-base falls back to an old commit, reporting the whole
+  upstream delta as fork drift.
+
   1. Fetch the commit (the only network step besides the push):
        git fetch --no-tags upstream <sha or main>
        C=$(git rev-parse FETCH_HEAD)          # or the exact sha you named
