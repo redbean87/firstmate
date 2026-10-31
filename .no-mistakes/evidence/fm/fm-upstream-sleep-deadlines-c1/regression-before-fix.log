@@ -1,0 +1,4 @@
+1..6
+not ok - a timeout evidence did not name its bound (missing: '"bound":"invoke"')
+--- output ---
+{"code":"timeout","extension_id":"org.example.sleep-deadlines","operation":"source.poll","schema":"firstmate.process-event-extension-error.v1"}

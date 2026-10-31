@@ -1,0 +1,6 @@
+resumed the frozen host; the delayed barrier cannot publish readiness inside the grace
+LAUNCH-FAIL-START not-autohandled: launch-fail (left for the handler; still unacknowledged)
+captured: ./launch-fail.1.result
+LAUNCH-FAIL-RESULT {"bound":"launch-ready","code":"timeout","extension_id":"org.example.launch-fail","operation":"source.poll","overrun_ms":3155,"schema":"firstmate.process-event-extension-error.v1"}
+LIVE-PASS launch-ready-failure-captured results=1 host_error_sidecars=1 overrun_ms=3155
+FM_LIVE_COMPLETE

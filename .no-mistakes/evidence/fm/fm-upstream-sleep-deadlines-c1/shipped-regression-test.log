@@ -1,0 +1,8 @@
+1..6
+ok - a genuinely stalled invocation dies at its bound with no grace
+ok - a frozen invocation that resumes inside the grace completes
+ok - a frozen invocation that never resumes still fails at its bound with bound and overrun recorded
+ok - a launch-ready wait interrupted by suspension recovers inside the grace
+ok - an overrun at the capture gate cap keeps its host-error identity and retry coalescing
+ok - an overrun beyond the capture gate cap is rejected without host-error identity
+FM_TEST_COMPLETE

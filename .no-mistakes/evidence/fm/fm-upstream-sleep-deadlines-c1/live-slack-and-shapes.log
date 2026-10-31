@@ -1,0 +1,11 @@
+SLACK-EVIDENCE {"bound":"invoke","code":"timeout","extension_id":"org.example.slack-live","operation":"source.poll","schema":"firstmate.process-event-extension-error.v1"}
+LIVE-PASS slight-lateness-is-not-suspension rc=70 post_resume_ms=392
+SHAPE-legacy ROUND-1 captures=1
+SHAPE-legacy ROUND-2 captures=1
+SHAPE-legacy captures=1 host_error_sidecars=1
+LIVE-PASS legacy-four-key-envelope-still-coalesces
+SHAPE-extra ROUND-1 captures=1
+SHAPE-extra ROUND-2 captures=2
+SHAPE-extra captures=2 host_error_sidecars=0
+LIVE-PASS unexpected-extra-key-refused-without-host-error-identity
+FM_LIVE_COMPLETE

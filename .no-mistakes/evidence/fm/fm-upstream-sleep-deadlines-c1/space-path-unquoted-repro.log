@@ -1,0 +1,7 @@
+checkout: /tmp/fm space test/tree (path contains a space)
+variant: shim exec line unquoted (pre-fix)
+command: tests/fm-extension-sleep-deadlines.test.sh  (boundary cases only)
+1..2
+/private/var/folders/lq/gtznj14x70d1bgnvckqy6c6m0000gn/T/fm-extension-sleep-deadlines.INMQWx/overrun-cap/code/bin/fm-extension.mjs: line 8: /tmp/fm: No such file or directory
+error: extension adapter verification failed: ext-sleep
+not ok - cannot register cap fixture

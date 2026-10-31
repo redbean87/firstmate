@@ -1,0 +1,13 @@
+PIPELINE-SUSPENSION-START not-autohandled: live-susp (left for the handler; still unacknowledged)
+captured: ./live-susp.1.result
+PIPELINE-SUSPENSION-RESULT {"bound":"invoke","code":"timeout","extension_id":"org.example.capture-live","operation":"source.poll","overrun_ms":4123,"schema":"firstmate.process-event-extension-error.v1"}
+LIVE-PASS pipeline-suspension-capture results=1 host_error_sidecars=1
+OVERRUN-cap ROUND-1 captures=1
+OVERRUN-cap ROUND-2 captures=1
+OVERRUN-cap captures=1 host_error_sidecars=1
+LIVE-PASS overrun-at-gate-cap coalesced with host-error identity
+OVERRUN-beyond ROUND-1 captures=1
+OVERRUN-beyond ROUND-2 captures=2
+OVERRUN-beyond captures=2 host_error_sidecars=0
+LIVE-PASS overrun-beyond-gate-cap rejected without host-error identity
+FM_LIVE_COMPLETE

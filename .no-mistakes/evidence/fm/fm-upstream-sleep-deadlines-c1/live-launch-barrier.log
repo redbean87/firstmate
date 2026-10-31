@@ -1,0 +1,11 @@
+ATTEMPT-1 STATE-AT-FREEZE c310eb41228b20983650d5b722bc14dbc6acaec6b5a40da3974ea663b0b49c5d.owner.json c310eb41228b20983650d5b722bc14dbc6acaec6b5a40da3974ea663b0b49c5d.ready.json 
+ATTEMPT-1 LAUNCH-STDOUT launched after a suspended launch wait
+ATTEMPT-1 LAUNCH-STDERR 
+LIVE-PASS launch-ready-recovers-after-freeze attempt=1 rc=0 frozen_ms=8434 total_ms=8733
+BARRIER-INTACT-STDERR extension launch barrier: host did not release the launch barrier; bound startup fired 0 ms past its deadline
+LIVE-PASS barrier-bound-intact rc=125 elapsed_ms=5237
+BARRIER-RESUME-STDERR 
+LIVE-PASS barrier-resume-inside-grace rc=0 frozen_ms=8465
+BARRIER-FROZEN-STDERR extension launch barrier: host did not release the launch barrier; bound startup fired 3218 ms past its deadline after a system suspension (a 5000 ms bounded grace expired)
+LIVE-PASS barrier-frozen-never-released rc=125 grace_window_ms=5307
+FM_LIVE_COMPLETE

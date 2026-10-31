@@ -1,0 +1,6 @@
+### head (change under validation)
+ok - extension launch uses a tracked static core barrier without dynamic code evaluation
+not ok - interrupted extension host exited before its exact process group was gone
+### base 6946058 (before the change)
+ok - extension launch uses a tracked static core barrier without dynamic code evaluation
+not ok - interrupted extension host exited before its exact process group was gone

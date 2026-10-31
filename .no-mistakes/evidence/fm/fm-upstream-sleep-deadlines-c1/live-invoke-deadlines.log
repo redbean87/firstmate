@@ -1,0 +1,11 @@
+LIVE-PASS healthy-invocation rc=0 elapsed_ms=569
+STALL-EVIDENCE {"bound":"invoke","code":"timeout","extension_id":"org.example.live-sleep","operation":"source.poll","schema":"firstmate.process-event-extension-error.v1"}
+LIVE-PASS genuine-stall-dies-at-bound rc=70 elapsed_ms=3783
+LIVE-PASS frozen-resumes-inside-grace rc=0 frozen_ms=7815 total_ms=8090
+SUSPENSION-EVIDENCE {"bound":"invoke","code":"timeout","extension_id":"org.example.live-sleep","operation":"source.poll","overrun_ms":4319,"schema":"firstmate.process-event-extension-error.v1"}
+LIVE-PASS frozen-never-resumes-killed rc=70 overrun_ms=4319 grace_window_ms=5399
+ROUND-1 results=1
+ROUND-2 results=1
+COALESCED-RESULT {"bound":"invoke","code":"timeout","extension_id":"org.example.live-sleep","operation":"source.poll","schema":"firstmate.process-event-extension-error.v1"}
+LIVE-PASS pipeline-coalesce results=1 host_error_sidecars=1
+FM_LIVE_COMPLETE
