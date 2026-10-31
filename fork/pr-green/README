@@ -385,9 +385,20 @@ The path is the one the fork tests already drive with a stub seam:
               merge or an approval.
   terminal    no. The source never concludes itself, so it keeps listening for
               the next pull request.
-  silent      no. An unhandled readiness result is re-announced until firstmate
-              acknowledges it, so a single wake is never lost to a missed turn.
-              That retry is per result sequence, not per pull request.
+  silent      only for the host's own timeout evidence on this source: a
+              captured firstmate.process-event-extension-error.v1 record with
+              code timeout and operation source.poll under this extension's id
+              is a poll the host stopped waiting for - its invoke timer counts
+              time the machine spends asleep - so there is no readiness content
+              to wake about, and it is recorded handled without a wake (0.4.1).
+              That absorb is safe because the source is advisory by
+              construction, a lost poll is re-run by the next launch, and the
+              readiness latch can only repeat a wake, never swallow one.
+              Every other result - a readiness advisory, a non-timeout host
+              failure, or a timeout naming another operation - keeps its wake
+              and is re-announced until firstmate acknowledges it, so a single
+              wake is never lost to a missed turn. That retry is per result
+              sequence, not per pull request.
   acknowledge bin/fm-procevent.sh handled pr-green <sequence>
 
 The latch lives in the seam, not in core, so a re-announced result and a

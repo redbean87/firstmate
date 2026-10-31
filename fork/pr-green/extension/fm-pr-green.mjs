@@ -41,6 +41,12 @@
 //                  same adapter, so only a body that is not that evidence is
 //                  labelled pr-ready-advisory; failure evidence is labelled
 //                  pr-ready-error and never presented as a green pull request.
+//                  Of that failure evidence the host's own timed-out poll - its
+//                  invoke timer counts machine-sleep time, so a sleep longer
+//                  than the binding bound ends a healthy poll - is the one
+//                  result the silent seam accepts, recorded handled without a
+//                  wake (see isQuietPollTimeout below); every other result
+//                  keeps its wake.
 //
 // The judgment - the readiness predicate, the one-shot readiness latch, and the
 // wake body - lives entirely in ./readiness.mjs, the documented seam. One result
@@ -68,7 +74,7 @@ import path from "node:path";
 import { decideWake, pruneReadinessMarkers } from "./readiness.mjs";
 
 const EXTENSION_ID = "org.firstmate.fork.pr-green";
-const EXTENSION_VERSION = "0.4.0";
+const EXTENSION_VERSION = "0.4.1";
 const MAX_INPUT_BYTES = 65536;
 const MAX_OUTPUT_BYTES = 30000;
 const MAX_RECORD_BYTES = 65536;
@@ -157,6 +163,31 @@ function homeDirs(reference) {
   const stateDir = path.join(home, "state");
   requireDirectory(stateDir, "the registered home's state directory");
   return { home, stateDir, configDir: path.join(home, "config") };
+}
+
+// isQuietPollTimeout <content> -> boolean
+//
+// A host-produced source.poll timeout for THIS extension is an empty
+// quiet-period poll: the runner captured the host's failure evidence instead
+// of a readiness advisory, so there is no readiness content to wake anyone
+// about. The check is exact - this schema, this code, this operation, and this
+// extension's id - so a readiness advisory, a non-timeout host failure, a
+// timeout naming another operation or another extension, and every malformed
+// capture still announce as before. This mirrors the fork Discord inbound
+// adapter's absorb of the same host evidence.
+function isQuietPollTimeout(content) {
+  if (typeof content !== "string") return false;
+  let record;
+  try {
+    record = JSON.parse(content);
+  } catch {
+    return false;
+  }
+  return record !== null && typeof record === "object"
+    && record.schema === ERROR_EVIDENCE_SCHEMA
+    && record.code === "timeout"
+    && record.operation === "source.poll"
+    && record.extension_id === EXTENSION_ID;
 }
 
 // An optional <home>/state/pr-green/poll-wait-ms (100-50000) shortens the long
@@ -420,8 +451,11 @@ if (verb === "handshake") {
 } else if (verb === "invoke" && request.operation === "result.silent") {
   // A readiness wake has no channel of its own: the runner publishes the
   // ordinary wake for that result sequence and re-announces it until Firstmate
-  // acknowledges that sequence. A later poll is a new sequence.
-  respond(request.request_id, { value: false });
+  // acknowledges that sequence. A later poll is a new sequence. The one
+  // exception is the host's own timeout evidence for this source: a poll the
+  // host stopped waiting for carried no readiness content, so it is recorded
+  // handled without a wake; the next launch re-runs the poll.
+  respond(request.request_id, { value: isQuietPollTimeout(request.input?.content) });
 } else {
   throw new Error("unsupported extension verb or operation");
 }
