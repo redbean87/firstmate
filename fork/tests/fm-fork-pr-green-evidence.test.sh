@@ -353,7 +353,7 @@ record() {  # <home> <id> <key=value>...
 adapter_poll() {  # <config-ref>: one real protocol poll of the real adapter
   jq -cn --arg rid "sha256:$(printf '5%.0s' $(seq 1 64))" --arg ref "$1" \
     '{schema: "firstmate.extension-request.v1", request_id: $rid,
-      host_protocol: 1, extension_id: "org.firstmate.fork.pr-green", extension_version: "0.4.0",
+      host_protocol: 1, extension_id: "org.firstmate.fork.pr-green", extension_version: "0.4.1",
       package_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       capability: "process-event-adapter", capability_version: 1, adapter: "pr-green",
       operation: "source.poll", input: {source_id: "pr-green", config_ref: $ref}}' \
