@@ -1,0 +1,4 @@
+Scenario G: pause ending inside the 2s slack still kills at the bound, no grace, no overrun_ms
+attempt 1 resume offset 4200ms past invoke start
+exit=70
+{"bound":"invoke","code":"timeout","extension_id":"org.example.sleep-deadlines","operation":"source.poll","schema":"firstmate.process-event-extension-error.v1"}

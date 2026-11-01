@@ -1,0 +1,27 @@
+--- mixed round 1: inbox after round ---
+boundary-mixed.1.adapter
+boundary-mixed.1.extension
+boundary-mixed.1.host-error
+boundary-mixed.1.result
+--- mixed round 2: inbox after round ---
+boundary-mixed.1.adapter
+boundary-mixed.1.extension
+boundary-mixed.1.host-error
+boundary-mixed.1.result
+boundary-mixed.2.adapter
+boundary-mixed.2.extension
+boundary-mixed.2.host-error
+boundary-mixed.2.result
+--- mixed stored result (.1.result) ---
+{"schema":"firstmate.process-event-extension-error.v1","extension_id":"org.example.sleep-deadlines","operation":"source.poll","code":"timeout","bound":"invoke"}
+--- mixed second capture (.2.result) ---
+{"schema":"firstmate.process-event-extension-error.v1","extension_id":"org.example.sleep-deadlines","operation":"source.poll","code":"timeout","bound":"invoke","overrun_ms":4000}
+--- mixed host-error sidecar identity hash lines ---
+sidecar boundary-mixed.1.host-error:
+schema=fm-procevent-host-error.v1
+identity=sha256:6a2548839eeebfaba0c1c6daab2dd9a7c191d9995f571f4e2c40067bdf9bc0ae
+sidecar boundary-mixed.2.host-error:
+schema=fm-procevent-host-error.v1
+identity=sha256:19517e2a238b84cc994b23f52a595fe3614feab22a186e5acb007705ddb80fe8
+RESULT_COUNT=2
+SIDECAR_COUNT=2

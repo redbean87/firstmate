@@ -1,0 +1,18 @@
+--- drift round 1: inbox after round ---
+boundary-drift.1.adapter
+boundary-drift.1.extension
+boundary-drift.1.host-error
+boundary-drift.1.result
+--- drift round 2: inbox after round ---
+boundary-drift.1.adapter
+boundary-drift.1.extension
+boundary-drift.1.host-error
+boundary-drift.1.result
+--- drift stored result (.1.result) ---
+{"schema":"firstmate.process-event-extension-error.v1","extension_id":"org.example.sleep-deadlines","operation":"source.poll","code":"timeout","bound":"invoke","overrun_ms":4000}
+--- drift host-error sidecar identity hash lines ---
+sidecar boundary-drift.1.host-error:
+schema=fm-procevent-host-error.v1
+identity=sha256:9c1dffc5292e609943ba24f37c2fc55fa612b4b3311c296c75342a60aeaf14a5
+RESULT_COUNT=1
+SIDECAR_COUNT=1

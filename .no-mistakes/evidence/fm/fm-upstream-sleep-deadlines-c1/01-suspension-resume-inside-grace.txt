@@ -1,0 +1,15 @@
+SCENARIO A: real host `bin/fm-extension.mjs process-event ext-sleep source.poll` with a
+3000 ms invoke bound; the invocation tree (outer host + launch barrier + package group)
+was SIGSTOPed across the deadline and resumed ~7 s later (~4 s past the bound, beyond the
+2000 ms suspension slack).
+
+observed:
+  froze host 91637 and group 91728 at 06:48:09Z; invoke bound is 3000ms
+  resuming at 06:48:16Z (~7s frozen, deadline overrun ~4s > 2000ms slack)
+  exit=0
+  --- stdout ---
+  resumed inside the grace
+  --- stderr ---
+  (empty)
+
+Before the change this path killed the healthy invocation and recorded code=timeout.

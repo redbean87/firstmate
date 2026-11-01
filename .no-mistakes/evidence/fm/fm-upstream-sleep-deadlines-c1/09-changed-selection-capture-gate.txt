@@ -1,0 +1,8 @@
+Disposable repo containing only a change to bin/fm-procevent-extension-capture.pl; components inspected:
+$ bin/fm-test-run.sh --list --changed --base HEAD~1
+tests/fm-extension-binding.test.sh
+tests/fm-procevent-extension-errors.test.sh
+tests/fm-extension-sleep-deadlines.test.sh
+tests/fm-procevent.test.sh
+tests/fm-procevent-when.test.sh
+tests/fm-remote-reply.test.sh

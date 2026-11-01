@@ -1,0 +1,2 @@
+PLAIN_STALL_ELAPSED_MS=3316
+{"bound":"invoke","code":"timeout","extension_id":"org.example.sleep-deadlines","operation":"source.poll","schema":"firstmate.process-event-extension-error.v1"}

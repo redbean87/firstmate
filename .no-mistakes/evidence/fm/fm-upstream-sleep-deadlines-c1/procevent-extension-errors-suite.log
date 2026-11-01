@@ -1,0 +1,16 @@
+FM_TEST_BEGIN 2026-11-01T06:50:52Z tests/fm-procevent-extension-errors.test.sh family=standalone expected_gate_skip=none
+ok - package host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+ok - conflict host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+ok - barrier host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+ok - successful identical adapter results retain distinct sequences even with host-shaped output
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+ok - genuine evidence cannot suppress the first host error, and handled errors do not suppress fresh failures
+
+all extension-binding tests passed
+FM_TEST_END 2026-11-01T06:52:46Z tests/fm-procevent-extension-errors.test.sh exit=0 duration_ms=113755 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=113845
+FM_TEST_SUMMARY_FAMILY family=standalone count=1 duration_ms=113755 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-procevent-extension-errors.test.sh duration_ms=113755

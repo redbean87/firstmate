@@ -1,0 +1,3 @@
+Scenario H: the bounded grace is granted at most once
+exit=70 seconds-to-exit-after-second-resume=0
+{"bound":"invoke","code":"timeout","extension_id":"org.example.sleep-deadlines","operation":"source.poll","overrun_ms":4280,"schema":"firstmate.process-event-extension-error.v1"}

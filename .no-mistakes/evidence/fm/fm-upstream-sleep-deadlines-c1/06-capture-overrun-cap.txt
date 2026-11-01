@@ -1,0 +1,18 @@
+--- beyond round 1: inbox after round ---
+boundary-beyond.1.adapter
+boundary-beyond.1.extension
+boundary-beyond.1.result
+--- beyond round 2: inbox after round ---
+boundary-beyond.1.adapter
+boundary-beyond.1.extension
+boundary-beyond.1.result
+boundary-beyond.2.adapter
+boundary-beyond.2.extension
+boundary-beyond.2.result
+--- beyond stored result (.1.result) ---
+{"schema":"firstmate.process-event-extension-error.v1","extension_id":"org.example.sleep-deadlines","operation":"source.poll","code":"timeout","bound":"invoke","overrun_ms":10000000000000000}
+--- beyond second capture (.2.result) ---
+{"schema":"firstmate.process-event-extension-error.v1","extension_id":"org.example.sleep-deadlines","operation":"source.poll","code":"timeout","bound":"invoke","overrun_ms":10000000000000000}
+--- beyond host-error sidecar identity hash lines ---
+RESULT_COUNT=2
+SIDECAR_COUNT=0
