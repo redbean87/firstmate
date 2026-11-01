@@ -1,0 +1,16 @@
+LIVE: sleep-aware extension deadlines end to end on the real product
+  harness:   bin/fm-procevent.sh + bin/fm-extension.mjs (real host, real capture gate)
+  home:      disposable mktemp home, private claim root, no fleet state touched
+  bound:     3000ms invocation timeout
+
+Round 1 - one real SIGSTOP/SIGCONT suspension kill (frozen 7s across the bound)
+  capture 1 stored evidence: {"bound":"invoke","code":"timeout","extension_id":"org.example.sleep-e2e","operation":"source.poll","overrun_ms":4717,"schema":"firstmate.process-event-extension-error.v1"}
+Round 2 - capture 1 handled, second real suspension kill (frozen 11s)
+  capture 2 stored evidence: {"bound":"invoke","code":"timeout","extension_id":"org.example.sleep-e2e","operation":"source.poll","overrun_ms":9134,"schema":"firstmate.process-event-extension-error.v1"}
+  => real overruns differ between kills: 4717ms vs 9134ms
+Round 3 - third real suspension kill of the same bound
+  captures still: 2; stored capture 2 overrun_ms: 9134 (kept)
+  => many-kill coalescing: same bound + presence of overrun_ms reused one capture sequence
+Round 4 - adversarial plain stall, no suspension
+  captures: 3; capture 3 overrun_ms: absent
+  => presence of overrun_ms is part of identity: a plain timeout stays a distinct capture
