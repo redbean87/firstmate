@@ -76,7 +76,9 @@
 # refuses a launch whose harness is opencode (exit 1), naming the marker's own
 # reason, so dispatch follows the decision without hand-editing
 # config/crew-dispatch.json; every other launch - claude and any other
-# harness under either decision - proceeds unchanged, because the marker
+# harness under either decision - proceeds unchanged (and FM_BUDGET_MODE_OVERRIDE=1
+# in the spawning environment, set by firstmate only for an explicit captain
+# per-task harness choice, lets that one opencode launch through), because the marker
 # gates only the plan being switched off (OpenCode Go), while Claude is both
 # the fallback plan and an independently paid plan this marker never refuses.
 # A raw launch is judged by its first word when the hook passes no harness.
@@ -257,6 +259,11 @@ policy_budget_mode() {
     launch_harness=${raw%% *}
   fi
   [ "$launch_harness" = opencode ] || return 0
+  # Precedence: an explicit captain per-task harness choice beats the marker.
+  # Firstmate sets FM_BUDGET_MODE_OVERRIDE=1 on that one spawn; the marker was
+  # still validated above, and the override is never read from any file, so it
+  # cannot become standing.
+  [ "${FM_BUDGET_MODE_OVERRIDE:-}" != 1 ] || return 0
   refuse "budget mode puts the fleet on the Claude plan: ${seen[reason]} (config/budget-mode, decided at ${seen[decided_at]})"
 }
 

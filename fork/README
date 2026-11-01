@@ -25,6 +25,15 @@ Ownership boundary
                       gate, project pins, machine/model resource capacity,
                       Claude subscription, and arming the ask-user
                       self-answer guard below.
+  Launch and burn     fork/bin/fm-launch-harness (the primary launch picks pi or
+                      claude from the budget-mode marker, falling back to the
+                      recorded harness when quota evidence is unreadable;
+                      FM_LAUNCH_HARNESS pins it), fork/bin/fm-burn-report (both
+                      plans against their limits, weekly Claude versus monthly
+                      OpenCode Go), fork/bin/fm-self-restart (relaunches the
+                      harness it ran under). FM_BUDGET_MODE_OVERRIDE=1, set
+                      by firstmate on one spawn for an explicit captain
+                      per-task harness choice, beats the marker.
   Budget mode         fork/bin/fm-budget-mode: decides which paid plan the
                       fleet dispatches on from live quota evidence (one
                       bounded quota-axi read of opencode-go and claude) and

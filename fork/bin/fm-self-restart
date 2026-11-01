@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# fm-self-restart - restart this firstmate session fresh in its own herdr pane,
+# on whatever harness it is running under. It never chooses a mode: it detects
+# the running agent from the pane's process, exits it with that harness's own
+# exit keys, and relaunches the same harness (FM_LAUNCH_HARNESS), so a restart
+# cannot flip the fleet between pi and claude. The launcher's quota choice
+# applies only to a fresh `firstmate` launch.
+#
+# Run it as the last step of a turn, after saving anything worth keeping. A
+# helper pane (which survives this session exiting) waits for the turn to end,
+# exits the agent, waits for it to be gone, and runs `firstmate` in the pane.
+#
+#   fm-self-restart            restart the pane this session runs in
+#   fm-self-restart --dry-run  print what it would do
+#
+# Install: copy or symlink to <home>/config/bin/fm-self-restart. Log:
+# $FM_SELF_RESTART_LOG, default ~/Projects/firstmate-next/data/self-restart.log.
+set -euo pipefail
+
+pane=${HERDR_PANE_ID:?fm-self-restart: not running inside a herdr pane}
+log=${FM_SELF_RESTART_LOG:-$HOME/Projects/firstmate-next/data/self-restart.log}
+dry=0; [ "${1:-}" = --dry-run ] && dry=1
+
+helper=$(mktemp "${TMPDIR:-/tmp}/fm-self-restart.XXXXXX")
+cat >"$helper" <<'HELPER'
+#!/bin/bash
+target=$1; log=$2
+say() { printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$log"; }
+AGENTS='claude|pi|codex|opencode|cursor-agent|grok|kimi|omp'
+running_agent() {  # print the agent argv0 running in the pane, else nothing
+  herdr pane process-info --pane "$1" 2>/dev/null \
+    | sed -nE "s/.*\"argv0\":\"($AGENTS)\".*/\1/p" | head -n 1
+}
+say "helper up; waiting for $target's turn to end"
+herdr agent wait "$target" --until idle --until done --timeout 900000 >/dev/null 2>&1 \
+  || say "turn did not end within 15 min; restarting anyway"
+sleep 3
+agent=$(running_agent "$target")
+case $agent in
+  claude) harness=claude ;;
+  pi) harness=pi ;;
+  *) harness= ;;
+esac
+case $agent in
+  pi)
+    say "exiting pi with ctrl+c, ctrl+c, ctrl+d"
+    for k in ctrl+c ctrl+c ctrl+d; do herdr pane send-keys "$target" "$k" >/dev/null 2>&1 || true; sleep 1; done ;;
+  '') say "no known agent process in the pane; nothing to exit" ;;
+  *)
+    say "exiting $agent with /exit"
+    herdr pane send-text "$target" "/exit" && herdr pane send-keys "$target" enter ;;
+esac
+for _ in $(seq 1 60); do
+  sleep 1
+  [ -n "$(running_agent "$target")" ] || break
+done
+if [ -n "$(running_agent "$target")" ]; then
+  say "agent still running after 60s; leaving the pane alone"; sleep 20; exit 1
+fi
+sleep 2
+say "starting firstmate${harness:+ on $harness}"
+# Reload ~/.zshrc so the pane runs the current firstmate function; pin the
+# harness it was on so the restart never chooses a mode.
+herdr pane send-text "$target" "source ~/.zshrc && ${harness:+FM_LAUNCH_HARNESS=$harness }firstmate" && herdr pane send-keys "$target" enter
+say "done"
+sleep 2
+herdr pane close "$HERDR_PANE_ID" >/dev/null 2>&1 || true
+HELPER
+chmod +x "$helper"
+
+if [ $dry = 1 ]; then
+  echo "would split $pane, run $helper in the new pane, exit the agent in $pane by its own harness keys, then relaunch the same harness there"
+  exit 0
+fi
+
+printf '%s %s\n' "$(date '+%F %T')" "restart requested for $pane" >>"$log"
+new=$(herdr pane split "$pane" --direction down --ratio 0.15 2>/dev/null \
+  | sed -nE 's/.*"pane_id":"([^"]+)".*/\1/p' | tail -1)
+[ -n "$new" ] || { echo "fm-self-restart: could not open a helper pane" >&2; exit 1; }
+herdr pane run "$new" "$helper" "$pane" "$log" >/dev/null
+echo "fm-self-restart: helper pane $new will restart $pane once this turn ends"

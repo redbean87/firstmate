@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# fm-burn-report - a short plain-text report of both paid plans' burn against
+# their limits, so the plan choice is made before work strands.
+#
+# Usage:
+#   fm-burn-report [--json-file <quota-axi --json output>]
+#   fm-burn-report --help
+#
+# Reads one bounded `quota-axi --json --provider opencode-go --provider claude
+# --max-age 15m` (no other provider, no paid call, no auth change), or the
+# given file. Missing or unreadable evidence prints a line saying so and exits
+# 0; the report never blocks anything.
+#
+# The two plans are not equivalent, and the report says so per plan:
+#   Claude       the weekly window is the limit and unused weekly capacity is
+#                LOST at reset. Unspent percent near the reset is waste, so
+#                the report states how much is still unspent and when it
+#                resets. Spend it, do not save it.
+#   OpenCode Go  the allowance is MONTHLY and unused days are not lost. The
+#                weekly and rolling windows only pace the burn; the monthly
+#                window is the true bound. Running ahead of pace is the risk,
+#                not running behind.
+# Each window shows percent remaining, its pace against an even burn when
+# quota-axi reports one, and its reset time.
+# Exit: 0 always (usage errors exit 2).
+set -u
+
+FILE=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json-file) [ $# -ge 2 ] || { echo "fm-burn-report: --json-file needs a path" >&2; exit 2; }
+      FILE=$2; shift 2 ;;
+    -h|--help) sed -n '2,/^set -u/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^set -u/d' >&2; exit 0 ;;
+    *) echo "fm-burn-report: unknown argument $1 (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+command -v jq >/dev/null 2>&1 || { echo "burn report unavailable: jq is not installed"; exit 0; }
+SNAP=$(mktemp "${TMPDIR:-/tmp}/fm-burn-report.XXXXXX") || { echo "burn report unavailable: no temporary file"; exit 0; }
+trap 'rm -f "$SNAP"' EXIT
+if [ -n "$FILE" ]; then
+  cat -- "$FILE" >"$SNAP" 2>/dev/null
+elif command -v quota-axi >/dev/null 2>&1; then
+  quota-axi --json --provider opencode-go --provider claude --max-age 15m >"$SNAP" 2>/dev/null &
+  pid=$!
+  ( sleep "${FM_BURN_QUOTA_TIMEOUT:-20}"; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  guard=$!
+  wait "$pid" 2>/dev/null
+  kill "$guard" 2>/dev/null; wait "$guard" 2>/dev/null
+fi
+if ! jq -e '.providers | type == "array"' "$SNAP" >/dev/null 2>&1; then
+  echo "burn report unavailable: no readable quota reading (quota-axi missing, timed out, or invalid output)"
+  exit 0
+fi
+
+jq -r --argjson now "$(date +%s)" '
+  def resets_in($t):
+    if $t == null then "reset time unknown"
+    else (($t | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | try fromdateiso8601 catch null) as $e
+      | if $e == null then "resets " + $t
+        else ($e - $now) as $d
+          | if $d <= 0 then "resets now"
+            elif $d < 86400 then "resets in \($d/3600|floor)h"
+            else "resets in \($d/86400|floor)d" end
+        end)
+    end;
+  def win: "  \(.label // .id): \(.percentRemaining // "?")% left"
+    + (if .pace.status then ", pace \(.pace.status)" + (if .pace.burnMultiple then " (\(.pace.burnMultiple * 100 | round / 100)x an even burn)" else "" end) else "" end)
+    + ", " + resets_in(.resetsAt);
+  def row($p): ([.providers[] | select(.provider == $p)] | first) // null;
+  (row("claude")) as $c | (row("opencode-go")) as $o |
+  "Burn report - both plans",
+  "",
+  "Claude (weekly window; unused capacity is LOST at reset - spend it)",
+  (if $c == null then "  no reading" else ($c.windows[]? | win),
+     (([$c.windows[]? | select(.kind == "weekly")] | first) as $w
+      | if $w == null or $w.percentRemaining == null then "  verdict: weekly window unreadable"
+        else "  verdict: \($w.percentRemaining)% of the week is unspent and \(resets_in($w.resetsAt)); "
+          + (if ($w.pace.status // "") == "behind" then "burning behind pace, so the unspent part will be lost: move work onto Claude" elif $w.percentRemaining < 10 then "nearly out until reset" else "burning at or ahead of pace" end) end) end),
+  "",
+  "OpenCode Go (monthly allowance; unused days carry, running ahead is the risk)",
+  (if $o == null then "  no reading" else ($o.windows[]? | win),
+     (([$o.windows[]? | select(.kind == "monthly")] | first) as $m
+      | if $m == null or $m.percentRemaining == null then "  verdict: monthly window unreadable"
+        else "  verdict: \($m.percentRemaining)% of the month remains, the true bound; "
+          + (if ($m.pace.status // "") == "ahead" then "burning ahead of pace, shift work to Claude before it strands"
+             elif $m.percentRemaining < 10 then "nearly out, shift work to Claude"
+             else "on or behind pace, safe to keep spending" end) end) end)
+' "$SNAP" 2>/dev/null || echo "burn report unavailable: the quota reading could not be interpreted"
+exit 0

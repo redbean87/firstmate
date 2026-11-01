@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# fm-launch-harness - choose the harness a primary firstmate session launches
+# on, from the same live quota signal that drives worker dispatch, and record
+# the choice so nothing depends on anyone remembering which mode is running.
+#
+# Usage:
+#   fm-launch-harness [--config <dir>]
+#   fm-launch-harness --help
+#
+# Prints exactly one word on stdout - pi or claude - and always exits 0 with a
+# usable word, so a launcher can run `harness=$(fm-launch-harness)` and never
+# be blocked by this script. Diagnostics go to stderr.
+#
+# Choice, in order:
+#   1. FM_LAUNCH_HARNESS=pi|claude names the harness explicitly (a restart that
+#      must come back on the harness it was running under, or a captain's
+#      explicit choice). It wins over the quota signal.
+#   2. Otherwise fm-budget-mode refreshes the config/budget-mode marker (one
+#      bounded quota read). The marker's decision maps opencode -> pi (the Pi
+#      harness runs on the OpenCode Go plan) and claude -> claude. The marker
+#      is the single source of truth: worker dispatch reads the very same
+#      file (fork/bin/fm-launch-policy), so the primary and the workers
+#      cannot disagree.
+#   3. When the evidence is missing or unreadable - the refresh failed and left
+#      no fresh marker, the marker is invalid, or the marker says the OpenCode
+#      Go reading was unmeasurable - the choice falls back to today's
+#      behaviour: the harness already recorded in config/primary-harness, else
+#      pi. An unreadable quota reading therefore never strands a launch and is
+#      never read as "exhausted".
+# The chosen harness is recorded in config/primary-harness (the same one-word
+# file the launcher has always used).
+#
+# Exit: always 0. A usage error is the only non-zero exit (2).
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUDGET="$SCRIPT_DIR/fm-budget-mode"
+
+CONFIG=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --config) [ $# -ge 2 ] || { echo "fm-launch-harness: --config needs a directory" >&2; exit 2; }
+      CONFIG=$2; shift 2 ;;
+    -h|--help) sed -n '2,/^set -u/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^set -u/d' >&2; exit 0 ;;
+    *) echo "fm-launch-harness: unknown argument $1 (try --help)" >&2; exit 2 ;;
+  esac
+done
+[ -n "$CONFIG" ] || CONFIG=${FM_HOME:-$HOME/Projects/firstmate-next}/config
+
+recorded() {  # the harness already recorded, else pi
+  local h
+  h=$(head -n 1 "$CONFIG/primary-harness" 2>/dev/null | tr -d '[:space:]')
+  case "$h" in claude) echo claude ;; *) echo pi ;; esac
+}
+
+finish() {  # <harness> <why>
+  mkdir -p "$CONFIG" 2>/dev/null && printf '%s\n' "$1" >"$CONFIG/primary-harness" 2>/dev/null
+  printf 'fm-launch-harness: %s (%s)\n' "$1" "$2" >&2
+  printf '%s\n' "$1"
+  exit 0
+}
+
+case "${FM_LAUNCH_HARNESS:-}" in
+  pi|claude) finish "$FM_LAUNCH_HARNESS" "explicit FM_LAUNCH_HARNESS" ;;
+  '') ;;
+  *) printf 'fm-launch-harness: ignoring FM_LAUNCH_HARNESS=%s (not pi or claude)\n' "$FM_LAUNCH_HARNESS" >&2 ;;
+esac
+
+marker="$CONFIG/budget-mode"
+before=$(date +%s)
+if [ -d "$CONFIG" ] && [ -w "$CONFIG" ] && [ -x "$BUDGET" ]; then
+  "$BUDGET" --config "$CONFIG" --quiet >/dev/null 2>&1 || true
+fi
+
+field() { sed -n "s/^$1=//p" "$marker" 2>/dev/null | head -n 1; }
+fallback=$(recorded)
+[ -f "$marker" ] && [ -r "$marker" ] || finish "$fallback" "no readable quota marker; kept the recorded harness"
+[ "$(field version)" = 1 ] || finish "$fallback" "quota marker is not version 1; kept the recorded harness"
+decided=$(field decided_at)
+case "$decided" in ''|*[!0-9]*) finish "$fallback" "quota marker has no decision time; kept the recorded harness" ;; esac
+[ "$decided" -ge $((before - 1)) ] && [ "$decided" -le $(( $(date +%s) + 5 )) ] \
+  || finish "$fallback" "quota refresh left no fresh marker; kept the recorded harness"
+case "$(field uncertainty)" in
+  *"OpenCode Go reading unmeasurable"*) finish "$fallback" "OpenCode Go reading unmeasurable; kept the recorded harness" ;;
+esac
+case "$(field harness)" in
+  opencode) finish pi "quota: $(field reason)" ;;
+  claude) finish claude "quota: $(field reason)" ;;
+  *) finish "$fallback" "quota marker names an unknown harness; kept the recorded harness" ;;
+esac
