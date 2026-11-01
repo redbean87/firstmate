@@ -1,0 +1,27 @@
+fm-extension-binding.test.sh — local environment limitation (pre-existing, unrelated to this change)
+
+head under test: 0e78a18f5f2e098d0b0b35e22c0082fc3b50ca00
+result: exit=1, blocked before any deadline code runs
+failing section: remote-activation / remote-lifecycle
+observed: "env: node: No such file or directory"
+  not ok - remote transport did not publish the binding (missing: 'bound: org.example.remote@1.2.3')
+
+cause: the suite's fake remote job worker (bin/fm-remote-job-worker.sh) execs the remote
+command under `/usr/bin/env -i` with a PATH composed only from the remote account's
+nvm/asdf/mise/nix/homebrew//usr/local//usr/bin profile (bin/fm-remote-job-lib.sh
+fm_remote_job_compose_operator_path). On this machine node is installed only through
+volta (~/.volta/tools/image/node/24.21.0/bin/node), which that composed PATH never
+contains, so the fake remote cannot find node. Overriding HOME with a temp dir carrying
+~/.nvm/versions/node/*/bin/node did not change it.
+
+verified not caused by this change: the same section fails identically on an unmodified
+`git archive` of the base commit bdaf633d65e01936c3d8aea9c592f34f7f902943:
+  env: node: No such file or directory
+  not ok - remote transport did not publish the binding (missing: 'bound: org.example.remote@1.2.3')
+
+to run it locally, provide node in a directory the remote-job PATH builder discovers
+(for example /usr/local/bin or ~/.nvm/versions/node/*/bin); CI has node on /usr/bin.
+The local sections that ran before the failing isolated section reported ok
+(unknown-selector refusal, section-coordinator propagation); the suite then aborted on
+the remote section, so it cannot be used as local evidence either way. The sleep-deadline
+suites and the capture-pipeline suites this change touches are green in the other logs here.

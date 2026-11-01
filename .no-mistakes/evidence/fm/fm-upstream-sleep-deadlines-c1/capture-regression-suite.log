@@ -1,0 +1,17 @@
+head=0e78a18f5f2e098d0b0b35e22c0082fc3b50ca00
+ok - package host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+ok - conflict host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+ok - barrier host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+ok - successful identical adapter results retain distinct sequences even with host-shaped output
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+ok - genuine evidence cannot suppress the first host error, and handled errors do not suppress fresh failures
+
+all extension-binding tests passed
+
+real	2m0.129s
+user	0m22.835s
+sys	0m19.776s
+exit=0

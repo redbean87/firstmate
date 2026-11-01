@@ -1,0 +1,14 @@
+live-coalesce: real host = /Users/cortezashley/.no-mistakes/worktrees/db084b037e89/01M6AF4GP3KN73MD07XSR7KQ11/bin/fm-extension.mjs
+registered real extension source 'live-coalesce' bound=3000ms
+round1: adapter started pid=89087 at 1793505281
+frozen host pid=88985 group=89084
+round1: resuming after 9s suspended (bound 3000ms)
+round1 captured: {"bound":"invoke","code":"timeout","extension_id":"org.example.sleep-deadlines","operation":"source.poll","overrun_ms":6213,"schema":"firstmate.process-event-extension-error.v1"}
+round2: retry adapter started pid=92423 at 1793505299
+frozen host pid=92325 group=92422
+round2: resuming after 11s suspended (bound 3000ms)
+after round2: result_files=1 host_error_sidecars=1 stored_overrun=6213
+frozen host pid=93898 group=93985
+control: resuming after 11s suspended (bound 3000ms)
+control invocation (11s suspension): rc=70 {"bound":"invoke","code":"timeout","extension_id":"org.example.sleep-deadlines","operation":"source.poll","overrun_ms":7945,"schema":"firstmate.process-event-extension-error.v1"}
+PASS: two real suspension kills of one bound coalesced into ONE capture (1 result, 1 host-error sidecar); stored evidence kept round 1's overrun_ms=6213 while the same bound under a longer suspension measured overrun_ms=7945

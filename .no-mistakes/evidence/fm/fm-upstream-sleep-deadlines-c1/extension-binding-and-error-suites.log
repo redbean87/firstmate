@@ -1,0 +1,32 @@
+FM_TEST_BEGIN 2026-11-01T03:31:58Z tests/fm-procevent-extension-errors.test.sh family=standalone expected_gate_skip=none
+FM_TEST_BEGIN 2026-11-01T03:31:58Z tests/fm-extension-binding.test.sh family=standalone expected_gate_skip=none
+ok - unknown extension conformance section selectors fail before setup
+env: node: No such file or directory
+not ok - remote transport did not publish the binding (missing: 'bound: org.example.remote@1.2.3')
+--- output ---
+
+not-autohandled: example-file (left for the handler; still unacknowledged)
+not-autohandled: flow-source (left for the handler; still unacknowledged)
+ok - the section coordinator propagates ordered failures and bounded cleanup
+not ok - an isolated extension conformance section failed
+FM_TEST_END 2026-11-01T03:32:06Z tests/fm-extension-binding.test.sh exit=1 duration_ms=7206 gate_skip=false
+ok - package host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+ok - conflict host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+ok - barrier host failures coalesce across two starts and three reconciles, with recovery and changed evidence
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+ok - successful identical adapter results retain distinct sequences even with host-shaped output
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+not-autohandled: identical-source (left for the handler; still unacknowledged)
+ok - genuine evidence cannot suppress the first host error, and handled errors do not suppress fresh failures
+
+all extension-binding tests passed
+FM_TEST_END 2026-11-01T03:33:47Z tests/fm-procevent-extension-errors.test.sh exit=0 duration_ms=108069 gate_skip=false
+FM_TEST_SUMMARY total=2 failed=1 skipped_gate=0 duration_ms=108347
+FM_TEST_SUMMARY_FAMILY family=standalone count=2 duration_ms=115275 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-procevent-extension-errors.test.sh duration_ms=108069
+FM_TEST_SLOWEST rank=2 script=tests/fm-extension-binding.test.sh duration_ms=7206
+
+real	1m48.622s
+user	0m32.679s
+sys	0m28.266s

@@ -1,0 +1,2 @@
+attempt 1 (held 3.2s across a 3000ms bound): rc=70 elapsed_after_resume=0s evidence={"bound":"invoke","code":"timeout","extension_id":"org.example.sleep-deadlines","operation":"source.poll","schema":"firstmate.process-event-extension-error.v1"}
+PASS: a suspension ending inside the 2s slack killed the invocation at its bound immediately (0s after resume), with bound=invoke and no overrun_ms and no bounded grace
