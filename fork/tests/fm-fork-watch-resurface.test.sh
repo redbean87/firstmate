@@ -8,9 +8,9 @@
 # end to end and arrange only its durable fixture state; the wiring cases pin
 # fork/bin/fm-fork-hook-check's HK3 knowledge - byte-identical block, anchored
 # between the ordinary branch's fi and the trailing wake, and --base covering
-# exactly the three hook blocks. Previous behaviour: both empty-queue cases
-# wake (the recovery-pending one reproduced the empty-ping leak), the
-# queued-row cases wake exactly once (unchanged either way).
+# every hook block each file adds over upstream. Previous behaviour: both
+# empty-queue cases wake (the recovery-pending one reproduced the empty-ping
+# leak), the queued-row cases wake exactly once (unchanged either way).
 set -u
 # shellcheck source=fork/tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -204,7 +204,7 @@ copy_watch_tree() {
   printf '%s\n' "$t"
 }
 
-# mutate <file> <python-expression>: rewrite a copied file with hk1/hk2/hk3
+# mutate <file> <python-expression>: rewrite a copied file with hk1..hk6
 # (its tree's canonical blocks) in scope.
 mutate() {
   python3 - "$1" "$2" <<'PY' || fail "fixture mutation did not apply: $2"
@@ -212,10 +212,18 @@ import sys
 p, expr = sys.argv[1], sys.argv[2]
 root = p.rsplit("/bin/", 1)[0]
 s = open(p).read()
-hk1 = open(root + "/fork/hooks/hk1-spawn.block").read()
-hk2 = open(root + "/fork/hooks/hk2-control.block").read()
-hk3 = open(root + "/fork/hooks/hk3-watch.block").read()
-s2 = eval(expr, {"s": s, "hk1": hk1, "hk2": hk2, "hk3": hk3})
+ns = {}
+for name in ("hk1-spawn", "hk2-control", "hk3-watch", "hk4-main-eligible",
+             "hk5-resurface-successor", "hk6-parked-review"):
+    ns[name.replace("-", "_")] = open(f"{root}/fork/hooks/{name}.block").read()
+ns["hk1"] = ns["hk1_spawn"]
+ns["hk2"] = ns["hk2_control"]
+ns["hk3"] = ns["hk3_watch"]
+ns["hk4"] = ns["hk4_main_eligible"]
+ns["hk5"] = ns["hk5_resurface_successor"]
+ns["hk6"] = ns["hk6_parked_review"]
+ns["s"] = s
+s2 = eval(expr, ns)
 assert s2 != s, "mutation did not change the file"
 open(p, "w").write(s2)
 PY
@@ -249,7 +257,7 @@ test_detects_missing_hk3() {
 test_detects_edited_hk3() {
   local t; t=$(copy_watch_tree edit-hk3)
   # shellcheck disable=SC2016 # a literal weakened guard is the point
-  mutate "$t/bin/fm-watch.sh" 's.replace("handling_successor_has_queued_row || return 0\n  # <<< fork resurface-guard hook HK3", "handling_successor_has_queued_row || true\n  # <<< fork resurface-guard hook HK3")'
+  mutate "$t/bin/fm-watch.sh" 's.replace("fork_main_eligible_queued_row || return 0\n  # <<< fork resurface-guard hook HK3", "fork_main_eligible_queued_row || true\n  # <<< fork resurface-guard hook HK3")'
   expect_hk3_detected "$t" "HK3: hook block in bin/fm-watch.sh differs" "edited HK3"
   pass "wiring: an HK3 block that no longer refuses (|| true) is detected"
 }
@@ -263,9 +271,9 @@ test_detects_hk3_moved_before_the_branch_fi() {
   pass "wiring: HK3 moved back inside the recover-check branch is detected"
 }
 
-test_base_covers_exactly_the_three_blocks() {
+test_base_covers_exactly_the_hook_blocks() {
   local t out rc
-  t=$(copy_watch_tree base3)
+  t=$(copy_watch_tree base-blocks)
   git -C "$t" init -q
   git -C "$t" config user.email fork-test@invalid
   git -C "$t" config user.name fork-test
@@ -274,23 +282,23 @@ test_base_covers_exactly_the_three_blocks() {
   cp "$t/bin/fm-watch.sh" "$t/watch.hooked"
   mutate "$t/bin/fm-spawn.sh" 's.replace(hk1, "")'
   mutate "$t/bin/fm-control.sh" 's.replace(hk2, "")'
-  mutate "$t/bin/fm-watch.sh" 's.replace(hk3, "")'
+  mutate "$t/bin/fm-watch.sh" 's.replace(hk3, "").replace(hk4, "").replace(hk5, "").replace(hk6, "")'
   git -C "$t" add bin
   git -C "$t" commit -q -m upstream
   mv "$t/spawn.hooked" "$t/bin/fm-spawn.sh"
   mv "$t/control.hooked" "$t/bin/fm-control.sh"
   mv "$t/watch.hooked" "$t/bin/fm-watch.sh"
   out=$("$CHECK" --root "$t" --base HEAD 2>&1); rc=$?
-  expect_code 0 "$rc" "--base must accept a tree that differs only by the three blocks"$'\n'"$out"
-  assert_contains "$out" "differ only by the three hook blocks" \
-    "--base must report the three-block boundary"
+  expect_code 0 "$rc" "--base must accept a tree that differs only by the hook blocks"$'\n'"$out"
+  assert_contains "$out" "differ only by the hook blocks" \
+    "--base must report the hook-block boundary"
   printf '# local tweak\n' >> "$t/bin/fm-watch.sh"
   out=$("$CHECK" --root "$t" --base HEAD 2>&1); rc=$?
-  [ "$rc" -ne 0 ] || fail "--base must reject a watch edit beyond the block"$'\n'"$out"
+  [ "$rc" -ne 0 ] || fail "--base must reject a watch edit beyond the blocks"$'\n'"$out"
   assert_contains "$out" "differ by more than their hook block" \
-    "--base must reject an HK3 file changed beyond its block"
+    "--base must reject an HK3 file changed beyond its blocks"
   assert_contains "$out" "bin/fm-watch.sh" "--base must name the extra watch edit"
-  pass "wiring: --base accepts exactly the three blocks and rejects any other upstream edit"
+  pass "wiring: --base accepts exactly the hook blocks and rejects any other upstream edit"
 }
 
 fork_run_tests

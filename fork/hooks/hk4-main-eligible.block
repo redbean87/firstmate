@@ -1,0 +1,13 @@
+# >>> fork resurface-guard hook HK4 (fork/README; fork edit in this file)
+# The main-eligible resurface guard both HK3 and HK5 call: it answers whether
+# main would actually receive a queued row - the same main-eligible filter
+# bin/fm-wake-drain.sh applies - so a queue held wholly by a live
+# supervision-branch grant cannot wake main with nothing for it to present.
+# fm_wake_actor_pending_count (bin/fm-wake-lib.sh) owns that filter; it reads
+# without the queue lock by contract, where a torn read can only mis-count one
+# poll, and reports an uncountable queue as pending so a queue nobody can read
+# still alarms.
+fork_main_eligible_queued_row() {
+  [ "$(fm_wake_actor_pending_count main)" -gt 0 ]
+}
+# <<< fork resurface-guard hook HK4

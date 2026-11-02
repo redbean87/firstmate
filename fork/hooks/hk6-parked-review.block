@@ -1,0 +1,23 @@
+            # >>> fork parked-review hook HK6 (fork/README; fork edit in this file)
+            # Parked awaiting review, not stuck: the log's latest event is a whole
+            # done: line and bin/fm-pr-check.sh's merge poll for this task is still
+            # armed (it retires when the PR merges), so this pane holds finished
+            # work waiting on review. Absorb like the captain-call bound above and
+            # hold the long PAUSE_RESURFACE_SECS recheck cadence a declared pause
+            # uses instead of alarming on every pane-hash change. A crew still
+            # working, a log with no terminal done: line, or a finished task whose
+            # PR is not recorded open never enters this branch, so their stale
+            # detection is unchanged.
+            elif [ "$(status_line_verb "$(last_status_line "$STATE/$task.status")")" = "done" ] \
+              && [ -e "$STATE/$task.pr-poll-registration" ] \
+              && [ -n "$(fm_meta_get "$STATE/$task.meta" pr)" ]; then
+              printf '%s' "$h" > "$sf"
+              wedge_episode_end "$key" 0 1
+              clear_write_tracking "$key"
+              parked_mtime=$(stat_mtime "$STATE/$task.status")
+              case "$parked_mtime" in ''|*[!0-9]*) parked_mtime=$(date +%s) ;; esac
+              parked_age=$(( $(date +%s) - parked_mtime ))
+              resurface_absorbed "$w" "$STATE/.parked-resurfaced-$key" "$parked_age" \
+                "stale: $w (done at $(fm_meta_get "$STATE/$task.meta" pr), awaiting review - parked, rechecked on a long cadence not a wedge; review the PR or release the worker)"
+              triage_log "absorbed stale (done, open PR awaiting review - parked): $w"
+            # <<< fork parked-review hook HK6

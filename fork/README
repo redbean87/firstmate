@@ -13,14 +13,15 @@ Ownership boundary
 ------------------
 
   Upstream core       everything outside fork/ and .github/workflows/fork-ci.yml,
-                      unchanged except the three hook blocks below.
-  Hook blocks (3)     HK1 in bin/fm-spawn.sh, HK2 in bin/fm-control.sh, and
-                      HK3 in bin/fm-watch.sh - the resurface guard that makes a
-                      recovery wake fire only while a wake row is actually
-                      queued, so an episode whose row was already handled no
-                      longer costs main an empty "watching resumed" turn.
-                      Canonical copies: fork/hooks/*.block. They are the only
-                      fork edits to upstream files.
+                      unchanged except the six hook blocks below.
+  Hook blocks (6)     HK1 in bin/fm-spawn.sh, HK2 in bin/fm-control.sh, and
+                      HK3-HK6 in bin/fm-watch.sh - the resurface guard that
+                      makes a recovery wake fire only while a wake row MAIN
+                      would receive is actually queued (HK3, HK4, HK5), and the
+                      parked-awaiting-review absorb that stops a done worker's
+                      open PR from raising a stale alarm on every pane-hash
+                      change (HK6). Canonical copies: fork/hooks/*.block. They
+                      are the only fork edits to upstream files.
   Fork policy         fork/bin/fm-launch-policy: brief intake guard, consult
                       gate, project pins, machine/model resource capacity,
                       Claude subscription, and arming the ask-user
@@ -104,8 +105,8 @@ has passed (fork/chatgpt/README "Plan breakdown"). Exclusive-area
 enforcement is not built. Both live under fork/ and need no upstream edits.
 
 
-The three hook points
--------------------
+The hook points
+---------------
 
   HK1  bin/fm-spawn.sh, directly after upstream's project-capacity admission
        and before the brief checks, launch-brief render, endpoint, worktree, and
@@ -118,16 +119,36 @@ The three hook points
   HK3  bin/fm-watch.sh, inside resurface_after_downtime() after the ordinary
        branch's fi and immediately before the trailing wake - the one point
        both that branch and the WATCHER_RECOVERY_PENDING=1 fall-through cross.
-       It adds one line: handling_successor_has_queued_row || return 0, the
-       same guard the handling-successor branch already carries, so an episode
-       whose row was already handled no longer wakes main with nothing queued.
+       It keeps upstream's own handling_successor_has_queued_row gate and adds
+       fork_main_eligible_queued_row, so only a row MAIN would receive wakes
+       main; an episode whose rows all belong to the supervision branch's live
+       grant no longer costs main an empty "watching resumed" turn.
+  HK4  bin/fm-watch.sh, after upstream's handling_successor_has_queued_row
+       definition and before resurface_after_downtime(): defines
+       fork_main_eligible_queued_row on upstream's fm_wake_actor_pending_count
+       (bin/fm-wake-lib.sh), the same main-eligible filter the drain applies.
+  HK5  bin/fm-watch.sh, inside resurface_after_downtime()'s
+       FM_WATCH_HANDLING_SUCCESSOR branch, between upstream's queue gate and
+       that branch's trailing wake. This is the site the live noise actually
+       fired from: on a Pi primary the extension restores continuity after
+       every actionable wake with FM_WATCH_PREDECESSOR_ARM_PID set, so each
+       post-wake watcher is a handling successor and reaches this wake, not
+       HK3. Same one-line guard as HK3.
+  HK6  bin/fm-watch.sh, in the terminal-status stale branch between the
+       captain-call absorb and the surfacing else: a pane whose status log's
+       latest event is a whole done: line with its merge poll still armed
+       (pr= metadata plus state/<id>.pr-poll-registration) is parked awaiting
+       review - absorbed with the long PAUSE_RESURFACE_SECS recheck cadence a
+       declared pause uses instead of an alarm per pane-hash change. A crew
+       still working, a log with no terminal done: line, or a finished task
+       whose PR is not recorded open never enters the branch.
 
 HK1 and HK2 call fork/bin/fm-launch-policy only when the home has
 config/fork-policies. A home without that file behaves exactly as upstream.
 With the file present, any non-zero exit refuses - including a missing or
-unexecutable policy script. HK3 has no policy gate: it calls no fork script,
-its guard is unconditional, and a row still queued at that moment resurfaces
-exactly as upstream.
+unexecutable policy script. HK3-HK6 have no policy gate: they call no fork
+script, their guards are unconditional, and a main-eligible row queued at
+that moment resurfaces exactly as upstream.
 
 Hook contract (environment HK1 and HK2 pass; see the policy script header):
 FM_LP_PHASE, FM_LP_TASK, FM_LP_KIND, FM_LP_PROJECT, FM_LP_HARNESS, FM_LP_MODEL,
@@ -136,8 +157,14 @@ FM_LP_CONFIG, and from HK1 only FM_LP_OWNER_PID ($$, the launching fm-spawn).
 The launch-policy blocks read these upstream names: in fm-spawn.sh ID KIND
 PROJ_ABS HARNESS MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG
 FM_HOME FM_ROOT; in fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT
-META KIND STATE DATA FM_HOME FM_ROOT, fm_meta_get, die. HK3 reads only
-upstream's handling_successor_has_queued_row, defined earlier in fm-watch.sh.
+META KIND STATE DATA FM_HOME FM_ROOT, fm_meta_get, die. The watch hooks read
+only upstream names: HK3 and HK5 call upstream's
+handling_successor_has_queued_row plus the HK4 block's
+fork_main_eligible_queued_row, HK4 reads fm_wake_actor_pending_count
+(bin/fm-wake-lib.sh, reached through fm-push-transition-lib.sh), and HK6 reads
+last_status_line and status_line_verb (bin/fm-classify-lib.sh), fm_meta_get
+(bin/fm-backend.sh), and fm-watch.sh's own wedge_episode_end,
+clear_write_tracking, resurface_absorbed, stat_mtime, and triage_log.
 fm-fork-hook-check verifies these hook inputs and the integration boundary
 (below).
 
@@ -496,14 +523,16 @@ Fork CI tests the fork's code and its integration with upstream, not upstream:
                       It never calls bin/fm-test-run.sh, and fork tests live
                       outside tests/, so upstream's selector, lanes, and
                       coverage guard never see them.
-  Hook wiring         fm-fork-hook-check verifies all three blocks are present
+  Hook wiring         fm-fork-hook-check verifies all six blocks are present
                       once, identical to fork/hooks/*.block, and at their
                       lifecycle positions, that the upstream names they read
                       exist, and that no other upstream bin/ file references
                       the fork; with --base it verifies nothing else
-                      upstream-owned differs from upstream. It does not check
+                      upstream-owned differs from upstream - only the canonical
+                      blocks each hooked file adds over the base, in file
+                      order. It does not check
                       the policy's upstream helper dependencies (see "The
-                      three hook points"); the fork test suites exercise those.
+                      hook points"); the fork test suites exercise those.
   Behaviour           spawn and relaunch tests drive the REAL upstream scripts
                       through upstream's shared test libraries (tests/lib.sh,
                       tests/fixtures.sh); the relaunch tests also lift four
@@ -513,7 +542,15 @@ Fork CI tests the fork's code and its integration with upstream, not upstream:
                       end: an empty queue must produce no recovery wake,
                       whether recovery is pending at startup or arrives
                       through the ordinary branch, and a queued row exactly
-                      one.
+                      one. The parked/main-eligible test drives both
+                      resurface wake sites with a real branch grant
+                      (bin/fm-wake-grant.sh) - a branch-granted-only queue
+                      stays silent at the handling-successor site and through
+                      HK3, a main-eligible row still wakes - and pins the
+                      stale path both ways: a stuck working worker is still
+                      detected, a done worker parked on a recorded open PR is
+                      absorbed, and the same done pane without the armed merge
+                      poll still surfaces.
 
 Upstream tests are never modified for the fork. Routine fork CI does not run
 the upstream suite. Run targeted upstream tests only for a named compatibility
@@ -531,7 +568,11 @@ excluded from this fork's upstream-suite runs as this recorded reason, never
 edited; drop the exclusion when upstream lands the guard from issue 8092.
 Our own gate for the guard is fork/tests/fm-fork-watch-resurface.test.sh,
 which proves both directions end to end: an empty queue stays silent and a
-queued row still wakes.
+queued row still wakes - and fork/tests/fm-fork-watch-parked-main-eligible
+.test.sh extends it to the branch-granted queue (silent at both wake sites),
+the main-eligible row (still wakes), and the stale path (a stuck worker still
+detected, a done worker parked on a recorded open PR absorbed, the same done
+pane without the armed merge poll still surfacing).
 
 That rule is enforced, not just written down: Fork CI's workflow-guard step
 (fork/bin/fm-fork-workflow-guard) reads the repository's workflow list and
@@ -592,7 +633,7 @@ cleanup stay manual. Commands run from the active checkout
      upstream tests only for a named risk, and record why.
   5. Review before landing:
        git -C "$W" log --oneline fork/stage1-enforcement..HEAD
-       git -C "$W" diff "$C" HEAD -- bin/          # only the three hook blocks
+       git -C "$W" diff "$C" HEAD -- bin/          # only the hook blocks
        git -C "$W" diff fork/stage1-enforcement HEAD --stat
   6. Land and publish (needs the captain's go; this updates the code the
      running session executes, as any self-update does):
