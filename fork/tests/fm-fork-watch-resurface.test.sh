@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# HK3, the fork's resurface guard: bin/fm-watch.sh's ordinary recovery branch
-# may announce "check: rearm-resurface" only while a wake row is actually
-# queued, so a recovery marker that reported downtime for a row already
-# handled no longer costs main an empty "watching resumed" turn. The two
-# behaviour cases drive the REAL bin/fm-watch.sh end to end and arrange only
-# its durable fixture state; the wiring cases pin fork/bin/fm-fork-hook-check's
-# HK3 knowledge - byte-identical block, anchored between the ordinary branch's
-# recover check and its trailing wake, and --base covering exactly the three
-# hook blocks. Previous behaviour: the empty-queue case wakes (this test then
-# fails), the queued-row case wakes exactly once (unchanged either way).
+# HK3, the fork's resurface guard: bin/fm-watch.sh may announce "check:
+# rearm-resurface" only while a wake row is actually queued, so a recovery
+# episode whose row was already handled no longer costs main an empty
+# "watching resumed" turn - including the recovery-pending fall-through, where
+# WATCHER_RECOVERY_PENDING=1 skips the ordinary branch and control reaches the
+# trailing wake directly. The behaviour cases drive the REAL bin/fm-watch.sh
+# end to end and arrange only its durable fixture state; the wiring cases pin
+# fork/bin/fm-fork-hook-check's HK3 knowledge - byte-identical block, anchored
+# between the ordinary branch's fi and the trailing wake, and --base covering
+# exactly the three hook blocks. Previous behaviour: both empty-queue cases
+# wake (the recovery-pending one reproduced the empty-ping leak), the
+# queued-row cases wake exactly once (unchanged either way).
 set -u
 # shellcheck source=fork/tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -131,6 +133,64 @@ test_queued_row_resurfaces_exactly_once() {
   pass "resurface: a queued row wakes exactly once and stays queued for main"
 }
 
+# The leak's real shape: the recovery marker is ALREADY durable when the
+# watcher starts, so WATCHER_RECOVERY_PENDING=1 skips the ordinary branch and
+# the trailing wake is reached with no guard at all - the empty ping this
+# guard exists to silence. Before the fix this case fired an empty
+# "check: rearm-resurface"; now the guard keeps the watcher supervising in
+# silence.
+test_startup_pending_empty_queue_stays_silent() {
+  local state fakebin home out i
+  read -r state fakebin home out < <(make_watch_case resurface-pending-empty)
+  printf 'pending:downtime:fixture.1.pendingempty\n' > "$state/.watcher-down"
+  chmod 600 "$state/.watcher-down"
+  start_watch "$state" "$fakebin" "$home" "$out"
+  i=0
+  while [ "$i" -lt 24 ]; do
+    if grep -qx "$REARM" "$out" 2>/dev/null; then
+      stop_watch "$WATCH_PID"
+      fail "recovery pending with an empty queue fired an empty wake: $(cat "$out")"
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  if ! kill -0 "$WATCH_PID" 2>/dev/null; then
+    fail "the watcher exited without waking: $(cat "$out")"
+  fi
+  assert_not_contains "$(cat "$out")" "$REARM" \
+    "a pending recovery with an empty queue must stay silent"
+  stop_watch "$WATCH_PID"
+  pass "resurface: recovery pending at startup with an empty queue stays silent"
+}
+
+# The same fall-through with a row genuinely queued must still wake main
+# exactly once - the guard changes nothing about a real resurface.
+test_startup_pending_queued_row_wakes_once() {
+  local state fakebin home out i wakes
+  read -r state fakebin home out < <(make_watch_case resurface-pending-queued)
+  printf 'pending:downtime:fixture.1.pendingqueued\n' > "$state/.watcher-down"
+  chmod 600 "$state/.watcher-down"
+  append_wake "$state" check resurface-fixture \
+    'check: fixture row queued while recovery is pending' \
+    || fail "fixture: could not append the wake row"
+  start_watch "$state" "$fakebin" "$home" "$out"
+  i=0
+  while [ "$i" -lt 40 ] && ! grep -qx "$REARM" "$out" 2>/dev/null; do
+    sleep 0.5
+    i=$((i + 1))
+  done
+  sleep 1  # let a duplicate wake land if the guard is broken
+  wakes=$(grep -c "^$REARM$" "$out" 2>/dev/null || true)
+  if [ "${wakes:-0}" -ne 1 ]; then
+    stop_watch "$WATCH_PID"
+    fail "a queued row with recovery pending must wake exactly once (got ${wakes:-0}): $(cat "$out")"
+  fi
+  grep "$(printf '\tcheck\tresurface-fixture\t')" "$state/.wake-queue" >/dev/null \
+    || fail "the fixture row must stay queued for main: $(cat "$state/.wake-queue")"
+  stop_watch "$WATCH_PID"
+  pass "resurface: a queued row with recovery pending still wakes exactly once"
+}
+
 # --- wiring: fork/bin/fm-fork-hook-check's HK3 knowledge ----------------------
 
 # copy_watch_tree <name>: a minimal tree with the three hooked files, the
@@ -189,18 +249,18 @@ test_detects_missing_hk3() {
 test_detects_edited_hk3() {
   local t; t=$(copy_watch_tree edit-hk3)
   # shellcheck disable=SC2016 # a literal weakened guard is the point
-  mutate "$t/bin/fm-watch.sh" 's.replace("handling_successor_has_queued_row || return 0\n    # <<< fork resurface-guard hook HK3", "handling_successor_has_queued_row || true\n    # <<< fork resurface-guard hook HK3")'
+  mutate "$t/bin/fm-watch.sh" 's.replace("handling_successor_has_queued_row || return 0\n  # <<< fork resurface-guard hook HK3", "handling_successor_has_queued_row || true\n  # <<< fork resurface-guard hook HK3")'
   expect_hk3_detected "$t" "HK3: hook block in bin/fm-watch.sh differs" "edited HK3"
   pass "wiring: an HK3 block that no longer refuses (|| true) is detected"
 }
 
-test_detects_hk3_moved_past_the_recover_check() {
+test_detects_hk3_moved_before_the_branch_fi() {
   local t; t=$(copy_watch_tree moved-hk3)
   # shellcheck disable=SC2016 # Python source, not shell expansion
-  mutate "$t/bin/fm-watch.sh" 's.replace(hk3, "").replace("\n  fi\n  wake \"check: rearm-resurface\"", "\n  fi\n" + hk3 + "  wake \"check: rearm-resurface\"", 1)'
-  expect_hk3_detected "$t" "HK3: block must immediately follow the ordinary branch's recover check" \
-    "HK3 after the branch fi"
-  pass "wiring: HK3 moved out of the recover-check anchor is detected"
+  mutate "$t/bin/fm-watch.sh" 's.replace(hk3, "").replace("\n  fi\n  wake \"check: rearm-resurface\"", "\n" + hk3 + "  fi\n  wake \"check: rearm-resurface\"", 1)'
+  expect_hk3_detected "$t" "HK3: block must sit between the ordinary branch's fi" \
+    "HK3 before the branch fi"
+  pass "wiring: HK3 moved back inside the recover-check branch is detected"
 }
 
 test_base_covers_exactly_the_three_blocks() {
