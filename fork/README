@@ -618,7 +618,8 @@ cleanup stay manual. Commands run from the active checkout
      active checkout, its branch, its untracked notes, and the running
      session are not touched. W below is that worktree.
   3. Exit 3 means conflicts, listed by owner. Resolve in W only:
-       hook file   take upstream's version, then re-insert the block from
+       hook file   bin/fm-spawn.sh, bin/fm-control.sh, and bin/fm-watch.sh:
+                   take upstream's version, then re-insert the block from
                    fork/hooks/*.block verbatim at the anchor the README names
                    (git -C "$W" checkout --theirs -- <file>, then edit);
        fork-owned  upstream now writes a fork path: stop, decide by hand;

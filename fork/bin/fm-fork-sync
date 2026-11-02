@@ -20,8 +20,9 @@
 #          the worktree and every conflicted path is listed with its owner:
 #            fork-owned  fork/ or the fork CI workflow: upstream now writes a
 #                        path the fork owns; stop and decide by hand
-#            hook file   bin/fm-spawn.sh or bin/fm-control.sh: take upstream's
-#                        side, then re-insert the block from fork/hooks/
+#            hook file   bin/fm-spawn.sh, bin/fm-control.sh, or
+#                        bin/fm-watch.sh: take upstream's side, then
+#                        re-insert the block from fork/hooks/
 #            upstream    any other path: the fork has edited an upstream file,
 #                        a boundary violation; stop and remove that edit
 #          Exit 0 merged cleanly, 3 conflicts, 1/2 refused.
@@ -47,7 +48,7 @@ usage() { sed -n '6,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 owner_of() {  # <path>: fork-owned | hook file | upstream
   case "$1" in
     fork/*|.github/workflows/fork-ci.yml) echo fork-owned ;;
-    bin/fm-spawn.sh|bin/fm-control.sh) echo "hook file" ;;
+    bin/fm-spawn.sh|bin/fm-control.sh|bin/fm-watch.sh) echo "hook file" ;;
     *) echo upstream ;;
   esac
 }
@@ -137,7 +138,7 @@ cmd_check() {
   echo "== fork tests"; "$root/fork/tests/run" || failed=1
   echo "== review: commits this import brings"
   git -C "$root" log --oneline --no-merges "refs/heads/$from..$sha" | head -50
-  echo "== review: upstream-owned delta vs the imported commit (expect only the two hook files)"
+  echo "== review: upstream-owned delta vs the imported commit (expect only the three hook files)"
   git -C "$root" diff --stat "$sha" HEAD -- . ':(exclude)fork' ':(exclude).github/workflows/fork-ci.yml'
   [ "$failed" -eq 0 ] && echo "check: all passed" || echo "check: FAILED"
   return "$failed"

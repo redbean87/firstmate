@@ -99,4 +99,22 @@ test_missing_commit_refuses_without_side_effects() {
   pass "sync: an unfetched commit refuses before writing anything"
 }
 
+test_watch_conflict_is_classified_as_hook_file() {
+  local r sha out rc
+  r=$(make_repo watch)
+  git -C "$r" checkout -q main
+  printf 'watch line 1\nwatch line 2\n' > "$r/bin/fm-watch.sh"
+  git -C "$r" add bin/fm-watch.sh
+  git -C "$r" commit -q -m "upstream adds watch"
+  sha=$(git -C "$r" rev-parse HEAD)
+  git -C "$r" checkout -q fork/stage1-enforcement
+  printf 'watch line 1\n# fork hook\nwatch line 2\n' > "$r/bin/fm-watch.sh"
+  git -C "$r" add bin/fm-watch.sh
+  git -C "$r" commit -q -m "fork hooks watch"
+  out=$("$r/fork/bin/fm-fork-sync" prepare "$sha" --worktree "$TMP_ROOT/watch-wt" 2>&1); rc=$?
+  expect_code 3 "$rc" "a watch conflict must exit 3"$'\n'"$out"
+  assert_contains "$out" "hook file  bin/fm-watch.sh" "bin/fm-watch.sh must classify as a hook file, not a boundary violation"
+  pass "sync: a bin/fm-watch.sh conflict classifies as a hook file"
+}
+
 fork_run_tests
