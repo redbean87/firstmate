@@ -41,17 +41,21 @@
 //                  same adapter, so only a body that is not that evidence is
 //                  labelled pr-ready-advisory; failure evidence is labelled
 //                  pr-ready-error and never presented as a green pull request.
-//                  Of that failure evidence the host's own timed-out poll - its
-//                  invoke timer counts machine-sleep time, so a sleep longer
-//                  than the binding bound ends a healthy poll - is the one
-//                  result the silent seam accepts, recorded handled without a
-//                  wake (see isQuietPollTimeout below); every other result
+//                  The silent seam accepts exactly two contents: the host's own
+//                  timed-out poll - its invoke timer counts machine-sleep time,
+//                  so a sleep longer than the binding bound ends a healthy poll
+//                  (see isQuietPollTimeout below) - and a readiness capture
+//                  whose every advisory is already concluded by the time the
+//                  capture is read, so a moot advisory self-concludes instead
+//                  of presenting a wake (see decideSilent below, and
+//                  advisoriesConcluded in ./readiness.mjs); every other result
 //                  keeps its wake.
 //
-// The judgment - the readiness predicate, the one-shot readiness latch, and the
-// wake body - lives entirely in ./readiness.mjs, the documented seam. One result
-// carries every pull request that poll finds ready, never only the one that sorts
-// first, and a poll that finds only latched heads returns no-result.
+// The judgment - the readiness predicate, the one-shot readiness latch, the
+// wake body, and the self-conclusion of an already-captured advisory - lives
+// entirely in ./readiness.mjs, the documented seam. One result carries every
+// pull request that poll finds ready, never only the one that sorts first, and
+// a poll that finds only latched heads returns no-result.
 //
 // Adapter state. The latch marker is the only state this capability writes, and
 // it belongs to that seam: <home>/state/<id>.pr-green-ready, one per task,
@@ -74,7 +78,7 @@ import path from "node:path";
 import { decideWake, pruneReadinessMarkers } from "./readiness.mjs";
 
 const EXTENSION_ID = "org.firstmate.fork.pr-green";
-const EXTENSION_VERSION = "0.4.1";
+const EXTENSION_VERSION = "0.4.2";
 const MAX_INPUT_BYTES = 65536;
 const MAX_OUTPUT_BYTES = 30000;
 const MAX_RECORD_BYTES = 65536;
@@ -188,6 +192,42 @@ function isQuietPollTimeout(content) {
     && record.code === "timeout"
     && record.operation === "source.poll"
     && record.extension_id === EXTENSION_ID;
+}
+
+// decideSilent <input> -> boolean (never throws)
+//
+// The verdict the runner records instead of a wake for one captured result.
+// true needs positive proof, so every doubt keeps the ordinary wake - a wrong
+// silence could swallow a live advisory, while a wrong wake only costs a
+// wasted look (see the silent contract in fork/pr-green/README).
+//
+// Two contents are silent: the host's own timed-out poll (isQuietPollTimeout),
+// and a readiness capture whose every advisory is already concluded when the
+// capture is read - its task record state/<id>.meta gone, or its pull request
+// merged - proven only as ./readiness.mjs's advisoriesConcluded proves it.
+// The home that check needs comes from the config_ref the host attaches to
+// captured-result operations (the fork's HK7 block in bin/fm-extension.mjs);
+// without a usable reference, or from a seam revision that does not provide
+// the verdict (the delivery fixture's stub seam), this answers false, which is
+// the pre-existing wake behaviour and never a suppression.
+async function decideSilent(input) {
+  const content = input?.content;
+  if (isQuietPollTimeout(content)) return true;
+  if (typeof content !== "string" || content === "") return false;
+  let dirs;
+  try {
+    dirs = homeDirs(input?.config_ref);
+  } catch {
+    return false;
+  }
+  try {
+    const seam = await import("./readiness.mjs");
+    if (typeof seam.advisoriesConcluded !== "function") return false;
+    const ctx = { ...dirs, now: Date.now(), log };
+    return seam.advisoriesConcluded(content, ctx) === true;
+  } catch {
+    return false;
+  }
 }
 
 // An optional <home>/state/pr-green/poll-wait-ms (100-50000) shortens the long
@@ -451,11 +491,14 @@ if (verb === "handshake") {
 } else if (verb === "invoke" && request.operation === "result.silent") {
   // A readiness wake has no channel of its own: the runner publishes the
   // ordinary wake for that result sequence and re-announces it until Firstmate
-  // acknowledges that sequence. A later poll is a new sequence. The one
-  // exception is the host's own timeout evidence for this source: a poll the
-  // host stopped waiting for carried no readiness content, so it is recorded
-  // handled without a wake; the next launch re-runs the poll.
-  respond(request.request_id, { value: isQuietPollTimeout(request.input?.content) });
+  // acknowledges that sequence. A later poll is a new sequence. Exactly two
+  // contents record handled without a wake: the host's own timeout evidence
+  // for this source - a poll the host stopped waiting for carried no
+  // readiness content, so the next launch re-runs it - and a readiness
+  // capture whose task is already concluded by the time the capture is read,
+  // so a merge that lands between capture and read never resurrects a moot
+  // advisory (see decideSilent above).
+  respond(request.request_id, { value: await decideSilent(request.input) });
 } else {
   throw new Error("unsupported extension verb or operation");
 }

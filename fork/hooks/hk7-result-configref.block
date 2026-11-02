@@ -1,0 +1,3 @@
+    // >>> fork result-configref hook HK7 (fork/README; fork edit in this file)
+    input = { ...input, config_ref: `home:${home}` };
+    // <<< fork result-configref hook HK7

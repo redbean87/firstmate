@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm-fork-hook-check - prove the fork's six upstream integration points are
+# fm-fork-hook-check - prove the fork's seven upstream integration points are
 # present, unmodified, and at their lifecycle positions, and (with --base) that
 # no other upstream-owned file differs from upstream.
 #
@@ -40,10 +40,18 @@
 #     branch between the captain-call absorb and the surfacing else; the
 #     upstream names it reads exist in bin/fm-watch.sh,
 #     bin/fm-classify-lib.sh, or bin/fm-backend.sh.
-#   - No upstream-owned bin/ file other than the two launch-policy hook files
+#   - HK7 appears exactly once in bin/fm-extension.mjs, byte-identical to
+#     fork/hooks/hk7-result-configref.block, inside invokeProcessEvent's
+#     captured-result branch directly after upstream's input assignment, so a
+#     captured-result operation (result.classify, result.terminal,
+#     result.silent) carries the home reference an extension needs to judge a
+#     capture against its own task records; the upstream names it reads (the
+#     invokeProcessEvent home parameter, the captured input assignment) exist
+#     in that file.
+#   - No upstream-owned bin/ file other than the launch-policy hook files
 #     references fork code.
 #   - --base: `git diff <ref>` outside fork/ and the fork CI workflow touches
-#     only the three hooked files, and only by adding their canonical hook
+#     only the four hooked files, and only by adding their canonical hook
 #     blocks (every block the base lacks, in file order).
 # Prints one `ok:` or `FAIL:` line per check; exits 1 if any check fails.
 set -u
@@ -54,7 +62,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT=$(cd "${2:?--root needs a path}" && pwd); shift 2 ;;
     --base) BASE=${2:?--base needs a ref}; shift 2 ;;
-    -h|--help) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "fm-fork-hook-check: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -66,13 +74,15 @@ bad() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
 SPAWN="$ROOT/bin/fm-spawn.sh"
 CONTROL="$ROOT/bin/fm-control.sh"
 WATCH="$ROOT/bin/fm-watch.sh"
+EXTENSION="$ROOT/bin/fm-extension.mjs"
 HK1="$ROOT/fork/hooks/hk1-spawn.block"
 HK2="$ROOT/fork/hooks/hk2-control.block"
 HK3="$ROOT/fork/hooks/hk3-watch.block"
 HK4="$ROOT/fork/hooks/hk4-main-eligible.block"
 HK5="$ROOT/fork/hooks/hk5-resurface-successor.block"
 HK6="$ROOT/fork/hooks/hk6-parked-review.block"
-for f in "$SPAWN" "$CONTROL" "$WATCH" "$HK1" "$HK2" "$HK3" "$HK4" "$HK5" "$HK6"; do
+HK7="$ROOT/fork/hooks/hk7-result-configref.block"
+for f in "$SPAWN" "$CONTROL" "$WATCH" "$EXTENSION" "$HK1" "$HK2" "$HK3" "$HK4" "$HK5" "$HK6" "$HK7"; do
   [ -f "$f" ] || { bad "missing file ${f#"$ROOT"/}"; exit 1; }
 done
 
@@ -304,6 +314,34 @@ if find_block "$WATCH" "$HK6" HK6; then
   fi
 fi
 
+# --- HK7: bin/fm-extension.mjs captured-result config_ref --------------------
+if find_block "$EXTENSION" "$HK7" HK7; then
+  # Anchor: inside invokeProcessEvent's captured-result branch, directly after
+  # upstream's input assignment and before the branch ends, so exactly the
+  # captured-result operations (result.classify, result.terminal,
+  # result.silent) gain the home reference and no other invocation changes.
+  # shellcheck disable=SC2016 # literal upstream source line
+  fn=$(grep -nF 'async function invokeProcessEvent(home, adapter, operation, options) {' "$EXTENSION" | head -1 | cut -d: -f1)
+  # shellcheck disable=SC2016 # literal upstream source line
+  upstream_input=$(grep -nF 'input = { source_id: captured.sourceId, sequence: captured.sequence, content: captured.content };' "$EXTENSION" | head -1 | cut -d: -f1)
+  if [ -z "$fn" ] || [ -z "$upstream_input" ]; then
+    bad "HK7: an upstream anchor is gone (invokeProcessEvent or its captured input assignment); re-anchor the block"
+  elif [ "$BLOCK_BEGIN" -ne $(( upstream_input + 1 )) ]; then
+    bad "HK7: block must sit directly after the captured-result input assignment (line $upstream_input)"
+  elif [ "$BLOCK_BEGIN" -le "$fn" ]; then
+    bad "HK7: block must sit inside invokeProcessEvent (line $fn)"
+  elif [ "$(sed -n "$((BLOCK_END + 1))p" "$EXTENSION")" != "  }" ]; then
+    bad "HK7: block must sit directly before the end of the captured-result branch (line $((BLOCK_END + 1)))"
+  else
+    ok "HK7: inside invokeProcessEvent ($fn), after the captured input assignment ($upstream_input), before the branch end ($((BLOCK_END + 1)))"
+  fi
+  if [ -z "$fn" ]; then
+    bad "HK7: upstream invokeProcessEvent is not found; the block reads its home parameter"
+  else
+    ok "HK7: every upstream name the block reads exists"
+  fi
+fi
+
 # --- no other fork reference in upstream-owned bin/ ---------------------------
 others=$(grep -lE 'fork/bin/|FM_LP_[A-Z]' "$ROOT"/bin/* 2>/dev/null | grep -vxF -e "$SPAWN" -e "$CONTROL" || true)
 if [ -n "$others" ]; then
@@ -321,19 +359,19 @@ if [ -n "$BASE" ]; then
     outside=
     for f in $changed; do
       case "$f" in
-        bin/fm-control.sh|bin/fm-spawn.sh|bin/fm-watch.sh) ;;
+        bin/fm-control.sh|bin/fm-spawn.sh|bin/fm-watch.sh|bin/fm-extension.mjs) ;;
         *) outside="$outside $f" ;;
       esac
     done
     if [ -n "$outside" ]; then
-      bad "--base $BASE: upstream-owned files differing:${outside# } (expected only bin/fm-control.sh bin/fm-spawn.sh bin/fm-watch.sh)"
+      bad "--base $BASE: upstream-owned files differing:${outside# } (expected only bin/fm-control.sh bin/fm-spawn.sh bin/fm-watch.sh bin/fm-extension.mjs)"
     else
       # Each hooked file's added lines must be exactly the canonical blocks the
       # BASE copy lacks, concatenated in the working file's own order: a hook
       # the base already carries contributes nothing, and any added line
       # outside a missing block (or a block moved out of order) is extra.
       extra=
-      for file in bin/fm-spawn.sh bin/fm-control.sh bin/fm-watch.sh; do
+      for file in bin/fm-spawn.sh bin/fm-control.sh bin/fm-watch.sh bin/fm-extension.mjs; do
         printf '%s\n' "$changed" | grep -qxF -- "$file" || continue
         diff_out=$(git -C "$ROOT" diff -U0 "$BASE" -- "$file")
         deleted=$(printf '%s\n' "$diff_out" | grep -cE '^-([^-]|$)' || true)
@@ -344,6 +382,7 @@ if [ -n "$BASE" ]; then
             bin/fm-spawn.sh) set -- "$HK1" ;;
             bin/fm-control.sh) set -- "$HK2" ;;
             bin/fm-watch.sh) set -- "$HK4" "$HK5" "$HK3" "$HK6" ;;
+            bin/fm-extension.mjs) set -- "$HK7" ;;
           esac
           for block in "$@"; do
             begin=$(head -1 "$block")

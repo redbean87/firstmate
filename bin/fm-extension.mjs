@@ -1769,6 +1769,9 @@ async function invokeProcessEvent(home, adapter, operation, options) {
     if (!options["--result-file"]) fail("usage", `${operation} requires --result-file`);
     const captured = await readCapturedResult(home, options["--result-file"], operation, options);
     input = { source_id: captured.sourceId, sequence: captured.sequence, content: captured.content };
+    // >>> fork result-configref hook HK7 (fork/README; fork edit in this file)
+    input = { ...input, config_ref: `home:${home}` };
+    // <<< fork result-configref hook HK7
   }
   const requestId = options["--request-id"] || makeRequestId();
   if (!REQUEST_ID_RE.test(requestId)) fail("usage", "--request-id must be sha256:<64 lowercase hex>");

@@ -20,7 +20,11 @@ request GitHub never ran checks for. A head that is not provably mergeable
 repository has an active workflow that triggers on pull_request, now stay
 silent, because GitHub skips required and CI checks on a head that conflicts
 with its base - an all-green or empty rollup there is the artifact of checks
-that never ran, never evidence that they passed.
+that never ran, never evidence that they passed. Slice T5 made the wake
+moot-proof: a capture whose own task is already concluded by the time it is
+read - its pull request merged, or its task record gone - concludes itself
+instead of presenting a wake, so a task that finishes between capture and read
+never resurrects a finished advisory ("Event delivery and acknowledgement").
 
 It is fork-owned. Everything lives under fork/pr-green/, upstream code stays
 byte-identical, and it reaches Firstmate through the same documented
@@ -108,7 +112,9 @@ Files
   extension/readiness.mjs             the readiness seam. It is the whole of
                                       the adapter's judgment: the readiness
                                       predicate, the readiness latch and its
-                                      marker, and the advisory body.
+                                      marker, the advisory body, and the
+                                      self-conclusion of an already-captured
+                                      advisory.
   fork/bin/fm-pr-green-teardown       the fork-owned teardown path for readiness
                                       state: prune, drop one task's marker, or
                                       drop a whole home's markers, never touching
@@ -157,6 +163,20 @@ Files
                                       independence from merge notification, poll
                                       pruning, the teardown path, and the whole
                                       promise through the real host and runner.
+  fork/tests/fm-fork-pr-green-self-conclude.test.sh
+                                      the self-conclusion's own suite: a capture
+                                      for a merged pull request and a capture
+                                      whose task record is gone both recorded
+                                      handled with no wake through the real
+                                      host and runner, a merge landing between
+                                      capture and read concluding the capture at
+                                      read time, a live task's capture still
+                                      re-announcing until acknowledged, and the
+                                      side verdicts (live record, open or
+                                      unreadable pull request, missing home
+                                      reference, non-advisory content, and a
+                                      multi-advisory capture with one live
+                                      task) all keeping their wake.
 
 
 The readiness seam
@@ -175,6 +195,13 @@ part of the package can quietly acquire an opinion about a pull request:
   poll (see "One wake per head: the latch"), a stderr logger, and
   evaluateCount: how many entries that poll offers the seam, which is what the
   poll's one read budget is split across.
+
+The seam answers one further question, for a readiness advisory that has
+already been captured: advisoriesConcluded(content, ctx) -> boolean, the
+self-conclusion behind the silent verdict under "Event delivery and
+acknowledgement". It reads only - no marker, no record, no handled file - and
+answers false for every doubt; readiness.mjs's header is the single owner of
+its contract.
 
 A wake is produced only when all of this holds at once:
 
@@ -385,17 +412,35 @@ The path is the one the fork tests already drive with a stub seam:
               merge or an approval.
   terminal    no. The source never concludes itself, so it keeps listening for
               the next pull request.
-  silent      only for the host's own timeout evidence on this source: a
-              captured firstmate.process-event-extension-error.v1 record with
+  silent      exactly two contents are recorded handled without a wake:
+              (1) the host's own timeout evidence on this source: a captured
+              firstmate.process-event-extension-error.v1 record with
               code timeout and operation source.poll under this extension's id
               is a poll the host stopped waiting for - its invoke timer counts
               time the machine spends asleep - so there is no readiness content
-              to wake about, and it is recorded handled without a wake (0.4.1).
-              That absorb is safe because the source is advisory by
-              construction, a lost poll is re-run by the next launch, and the
-              readiness latch can only repeat a wake, never swallow one.
-              Every other result - a readiness advisory, a non-timeout host
-              failure, or a timeout naming another operation - keeps its wake
+              to wake about (0.4.1);
+              (2) a readiness capture whose every advisory is already
+              concluded when the capture is read: each advisory's task record
+              state/<id>.meta is gone, or its pull request reads MERGED at the
+              forge (0.4.2). The question is asked at read time, never cached
+              at capture time, so a task that concludes between capture and
+              read - a merge that lands in that window - never resurrects a
+              moot advisory.
+              Both absorbs are safe because the source is advisory by
+              construction: a lost poll is re-run by the next launch, the
+              self-conclusion demands positive proof and never guesses (a live
+              task, an open or closed pull request, an unreadable forge answer,
+              a missing or unusable home reference, or a capture with any
+              non-advisory line all keep the wake), a capture with several
+              advisories concludes only when every one of them does, so a
+              still-live task keeps the whole capture announced, and the
+              readiness latch can only repeat a wake, never swallow one. The
+              verdict reads the home the host attaches to captured-result
+              operations (HK7 in bin/fm-extension.mjs); without it the capture
+              keeps its wake, exactly as before.
+              Every other result - a readiness advisory for a live task, a
+              non-timeout host failure, or a timeout naming another operation
+              - keeps its wake
               and is re-announced until firstmate acknowledges it, so a single
               wake is never lost to a missed turn. That retry is per result
               sequence, not per pull request.
