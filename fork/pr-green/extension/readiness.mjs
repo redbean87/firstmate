@@ -28,6 +28,15 @@
 //          total for the poll and is split across those entries.
 //   returns null, which is silence, or {advisory: "<wake body>"}.
 //
+// advisoriesConcluded(content, ctx)
+//   the self-conclusion verdict behind the adapter's result.silent for a
+//   readiness capture: true only when every advisory already captured is
+//   concluded by the time the capture is read - its task record gone or its
+//   pull request merged - so the runner records the capture handled instead
+//   of presenting a moot wake. It reads only, proves a conclusion positively,
+//   and answers false for every doubt; its own comment below owns the full
+//   contract.
+//
 // The predicate. A wake is produced only when every one of these holds:
 //
 //   open       the live pull request state is OPEN and isDraft is exactly false;
@@ -1177,5 +1186,106 @@ export function decideWake(entry, ctx) {
       // A logger that fails must not change the verdict either.
     }
     return null;
+  }
+}
+
+// --- capture self-conclusion ------------------------------------------------
+//
+// advisoriesConcluded <content> <ctx> -> boolean (never throws)
+//
+// The judgment behind the adapter's result.silent verdict for a READINESS
+// capture: true only when the capture carries at least one advisory and every
+// advisory in it is already concluded at the moment the capture is read, so
+// the runner records the capture handled instead of presenting a wake that is
+// moot by then. The question is asked at read time, never cached at capture
+// time, so a merge that lands between capture and read concludes the capture
+// too.
+//
+// The content is read line by line: every non-empty line must be one full
+// advisory line this seam produces (advisoryBody's first sentence). A capture
+// with no advisory line, or any line that does not parse, is never concluded -
+// a host failure record, a malformed body, and any foreign content keep their
+// wake exactly as before.
+//
+// One advisory is concluded only with positive proof, in this order:
+//
+//   record    the task record state/<id>.meta is gone (ENOENT). An existing
+//             record - of any kind or condition - keeps the forge question,
+//             because a cleaned-up task and a merged pull request are two
+//             independent conclusions and either alone is enough.
+//   merged    the pull request itself reads state MERGED at the forge,
+//             through the same bounded view as the readiness predicate (the
+//             same config/pr-green-gh, timeouts, and read budget). OPEN,
+//             CLOSED, an unreadable or partial answer, a missing or unusable
+//             gh, and a read that runs out of budget are all "not proven",
+//             never a conclusion.
+//
+// A capture concludes only when EVERY advisory in it concludes: one
+// still-live task keeps the whole capture announced, so a live advisory can
+// never be lost behind a concluded neighbour, and the wake then carries every
+// line exactly as it does today. The failure direction of this verdict is
+// therefore always the ordinary wake - doubt never suppresses, because the
+// latch can only repeat a wake while a wrong silence here could swallow one.
+//
+// ctx is the shape decideWake takes ({home, stateDir, configDir, now, log}),
+// with evaluateCount set here for the read budget split. This function reads
+// only: it writes no latch marker, records nothing handled, and changes no
+// task record - the runner owns recording the capture handled when this
+// answers true.
+
+// advisoryBody's first sentence, parsed back: task id, the recorded pull
+// request URL, and that URL's host for GH_HOST. The URL shape mirrors the
+// adapter's own pull-request gate, so a body this line cannot parse is never
+// a conclusion.
+const ADVISORY_LINE = /^PR READINESS \(advisory\): ([A-Za-z0-9][A-Za-z0-9._-]{0,63}) (https:\/\/([a-z0-9.-]{1,253})\/([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9-]{0,37}[A-Za-z0-9])\/([A-Za-z0-9._-]{1,100})\/pull\/[1-9][0-9]*) at head (?:[0-9a-f]{40}|[0-9a-f]{64})\./;
+
+// entryConcluded <ctx> <entry> -> boolean
+//
+// A concluded record ends the question; a record that still exists in any
+// condition falls through to the forge proof.
+function entryConcluded(ctx, entry) {
+  try {
+    fs.lstatSync(path.join(ctx.stateDir, `${entry.id}.meta`));
+  } catch (error) {
+    return Boolean(error && error.code === "ENOENT");
+  }
+  return pullMerged(ctx, entry);
+}
+
+// pullMerged <ctx> <entry> -> boolean
+//
+// Positive proof only: the pull request reads state MERGED through the same
+// bounded forge view the readiness predicate uses. Any doubt answers false.
+function pullMerged(ctx, entry) {
+  const reader = forgeReader(entry, ctx);
+  if (reader === null) return false;
+  const view = reader.view();
+  if (view === null || typeof view !== "object" || Array.isArray(view)) return false;
+  return view.state === "MERGED";
+}
+
+export function advisoriesConcluded(content, ctx) {
+  try {
+    const entries = [];
+    for (const line of String(content).split("\n")) {
+      if (line.trim() === "") continue;
+      const match = ADVISORY_LINE.exec(line);
+      if (match === null) return false;
+      entries.push({ id: match[1], pr: match[2], host: match[3] });
+    }
+    if (entries.length === 0) return false;
+    const readCtx = { ...ctx, evaluateCount: entries.length };
+    for (const entry of entries) {
+      if (!entryConcluded(readCtx, entry)) return false;
+    }
+    try {
+      ctx.log(`pr-green: self-concluded ${entries.map((entry) => entry.id).join(" ")}`);
+    } catch {
+      // A logger that fails must not change the verdict either.
+    }
+    return true;
+  } catch {
+    // A throw is not proof: any doubt keeps the ordinary wake.
+    return false;
   }
 }
