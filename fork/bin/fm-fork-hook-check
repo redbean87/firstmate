@@ -19,20 +19,20 @@
 #     fork/hooks/hk3-watch.block, inside resurface_after_downtime() after the
 #     ordinary branch's fi and directly before the trailing wake, so both the
 #     ordinary branch and the WATCHER_RECOVERY_PENDING=1 fall-through reach
-#     the guard before the wake; it keeps upstream's own
-#     handling_successor_has_queued_row gate and adds
-#     fork_main_eligible_queued_row, and both helpers exist before the
-#     function.
+#     the guard before the wake; it calls fork_main_eligible_queued_row, which
+#     must exist before the function. (Upstream's own queue gate on this path,
+#     handling_successor_has_queued_row, was removed upstream; the main-eligible
+#     count is a stricter, fresh read of the same queue.)
 #   - HK4 appears exactly once in bin/fm-watch.sh, byte-identical to
-#     fork/hooks/hk4-main-eligible.block, after upstream's
-#     handling_successor_has_queued_row definition and before
+#     fork/hooks/hk4-main-eligible.block, directly before
 #     resurface_after_downtime(); it defines fork_main_eligible_queued_row on
 #     upstream's fm_wake_actor_pending_count, which bin/fm-wake-lib.sh defines
 #     and bin/fm-watch.sh reaches through its fm-push-transition-lib.sh source.
 #   - HK5 appears exactly once in bin/fm-watch.sh, byte-identical to
 #     fork/hooks/hk5-resurface-successor.block, inside the
 #     FM_WATCH_HANDLING_SUCCESSOR branch of resurface_after_downtime() between
-#     upstream's own queue gate and that branch's trailing wake - the site the
+#     upstream's own queue gate (the FM_RECOVERY_MARKER_QUEUED check) and that
+#     branch's trailing wake - the site the
 #     Pi extension's post-wake successor arms actually reach - and after HK4's
 #     definition.
 #   - HK6 appears exactly once in bin/fm-watch.sh, byte-identical to
@@ -54,7 +54,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT=$(cd "${2:?--root needs a path}" && pwd); shift 2 ;;
     --base) BASE=${2:?--base needs a ref}; shift 2 ;;
-    -h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "fm-fork-hook-check: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -207,40 +207,28 @@ if find_block "$WATCH" "$HK3" HK3; then
   else
     ok "HK3: inside resurface_after_downtime(), after the recover check ($recover_line) and the branch fi ($((BLOCK_BEGIN - 1))), before the trailing wake ($((BLOCK_END + 1)))"
   fi
-  helper=$(grep -nE '^handling_successor_has_queued_row\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
   fork_helper=$(grep -nxF 'fork_main_eligible_queued_row() {' "$WATCH" | head -1 | cut -d: -f1)
-  if [ -z "$helper" ]; then
-    bad "HK3: upstream helper handling_successor_has_queued_row() not found; the block calls it"
-  elif [ -n "$fn_start" ] && [ "$helper" -ge "$fn_start" ]; then
-    bad "HK3: handling_successor_has_queued_row must be defined before resurface_after_downtime() (line $helper)"
-  elif [ -z "$fork_helper" ]; then
+  if [ -z "$fork_helper" ]; then
     bad "HK3: fork helper fork_main_eligible_queued_row() not found; the block calls it (HK4 defines it)"
   elif [ -n "$fn_start" ] && [ "$fork_helper" -ge "$fn_start" ]; then
     bad "HK3: fork_main_eligible_queued_row must be defined before resurface_after_downtime() (line $fork_helper)"
   else
-    ok "HK3: both guards the block calls exist before resurface_after_downtime() (lines $helper, $fork_helper)"
+    ok "HK3: the guard the block calls exists before resurface_after_downtime() (line $fork_helper)"
   fi
 fi
 
 # --- HK4: bin/fm-watch.sh main-eligible guard definition ---------------------
 if find_block "$WATCH" "$HK4" HK4; then
-  upstream_helper=$(grep -nE '^handling_successor_has_queued_row\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
-  upstream_helper_end=
-  if [ -n "$upstream_helper" ]; then
-    upstream_helper_end=$(awk -v s="$upstream_helper" 'NR > s && /^}/ { print NR; exit }' "$WATCH")
-  fi
   fn_start=$(grep -nE '^resurface_after_downtime\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
-  if [ -z "$upstream_helper_end" ] || [ -z "$fn_start" ]; then
-    bad "HK4: an upstream anchor is gone (handling_successor_has_queued_row's definition or resurface_after_downtime); re-anchor the block"
-  elif [ "$BLOCK_BEGIN" -le "$upstream_helper_end" ]; then
-    bad "HK4: block must sit after upstream's handling_successor_has_queued_row definition (ends line $upstream_helper_end)"
-  elif [ "$BLOCK_END" -ge "$fn_start" ]; then
-    bad "HK4: block must sit before resurface_after_downtime() (line $fn_start), whose guards call it"
+  if [ -z "$fn_start" ]; then
+    bad "HK4: upstream anchor resurface_after_downtime() is gone; re-anchor the block"
+  elif [ "$BLOCK_END" -ne $(( fn_start - 1 )) ]; then
+    bad "HK4: block must sit directly before resurface_after_downtime() (line $fn_start), whose guards call it"
   elif ! grep -qxF 'fork_main_eligible_queued_row() {' "$HK4" \
     || ! grep -q 'fm_wake_actor_pending_count main' "$HK4"; then
     bad "HK4: the block must define fork_main_eligible_queued_row on fm_wake_actor_pending_count main"
   else
-    ok "HK4: after upstream's helper definition ($upstream_helper_end), before resurface_after_downtime() ($fn_start), defining the main-eligible guard"
+    ok "HK4: directly before resurface_after_downtime() ($fn_start), defining the main-eligible guard"
     HK4_BLOCK_END=$BLOCK_END
   fi
   if ! grep -qE '^fm_wake_actor_pending_count\(\)' "$ROOT/bin/fm-wake-lib.sh"; then
@@ -260,10 +248,10 @@ if find_block "$WATCH" "$HK5" HK5; then
   if [ -n "$fn_start" ]; then
     fn_end=$(awk -v s="$fn_start" 'NR > s && /^}/ { print NR; exit }' "$WATCH")
   fi
-  # The branch's own upstream gate: four-space indent, so HK3's two-space copy
-  # of the same line cannot satisfy it.
+  # The branch's own upstream gate (four-space indent, inside the
+  # handling-successor branch).
   # shellcheck disable=SC2016 # literal upstream source line
-  upstream_gate=$(grep -nxF -- '    handling_successor_has_queued_row || return 0' "$WATCH" | head -1 | cut -d: -f1)
+  upstream_gate=$(grep -nxF -- '    [ "$FM_RECOVERY_MARKER_QUEUED" = 1 ] || return 0' "$WATCH" | head -1 | cut -d: -f1)
   # shellcheck disable=SC2016 # literal upstream source line
   branch_wake=$(grep -nxF -- '    wake "check: rearm-resurface"' "$WATCH" | head -1 | cut -d: -f1)
   if [ -z "$fn_start" ] || [ -z "$fn_end" ]; then

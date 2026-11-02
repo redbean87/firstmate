@@ -119,12 +119,13 @@ The hook points
   HK3  bin/fm-watch.sh, inside resurface_after_downtime() after the ordinary
        branch's fi and immediately before the trailing wake - the one point
        both that branch and the WATCHER_RECOVERY_PENDING=1 fall-through cross.
-       It keeps upstream's own handling_successor_has_queued_row gate and adds
-       fork_main_eligible_queued_row, so only a row MAIN would receive wakes
-       main; an episode whose rows all belong to the supervision branch's live
-       grant no longer costs main an empty "watching resumed" turn.
-  HK4  bin/fm-watch.sh, after upstream's handling_successor_has_queued_row
-       definition and before resurface_after_downtime(): defines
+       It calls fork_main_eligible_queued_row, so only a row MAIN would
+       receive wakes main (upstream removed its own queue gate on this path
+       in the 2026-11-02 sync; the main-eligible count reads the queue
+       freshly and is a stricter test of the same thing); an episode whose
+       rows all belong to the supervision branch's live grant no longer
+       costs main an empty "watching resumed" turn.
+  HK4  bin/fm-watch.sh, directly before resurface_after_downtime(): defines
        fork_main_eligible_queued_row on upstream's fm_wake_actor_pending_count
        (bin/fm-wake-lib.sh), the same main-eligible filter the drain applies.
   HK5  bin/fm-watch.sh, inside resurface_after_downtime()'s
@@ -158,8 +159,7 @@ The launch-policy blocks read these upstream names: in fm-spawn.sh ID KIND
 PROJ_ABS HARNESS MODEL EFFORT RELAUNCH RAW_LAUNCH LAUNCH STATE DATA CONFIG
 FM_HOME FM_ROOT; in fm-control.sh TARGET_HARNESS TARGET_MODEL TARGET_EFFORT
 META KIND STATE DATA FM_HOME FM_ROOT, fm_meta_get, die. The watch hooks read
-only upstream names: HK3 and HK5 call upstream's
-handling_successor_has_queued_row plus the HK4 block's
+only upstream names: HK3 and HK5 call the HK4 block's
 fork_main_eligible_queued_row, HK4 reads fm_wake_actor_pending_count
 (bin/fm-wake-lib.sh, reached through fm-push-transition-lib.sh), and HK6 reads
 last_status_line and status_line_verb (bin/fm-classify-lib.sh), fm_meta_get
