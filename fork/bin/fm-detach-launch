@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# fm-detach-launch - start a long-running command detached from the caller's
+# working directory, pinned into a directory the caller proves outside every
+# root bin/fm-teardown.sh reaps.
+#
+# Usage:
+#   fm-detach-launch --cwd <dir> [--state <state-dir>] [--log <file>] -- <command> [args...]
+#   fm-detach-launch --help
+#
+# Why: fm-teardown.sh reaps a finished task's leftover processes by matching
+# each process's CURRENT WORKING DIRECTORY against the task's own worktree and
+# its task temp directory (reap_task_worktree_processes -> task_pids_under_roots
+# -> pids_with_cwd_under over "$WT" "$TASK_TMP"). A service a recipe launches
+# with `nohup ... &` while the shell stands in the worktree inherits that
+# worktree as its working directory, so cleanup kills the deliberately detached
+# service even though leaving it running was the deliberate action (the
+# 2026-11-01 ChatGPT bridge incident: consultations went down with the very
+# task that had just relaunched them). This helper launches from an explicit
+# --cwd instead - it never inherits the caller's directory - and refuses a
+# directory it cannot prove outside those roots:
+#
+#   - a directory inside a linked git worktree (a non-directory `.git` marker
+#     whose gitdir points into a `.git/worktrees/` checkout - the shape of
+#     every reaped worktree: treehouse pool slots and secondmate homes alike;
+#     an unreadable marker is refused too rather than passed; a plain clone
+#     with a `.git` directory is allowed, because primary checkouts are never
+#     reaped and the daemon directories recipes pin live in plain clones);
+#   - when FM_TASK_ID is set (a worker's environment), the launching task's
+#     own task temp root /tmp/fm-<id> (both sides resolved physically, so a
+#     macOS /tmp symlink still matches) and, when --state names the state root
+#     and <id>.meta records them, that task's recorded worktree= and tasktmp= -
+#     the exact records the reaper reads. An id that is not a plain task id is
+#     never interpolated into a path, and a missing record contributes no root
+#     (the structural check above still applies).
+#
+# On success the launched pid is printed on stdout and nothing else, after the
+# child's stdout and stderr are redirected to <logfile> (truncated at launch;
+# /dev/null when --log is omitted) and its stdin to /dev/null, so a caller that
+# captures the pid in $(...) never blocks on the child. A relative --log is
+# resolved against the invoking directory before the launch cd. The launch runs
+# under nohup. Every refusal and launch failure prints one
+# `fm-detach-launch:` line on stderr and exits 1 without launching anything;
+# usage errors exit 2.
+set -u
+
+usage() {
+  printf 'usage: fm-detach-launch --cwd <dir> [--state <state-dir>] [--log <file>] -- <command> [args...]\n' >&2
+  printf '       fm-detach-launch --help\n' >&2
+}
+
+die() { # <message> [code]
+  printf 'fm-detach-launch: %s\n' "$1" >&2
+  exit "${2:-1}"
+}
+
+under_root() { # <resolved-root>: succeed when $phys equals it or lies under it
+  case "$phys" in
+    "$1"|"$1"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+case "${1:-}" in
+  -h|--help)
+    sed -n '2,/^set -u/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^set -u/d' >&2
+    exit 0
+    ;;
+esac
+
+CWD_ARG=
+STATE_DIR=
+LOG=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --cwd) [ $# -ge 2 ] || die "--cwd needs a directory" 2; CWD_ARG=$2; shift 2 ;;
+    --state) [ $# -ge 2 ] || die "--state needs a directory" 2; STATE_DIR=$2; shift 2 ;;
+    --log) [ $# -ge 2 ] || die "--log needs a file" 2; LOG=$2; shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+[ -n "$CWD_ARG" ] || { usage; die "--cwd is required; this helper never inherits the caller's working directory" 2; }
+[ $# -gt 0 ] || { usage; die "missing <command> to launch" 2; }
+
+phys=$(CDPATH='' cd -- "$CWD_ARG" 2>/dev/null && pwd -P) ||
+  die "launch directory not found: $CWD_ARG"
+
+# Structural root check: refuse any linked git worktree on the way up, which is
+# the shape of every worktree fm-teardown.sh reaps (treehouse pool slots and
+# secondmate homes). A `.git` directory (a plain clone, e.g. the bridge's own
+# daemon directory) is allowed and the walk keeps going, so a clone nested
+# inside a worktree is still caught at the worktree root above it.
+probe=$phys
+while :; do
+  if [ -f "$probe/.git" ]; then
+    grep -q 'worktrees/' "$probe/.git" 2>/dev/null
+    gitfile_rc=$?
+    case "$gitfile_rc" in
+      0) die "refusing to launch in $phys: it is inside the git worktree $probe, which task cleanup reaps by working directory" ;;
+      2) die "refusing to launch in $phys: cannot read $probe/.git to prove it is not a task worktree" ;;
+    esac
+  fi
+  [ "$probe" = / ] && break
+  probe=${probe%/*}
+  [ -n "$probe" ] || probe=/
+done
+
+# Task-context root check: in a worker's environment FM_TASK_ID names the task
+# whose cleanup must not reach this service, so that task's own roots are
+# refused exactly - the derived /tmp/fm-<id> temp root plus whatever the task
+# record (worktree=, tasktmp=) says, i.e. the same records the reaper reads.
+if [ -n "${FM_TASK_ID:-}" ]; then
+  case "$FM_TASK_ID" in
+    *[!A-Za-z0-9._-]*)
+      # Not a plain task id: never build a filesystem path from it. The
+      # structural check above has already run.
+      : ;;
+    *)
+      task_tmp_phys=$(CDPATH='' cd -- "/tmp/fm-$FM_TASK_ID" 2>/dev/null && pwd -P) || task_tmp_phys=
+      if [ -n "$task_tmp_phys" ] && under_root "$task_tmp_phys"; then
+        die "refusing to launch in $phys: it is inside task $FM_TASK_ID's task temp root $task_tmp_phys, which task cleanup reaps by working directory"
+      fi
+      if [ -n "$STATE_DIR" ] && [ -f "$STATE_DIR/$FM_TASK_ID.meta" ]; then
+        for root_key in worktree tasktmp; do
+          root_rec=$(sed -n "s/^$root_key=//p" "$STATE_DIR/$FM_TASK_ID.meta" | head -n 1)
+          [ -n "$root_rec" ] || continue
+          root_phys=$(CDPATH='' cd -- "$root_rec" 2>/dev/null && pwd -P) || continue
+          if under_root "$root_phys"; then
+            die "refusing to launch in $phys: it is inside task $FM_TASK_ID's recorded $root_key root $root_phys, which task cleanup reaps by working directory"
+          fi
+        done
+      fi
+      ;;
+  esac
+fi
+
+command -v nohup >/dev/null 2>&1 ||
+  die "nohup is not available; cannot launch a detached process"
+
+if [ -n "$LOG" ]; then
+  : >"$LOG" 2>/dev/null ||
+    die "cannot write log file: $LOG"
+  log_abs=$(CDPATH='' cd -- "$(dirname -- "$LOG")" && pwd -P)/$(basename -- "$LOG") ||
+    die "cannot resolve log file: $LOG"
+  LOG=$log_abs
+fi
+
+cd -- "$phys" || die "cannot enter launch directory: $phys"
+if [ -n "$LOG" ]; then
+  nohup "$@" >>"$LOG" 2>&1 </dev/null &
+else
+  nohup "$@" >/dev/null 2>&1 </dev/null &
+fi
+printf '%s\n' "$!"

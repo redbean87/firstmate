@@ -156,6 +156,7 @@ set -u
 
 LIBDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 FM_BIN=$(cd "$LIBDIR/../../bin" && pwd)
+DETACH="$LIBDIR/../bin/fm-detach-launch"
 # shellcheck source=fork/chatgpt/fm-chatgpt-bridge-lib.sh
 . "$LIBDIR/fm-chatgpt-bridge-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
@@ -1331,7 +1332,7 @@ cmd_bridge_start() {
     printf 'fm-chatgpt-loop: a bridge is already reachable; start refuses to take ownership of a foreign instance (stop only stops what start started)\n' >&2
     return 1
   fi
-  local dir cli
+  local dir cli bridge_pid
   dir=$(bridge_daemon_dir)
   [ -d "$dir" ] || { printf 'fm-chatgpt-loop: bridge daemon not found at %s; install it externally first\n' "$dir" >&2; return 1; }
   if [ -x "$dir/bin/codex-chatgpt-web" ]; then
@@ -1344,10 +1345,13 @@ cmd_bridge_start() {
   fi
   # Visible browser by default: never force headless operation here.
   mkdir -p "$STATE" || return 1
+  # Detach through the fork helper so the daemon's working directory is its own
+  # directory, never the invoking shell's: task cleanup reaps by cwd and would
+  # otherwise kill a bridge this recipe deliberately leaves running.
   # shellcheck disable=SC2086
-  nohup $cli serve >"$STATE/chatgpt-loop-bridge.log" 2>&1 &
-  printf '%s\n' "$!" > "$BRIDGE_PID_FILE"
-  printf 'bridge starting (pid %s, log %s/chatgpt-loop-bridge.log)\n' "$!" "$STATE"
+  bridge_pid=$("$DETACH" --cwd "$dir" --state "$STATE" --log "$STATE/chatgpt-loop-bridge.log" -- $cli serve) || return 1
+  printf '%s\n' "$bridge_pid" > "$BRIDGE_PID_FILE"
+  printf 'bridge starting (pid %s, log %s/chatgpt-loop-bridge.log)\n' "$bridge_pid" "$STATE"
 }
 
 cmd_bridge_stop() {
