@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm-fork-hook-check - prove the fork's three upstream integration points are
+# fm-fork-hook-check - prove the fork's six upstream integration points are
 # present, unmodified, and at their lifecycle positions, and (with --base) that
 # no other upstream-owned file differs from upstream.
 #
@@ -19,13 +19,32 @@
 #     fork/hooks/hk3-watch.block, inside resurface_after_downtime() after the
 #     ordinary branch's fi and directly before the trailing wake, so both the
 #     ordinary branch and the WATCHER_RECOVERY_PENDING=1 fall-through reach
-#     the guard before the wake; the upstream helper the block calls,
-#     handling_successor_has_queued_row, exists and is defined before the
+#     the guard before the wake; it keeps upstream's own
+#     handling_successor_has_queued_row gate and adds
+#     fork_main_eligible_queued_row, and both helpers exist before the
 #     function.
+#   - HK4 appears exactly once in bin/fm-watch.sh, byte-identical to
+#     fork/hooks/hk4-main-eligible.block, after upstream's
+#     handling_successor_has_queued_row definition and before
+#     resurface_after_downtime(); it defines fork_main_eligible_queued_row on
+#     upstream's fm_wake_actor_pending_count, which bin/fm-wake-lib.sh defines
+#     and bin/fm-watch.sh reaches through its fm-push-transition-lib.sh source.
+#   - HK5 appears exactly once in bin/fm-watch.sh, byte-identical to
+#     fork/hooks/hk5-resurface-successor.block, inside the
+#     FM_WATCH_HANDLING_SUCCESSOR branch of resurface_after_downtime() between
+#     upstream's own queue gate and that branch's trailing wake - the site the
+#     Pi extension's post-wake successor arms actually reach - and after HK4's
+#     definition.
+#   - HK6 appears exactly once in bin/fm-watch.sh, byte-identical to
+#     fork/hooks/hk6-parked-review.block, inside the terminal-status stale
+#     branch between the captain-call absorb and the surfacing else; the
+#     upstream names it reads exist in bin/fm-watch.sh,
+#     bin/fm-classify-lib.sh, or bin/fm-backend.sh.
 #   - No upstream-owned bin/ file other than the two launch-policy hook files
 #     references fork code.
 #   - --base: `git diff <ref>` outside fork/ and the fork CI workflow touches
-#     only the three hooked files, and only by adding exactly the three blocks.
+#     only the three hooked files, and only by adding their canonical hook
+#     blocks (every block the base lacks, in file order).
 # Prints one `ok:` or `FAIL:` line per check; exits 1 if any check fails.
 set -u
 
@@ -35,7 +54,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT=$(cd "${2:?--root needs a path}" && pwd); shift 2 ;;
     --base) BASE=${2:?--base needs a ref}; shift 2 ;;
-    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "fm-fork-hook-check: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -50,7 +69,10 @@ WATCH="$ROOT/bin/fm-watch.sh"
 HK1="$ROOT/fork/hooks/hk1-spawn.block"
 HK2="$ROOT/fork/hooks/hk2-control.block"
 HK3="$ROOT/fork/hooks/hk3-watch.block"
-for f in "$SPAWN" "$CONTROL" "$WATCH" "$HK1" "$HK2" "$HK3"; do
+HK4="$ROOT/fork/hooks/hk4-main-eligible.block"
+HK5="$ROOT/fork/hooks/hk5-resurface-successor.block"
+HK6="$ROOT/fork/hooks/hk6-parked-review.block"
+for f in "$SPAWN" "$CONTROL" "$WATCH" "$HK1" "$HK2" "$HK3" "$HK4" "$HK5" "$HK6"; do
   [ -f "$f" ] || { bad "missing file ${f#"$ROOT"/}"; exit 1; }
 done
 
@@ -186,12 +208,111 @@ if find_block "$WATCH" "$HK3" HK3; then
     ok "HK3: inside resurface_after_downtime(), after the recover check ($recover_line) and the branch fi ($((BLOCK_BEGIN - 1))), before the trailing wake ($((BLOCK_END + 1)))"
   fi
   helper=$(grep -nE '^handling_successor_has_queued_row\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
+  fork_helper=$(grep -nxF 'fork_main_eligible_queued_row() {' "$WATCH" | head -1 | cut -d: -f1)
   if [ -z "$helper" ]; then
     bad "HK3: upstream helper handling_successor_has_queued_row() not found; the block calls it"
   elif [ -n "$fn_start" ] && [ "$helper" -ge "$fn_start" ]; then
     bad "HK3: handling_successor_has_queued_row must be defined before resurface_after_downtime() (line $helper)"
+  elif [ -z "$fork_helper" ]; then
+    bad "HK3: fork helper fork_main_eligible_queued_row() not found; the block calls it (HK4 defines it)"
+  elif [ -n "$fn_start" ] && [ "$fork_helper" -ge "$fn_start" ]; then
+    bad "HK3: fork_main_eligible_queued_row must be defined before resurface_after_downtime() (line $fork_helper)"
   else
-    ok "HK3: the helper the block calls exists before resurface_after_downtime() (line $helper)"
+    ok "HK3: both guards the block calls exist before resurface_after_downtime() (lines $helper, $fork_helper)"
+  fi
+fi
+
+# --- HK4: bin/fm-watch.sh main-eligible guard definition ---------------------
+if find_block "$WATCH" "$HK4" HK4; then
+  upstream_helper=$(grep -nE '^handling_successor_has_queued_row\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
+  upstream_helper_end=
+  if [ -n "$upstream_helper" ]; then
+    upstream_helper_end=$(awk -v s="$upstream_helper" 'NR > s && /^}/ { print NR; exit }' "$WATCH")
+  fi
+  fn_start=$(grep -nE '^resurface_after_downtime\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
+  if [ -z "$upstream_helper_end" ] || [ -z "$fn_start" ]; then
+    bad "HK4: an upstream anchor is gone (handling_successor_has_queued_row's definition or resurface_after_downtime); re-anchor the block"
+  elif [ "$BLOCK_BEGIN" -le "$upstream_helper_end" ]; then
+    bad "HK4: block must sit after upstream's handling_successor_has_queued_row definition (ends line $upstream_helper_end)"
+  elif [ "$BLOCK_END" -ge "$fn_start" ]; then
+    bad "HK4: block must sit before resurface_after_downtime() (line $fn_start), whose guards call it"
+  elif ! grep -qxF 'fork_main_eligible_queued_row() {' "$HK4" \
+    || ! grep -q 'fm_wake_actor_pending_count main' "$HK4"; then
+    bad "HK4: the block must define fork_main_eligible_queued_row on fm_wake_actor_pending_count main"
+  else
+    ok "HK4: after upstream's helper definition ($upstream_helper_end), before resurface_after_downtime() ($fn_start), defining the main-eligible guard"
+    HK4_BLOCK_END=$BLOCK_END
+  fi
+  if ! grep -qE '^fm_wake_actor_pending_count\(\)' "$ROOT/bin/fm-wake-lib.sh"; then
+    bad "HK4: upstream fm_wake_actor_pending_count() not found in bin/fm-wake-lib.sh"
+  elif ! grep -q 'fm-wake-lib.sh' "$ROOT/bin/fm-push-transition-lib.sh" \
+    || ! grep -q 'fm-push-transition-lib.sh' "$WATCH"; then
+    bad "HK4: bin/fm-watch.sh no longer reaches bin/fm-wake-lib.sh through fm-push-transition-lib.sh"
+  else
+    ok "HK4: the filter it calls is defined upstream and reachable from bin/fm-watch.sh"
+  fi
+fi
+
+# --- HK5: bin/fm-watch.sh handling-successor resurface guard -----------------
+if find_block "$WATCH" "$HK5" HK5; then
+  fn_start=$(grep -nE '^resurface_after_downtime\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
+  fn_end=
+  if [ -n "$fn_start" ]; then
+    fn_end=$(awk -v s="$fn_start" 'NR > s && /^}/ { print NR; exit }' "$WATCH")
+  fi
+  # The branch's own upstream gate: four-space indent, so HK3's two-space copy
+  # of the same line cannot satisfy it.
+  # shellcheck disable=SC2016 # literal upstream source line
+  upstream_gate=$(grep -nxF -- '    handling_successor_has_queued_row || return 0' "$WATCH" | head -1 | cut -d: -f1)
+  # shellcheck disable=SC2016 # literal upstream source line
+  branch_wake=$(grep -nxF -- '    wake "check: rearm-resurface"' "$WATCH" | head -1 | cut -d: -f1)
+  if [ -z "$fn_start" ] || [ -z "$fn_end" ]; then
+    bad "HK5: upstream function resurface_after_downtime() not found; re-anchor the block"
+  elif [ "$BLOCK_BEGIN" -le "$fn_start" ] || [ "$BLOCK_END" -ge "$fn_end" ]; then
+    bad "HK5: block must sit inside resurface_after_downtime() (lines $fn_start-$fn_end)"
+  elif [ -z "$upstream_gate" ] || [ -z "$branch_wake" ] \
+    || [ "$BLOCK_BEGIN" -ne $(( upstream_gate + 1 )) ] \
+    || [ "$BLOCK_END" -ne $(( branch_wake - 1 )) ]; then
+    bad "HK5: block must sit between the handling-successor branch's upstream queue gate${upstream_gate:+ (line $upstream_gate)} and that branch's trailing wake${branch_wake:+ (line $branch_wake)}"
+  elif [ -z "${HK4_BLOCK_END:-}" ] || [ "$BLOCK_BEGIN" -le "$HK4_BLOCK_END" ]; then
+    bad "HK5: block must sit after HK4 defines fork_main_eligible_queued_row (line ${HK4_BLOCK_END:-missing})"
+  else
+    ok "HK5: inside the handling-successor branch, after its upstream gate ($upstream_gate), before its wake ($branch_wake), after HK4"
+  fi
+fi
+
+# --- HK6: bin/fm-watch.sh parked-awaiting-review absorb -----------------------
+if find_block "$WATCH" "$HK6" HK6; then
+  # shellcheck disable=SC2016 # literal upstream source line
+  captain_triage=$(grep -nF -- 'triage_log "absorbed stale (open captain call already surfaced for this status): $w"' "$WATCH" | head -1 | cut -d: -f1)
+  if [ -z "$captain_triage" ]; then
+    bad "HK6: an upstream anchor is gone (the captain-call absorb triage_log); re-anchor the block"
+  elif [ "$BLOCK_BEGIN" -ne $(( captain_triage + 1 )) ]; then
+    bad "HK6: block must sit directly after the captain-call absorb branch (line $captain_triage)"
+  elif [ "$(sed -n "$((BLOCK_END + 1))p" "$WATCH")" != '            else' ]; then
+    bad "HK6: block must sit directly before the surfacing else (line $((BLOCK_END + 1)))"
+  else
+    ok "HK6: after the captain-call absorb ($captain_triage), before the surfacing else ($((BLOCK_END + 1)))"
+  fi
+  missing=
+  for fn in wedge_episode_end clear_write_tracking resurface_absorbed; do
+    grep -qE "^${fn}\\(\\)" "$WATCH" || missing="$missing $fn"
+  done
+  # stat_mtime lives inside fm-watch.sh's platform if/else, so it is indented.
+  grep -qE '^[[:space:]]*stat_mtime\(\)' "$WATCH" || missing="$missing stat_mtime"
+  # triage_log comes from the transition owner this watcher sources first.
+  grep -qE '^triage_log\(\)' "$ROOT/bin/fm-push-transition-lib.sh" || missing="$missing triage_log"
+  for fn in last_status_line status_line_verb; do
+    grep -qE "^${fn}\\(\\)" "$ROOT/bin/fm-classify-lib.sh" || missing="$missing $fn"
+  done
+  grep -qE '^fm_meta_get\(\)' "$ROOT/bin/fm-backend.sh" || missing="$missing fm_meta_get"
+  if ! grep -q 'fm-classify-lib.sh' "$ROOT/bin/fm-push-transition-lib.sh" \
+    || ! grep -q 'fm-backend.sh' "$ROOT/bin/fm-push-transition-lib.sh"; then
+    bad "HK6: bin/fm-watch.sh no longer reaches fm-classify-lib.sh/fm-backend.sh through fm-push-transition-lib.sh"
+  elif [ -n "$missing" ]; then
+    bad "HK6: upstream names the block reads are missing:$missing"
+  else
+    ok "HK6: every upstream name the block reads exists and is reachable"
   fi
 fi
 
@@ -203,7 +324,7 @@ else
   ok "no fork reference in any other upstream bin/ file"
 fi
 
-# --- --base: nothing upstream-owned differs except the three blocks -----------
+# --- --base: nothing upstream-owned differs except the hook blocks ------------
 if [ -n "$BASE" ]; then
   if ! git -C "$ROOT" rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
     bad "--base $BASE is not a commit in $ROOT"
@@ -219,22 +340,37 @@ if [ -n "$BASE" ]; then
     if [ -n "$outside" ]; then
       bad "--base $BASE: upstream-owned files differing:${outside# } (expected only bin/fm-control.sh bin/fm-spawn.sh bin/fm-watch.sh)"
     else
+      # Each hooked file's added lines must be exactly the canonical blocks the
+      # BASE copy lacks, concatenated in the working file's own order: a hook
+      # the base already carries contributes nothing, and any added line
+      # outside a missing block (or a block moved out of order) is extra.
       extra=
-      for pair in "bin/fm-spawn.sh:$HK1" "bin/fm-control.sh:$HK2" "bin/fm-watch.sh:$HK3"; do
-        file=${pair%%:*}
-        block=${pair#*:}
-        # A hooked file absent from the diff is caught by find_block above;
-        # only files that differ need their delta equal to exactly the block.
+      for file in bin/fm-spawn.sh bin/fm-control.sh bin/fm-watch.sh; do
         printf '%s\n' "$changed" | grep -qxF -- "$file" || continue
         diff_out=$(git -C "$ROOT" diff -U0 "$BASE" -- "$file")
         deleted=$(printf '%s\n' "$diff_out" | grep -cE '^-([^-]|$)' || true)
+        if [ "$deleted" -ne 0 ]; then extra="$extra $file"; continue; fi
         added=$(printf '%s\n' "$diff_out" | grep -E '^\+' | grep -vE '^\+\+\+ ' | sed 's/^+//')
-        if [ "$deleted" != 0 ] || [ "$added" != "$(cat "$block")" ]; then extra="$extra $file"; fi
+        expected=$(
+          case "$file" in
+            bin/fm-spawn.sh) set -- "$HK1" ;;
+            bin/fm-control.sh) set -- "$HK2" ;;
+            bin/fm-watch.sh) set -- "$HK4" "$HK5" "$HK3" "$HK6" ;;
+          esac
+          for block in "$@"; do
+            begin=$(head -1 "$block")
+            if git -C "$ROOT" show "$BASE:$file" 2>/dev/null | grep -qxF -- "$begin"; then
+              continue
+            fi
+            printf '%s\t%s\n' "$(line_of "$ROOT/$file" "$begin")" "$block"
+          done | LC_ALL=C sort -n | cut -f2- | while IFS= read -r b; do cat "$b"; done
+        )
+        if [ "$added" != "$expected" ]; then extra="$extra $file"; fi
       done
       if [ -n "$extra" ]; then
         bad "--base $BASE: these upstream files differ by more than their hook block:$extra"
       else
-        ok "--base $BASE: upstream-owned files differ only by the three hook blocks"
+        ok "--base $BASE: upstream-owned files differ only by the hook blocks"
       fi
     fi
   fi

@@ -3411,6 +3411,19 @@ handling_successor_has_queued_row() {
   fm_lock_release "$FM_WAKE_QUEUE_LOCK"
   return "$queued"
 }
+# >>> fork resurface-guard hook HK4 (fork/README; fork edit in this file)
+# The main-eligible resurface guard both HK3 and HK5 call: it answers whether
+# main would actually receive a queued row - the same main-eligible filter
+# bin/fm-wake-drain.sh applies - so a queue held wholly by a live
+# supervision-branch grant cannot wake main with nothing for it to present.
+# fm_wake_actor_pending_count (bin/fm-wake-lib.sh) owns that filter; it reads
+# without the queue lock by contract, where a torn read can only mis-count one
+# poll, and reports an uncountable queue as pending so a queue nobody can read
+# still alarms.
+fork_main_eligible_queued_row() {
+  [ "$(fm_wake_actor_pending_count main)" -gt 0 ]
+}
+# <<< fork resurface-guard hook HK4
 WATCHER_RECOVERY_PENDING=0
 if [ -n "${FM_LOCK_RECOVERED_PID:-}" ]; then
   WATCHER_RECOVERY_PENDING=1
@@ -3617,6 +3630,9 @@ resurface_after_downtime() {
     fi
     [ "$FM_RECOVERY_MARKER_ACTION" = recover ] || return 0
     handling_successor_has_queued_row || return 0
+    # >>> fork resurface-guard hook HK5 (fork/README; fork edit in this file)
+    fork_main_eligible_queued_row || return 0
+    # <<< fork resurface-guard hook HK5
     wake "check: rearm-resurface"
   fi
   if [ "$WATCHER_RECOVERY_PENDING" -ne 1 ]; then
@@ -3626,8 +3642,9 @@ resurface_after_downtime() {
     fi
     [ "$FM_RECOVERY_MARKER_ACTION" = recover ] || return 0
   fi
-  # >>> fork resurface-guard hook HK3 (fork/README; the only fork edit in this file)
+  # >>> fork resurface-guard hook HK3 (fork/README; fork edit in this file)
   handling_successor_has_queued_row || return 0
+  fork_main_eligible_queued_row || return 0
   # <<< fork resurface-guard hook HK3
   wake "check: rearm-resurface"
 }
@@ -4129,6 +4146,29 @@ EOF
               wedge_episode_end "$key" 0 1
               clear_write_tracking "$key"
               triage_log "absorbed stale (open captain call already surfaced for this status): $w"
+            # >>> fork parked-review hook HK6 (fork/README; fork edit in this file)
+            # Parked awaiting review, not stuck: the log's latest event is a whole
+            # done: line and bin/fm-pr-check.sh's merge poll for this task is still
+            # armed (it retires when the PR merges), so this pane holds finished
+            # work waiting on review. Absorb like the captain-call bound above and
+            # hold the long PAUSE_RESURFACE_SECS recheck cadence a declared pause
+            # uses instead of alarming on every pane-hash change. A crew still
+            # working, a log with no terminal done: line, or a finished task whose
+            # PR is not recorded open never enters this branch, so their stale
+            # detection is unchanged.
+            elif [ "$(status_line_verb "$(last_status_line "$STATE/$task.status")")" = "done" ] \
+              && [ -e "$STATE/$task.pr-poll-registration" ] \
+              && [ -n "$(fm_meta_get "$STATE/$task.meta" pr)" ]; then
+              printf '%s' "$h" > "$sf"
+              wedge_episode_end "$key" 0 1
+              clear_write_tracking "$key"
+              parked_mtime=$(stat_mtime "$STATE/$task.status")
+              case "$parked_mtime" in ''|*[!0-9]*) parked_mtime=$(date +%s) ;; esac
+              parked_age=$(( $(date +%s) - parked_mtime ))
+              resurface_absorbed "$w" "$STATE/.parked-resurfaced-$key" "$parked_age" \
+                "stale: $w (done at $(fm_meta_get "$STATE/$task.meta" pr), awaiting review - parked, rechecked on a long cadence not a wedge; review the PR or release the worker)"
+              triage_log "absorbed stale (done, open PR awaiting review - parked): $w"
+            # <<< fork parked-review hook HK6
             else
               stale_reason=$(stale_reason_naming_dialog "stale: $w" "$dialog")
               fm_wake_append stale "$w" "$stale_reason" || exit 1
