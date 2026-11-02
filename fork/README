@@ -519,6 +519,20 @@ Upstream tests are never modified for the fork. Routine fork CI does not run
 the upstream suite. Run targeted upstream tests only for a named compatibility
 risk, and record the reason.
 
+Known divergence (https://github.com/kunchenguid/firstmate/issues/8092):
+with the HK3 resurface guard in place, three upstream tests pin the pre-guard
+empty recovery wake and fail by design when the upstream suites run against
+this branch - tests/fm-watch-arm.test.sh
+(test_attached_arm_hands_a_stalled_holder_to_its_replacement),
+tests/fm-watch-checkpoint.test.sh
+(test_never_announced_recovery_is_announced_once), and
+tests/fm-watcher-lock.test.sh (the successor recovery-wake case). They are
+excluded from this fork's upstream-suite runs as this recorded reason, never
+edited; drop the exclusion when upstream lands the guard from issue 8092.
+Our own gate for the guard is fork/tests/fm-fork-watch-resurface.test.sh,
+which proves both directions end to end: an empty queue stays silent and a
+queued row still wakes.
+
 That rule is enforced, not just written down: Fork CI's workflow-guard step
 (fork/bin/fm-fork-workflow-guard) reads the repository's workflow list and
 fails the run whenever a workflow outside the allowlist - fork-ci.yml,
