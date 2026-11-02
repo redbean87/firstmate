@@ -11,11 +11,14 @@ TMP_ROOT=$(fm_test_tmproot fm-fork-hook-wiring)
 mkdir -p "$TMP_ROOT"
 
 # copy_tree <name>: a minimal tree holding the three hooked files, the canonical
-# blocks, and one other upstream bin file. Echoes its root.
+# blocks, one other upstream bin file, and the four upstream libraries the
+# hook check greps for HK4/HK6's contract names. Echoes its root.
 copy_tree() {
   local t="$TMP_ROOT/$1"
   mkdir -p "$t/bin" "$t/fork/hooks"
-  cp "$ROOT/bin/fm-spawn.sh" "$ROOT/bin/fm-control.sh" "$ROOT/bin/fm-watch.sh" "$ROOT/bin/fm-send.sh" "$t/bin/"
+  cp "$ROOT/bin/fm-spawn.sh" "$ROOT/bin/fm-control.sh" "$ROOT/bin/fm-watch.sh" "$ROOT/bin/fm-send.sh" \
+    "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-push-transition-lib.sh" \
+    "$ROOT/bin/fm-classify-lib.sh" "$ROOT/bin/fm-backend.sh" "$t/bin/"
   cp "$ROOT/fork/hooks/"*.block "$t/fork/hooks/"
   printf '%s\n' "$t"
 }
