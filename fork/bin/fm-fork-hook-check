@@ -16,9 +16,10 @@
 #     resolve_relaunch_profile and before safe_checkpoint and do_exit; the
 #     upstream names it reads exist in that file.
 #   - HK3 appears exactly once in bin/fm-watch.sh, byte-identical to
-#     fork/hooks/hk3-watch.block, inside resurface_after_downtime() immediately
-#     after the ordinary branch's recovery check and before that branch's fi
-#     and trailing wake; the upstream helper the block calls,
+#     fork/hooks/hk3-watch.block, inside resurface_after_downtime() after the
+#     ordinary branch's fi and directly before the trailing wake, so both the
+#     ordinary branch and the WATCHER_RECOVERY_PENDING=1 fall-through reach
+#     the guard before the wake; the upstream helper the block calls,
 #     handling_successor_has_queued_row, exists and is defined before the
 #     function.
 #   - No upstream-owned bin/ file other than the two launch-policy hook files
@@ -165,7 +166,10 @@ if find_block "$WATCH" "$HK3" HK3; then
   fi
   # The ordinary branch's recover check: the handling-successor branch has the
   # same line, so the anchor is the LAST such line inside the function - the
-  # one whose branch falls through to the trailing wake.
+  # one whose branch falls through to the trailing wake. The block must sit
+  # after that branch's fi and immediately before the trailing wake, the one
+  # point both the ordinary branch and the WATCHER_RECOVERY_PENDING=1
+  # fall-through cross before any resurface wake.
   # shellcheck disable=SC2016 # literal upstream source line
   recover_line=$(grep -nxF -- '    [ "$FM_RECOVERY_MARKER_ACTION" = recover ] || return 0' "$WATCH" \
     | awk -F: -v s="${fn_start:-0}" -v e="${fn_end:-0}" '$1 > s && $1 < e { last = $1 } END { print last }')
@@ -173,13 +177,13 @@ if find_block "$WATCH" "$HK3" HK3; then
     bad "HK3: upstream function resurface_after_downtime() not found; re-anchor the block"
   elif [ "$BLOCK_BEGIN" -le "$fn_start" ] || [ "$BLOCK_END" -ge "$fn_end" ]; then
     bad "HK3: block must sit inside resurface_after_downtime() (lines $fn_start-$fn_end)"
-  elif [ -z "$recover_line" ] || [ "$BLOCK_BEGIN" -ne "$((recover_line + 1))" ]; then
-    bad "HK3: block must immediately follow the ordinary branch's recover check${recover_line:+ (line $recover_line)} in resurface_after_downtime()"
-  elif [ "$(sed -n "$((BLOCK_END + 1))p" "$WATCH")" != '  fi' ] \
-    || [ "$(sed -n "$((BLOCK_END + 2))p" "$WATCH")" != '  wake "check: rearm-resurface"' ]; then
-    bad "HK3: block must sit between that recover check and the trailing wake (line $((BLOCK_END + 1)) must be '  fi' followed by the wake)"
+  elif [ -z "$recover_line" ] || [ "$BLOCK_BEGIN" -le "$recover_line" ]; then
+    bad "HK3: block must sit after the ordinary branch's recover check${recover_line:+ (line $recover_line)} in resurface_after_downtime()"
+  elif [ "$(sed -n "$((BLOCK_BEGIN - 1))p" "$WATCH")" != '  fi' ] \
+    || [ "$(sed -n "$((BLOCK_END + 1))p" "$WATCH")" != '  wake "check: rearm-resurface"' ]; then
+    bad "HK3: block must sit between the ordinary branch's fi (line $((BLOCK_BEGIN - 1))) and the trailing wake (line $((BLOCK_END + 1)))"
   else
-    ok "HK3: inside resurface_after_downtime(), after the recover check ($recover_line), before the trailing wake ($((BLOCK_END + 2)))"
+    ok "HK3: inside resurface_after_downtime(), after the recover check ($recover_line) and the branch fi ($((BLOCK_BEGIN - 1))), before the trailing wake ($((BLOCK_END + 1)))"
   fi
   helper=$(grep -nE '^handling_successor_has_queued_row\(\) \{' "$WATCH" | head -1 | cut -d: -f1)
   if [ -z "$helper" ]; then

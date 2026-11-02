@@ -3625,10 +3625,10 @@ resurface_after_downtime() {
       exit 1
     fi
     [ "$FM_RECOVERY_MARKER_ACTION" = recover ] || return 0
-    # >>> fork resurface-guard hook HK3 (fork/README; the only fork edit in this file)
-    handling_successor_has_queued_row || return 0
-    # <<< fork resurface-guard hook HK3
   fi
+  # >>> fork resurface-guard hook HK3 (fork/README; the only fork edit in this file)
+  handling_successor_has_queued_row || return 0
+  # <<< fork resurface-guard hook HK3
   wake "check: rearm-resurface"
 }
 

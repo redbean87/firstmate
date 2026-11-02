@@ -115,12 +115,12 @@ The three hook points
        and before safe_checkpoint/do_exit. A refused relaunch never stops the
        running agent; upstream stops the old agent before calling
        fm-spawn --relaunch, which is why HK1 alone cannot cover relaunch.
-  HK3  bin/fm-watch.sh, inside resurface_after_downtime() immediately after the
-       ordinary branch's recover check and before that branch's fi and trailing
-       wake. It adds one line: handling_successor_has_queued_row || return 0,
-       the same guard the handling-successor branch already carries, so a
-       recovery marker that reported downtime for a row since handled no longer
-       wakes main with nothing queued.
+  HK3  bin/fm-watch.sh, inside resurface_after_downtime() after the ordinary
+       branch's fi and immediately before the trailing wake - the one point
+       both that branch and the WATCHER_RECOVERY_PENDING=1 fall-through cross.
+       It adds one line: handling_successor_has_queued_row || return 0, the
+       same guard the handling-successor branch already carries, so an episode
+       whose row was already handled no longer wakes main with nothing queued.
 
 HK1 and HK2 call fork/bin/fm-launch-policy only when the home has
 config/fork-policies. A home without that file behaves exactly as upstream.
@@ -510,8 +510,10 @@ Fork CI tests the fork's code and its integration with upstream, not upstream:
                       fixture functions from tests/fm-control-relaunch.test.sh
                       and stop with FIXTURE-DRIFT if those disappear. The
                       resurface test drives the real bin/fm-watch.sh end to
-                      end: an empty queue must produce no recovery wake, a
-                      queued row exactly one.
+                      end: an empty queue must produce no recovery wake,
+                      whether recovery is pending at startup or arrives
+                      through the ordinary branch, and a queued row exactly
+                      one.
 
 Upstream tests are never modified for the fork. Routine fork CI does not run
 the upstream suite. Run targeted upstream tests only for a named compatibility
