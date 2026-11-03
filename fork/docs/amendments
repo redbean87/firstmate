@@ -1,0 +1,41 @@
+Firstmate fork amendments
+=========================
+
+Upstream documentation (docs/, README.md, AGENTS.md, skills) is kept
+byte-identical to upstream and is never rewritten for this fork. Where this
+fork behaves differently from what an upstream document says, the difference
+is recorded here, per upstream document and section. Read this file before
+trusting an upstream doc. The file has no extension on purpose (see
+fork/README): upstream's documentation-audience check refuses unregistered
+*.md, *.mdx, *.rst, and *.txt files.
+
+Each entry names the upstream document and section, then what this fork does
+instead. Add an entry when a deviation is created; remove it when the fork
+catches up. Hook-block edits are not listed here - fork/README "The hook
+points" owns those.
+
+
+docs/configuration.md - "PR registration scan (config/pr-register-scan)"
+------------------------------------------------------------------------
+
+Upstream describes a scan that records reported PRs from done lines during the
+fm-pr-check.sh sweep, enabled by config/pr-register-scan. This fork has no such
+feature: bin/fm-pr-check.sh here has no scan path at all, so setting
+config/pr-register-scan does nothing.
+
+Two separate facts, both standing:
+  - Lag: the section was added upstream by #8086 (9224c902), which this fork
+    has not merged yet; its docs/ are byte-identical to the last upstream
+    commit it did sync. The 15 docs files that differ from upstream/main are
+    upstream's own newer changes, not fork edits.
+  - Deviation: when the fork does sync #8086 the section will arrive, and it
+    will still describe a feature the fork lacks unless the scan code is
+    ported. Keep this entry until the code exists.
+
+
+docs/scripts.md - the bin/fm-pr-check.sh scan row
+-------------------------------------------------
+
+Same as above: upstream lists a scan mode for bin/fm-pr-check.sh. This fork's
+script has no scan path. The row is upstream-ahead (#8086) and, once synced,
+documents a feature this fork does not have.

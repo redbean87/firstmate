@@ -3,7 +3,9 @@ Firstmate fork layer
 
 This directory holds everything the Firstmate fork adds on top of upstream
 firstmate (https://github.com/kunchenguid/firstmate). Upstream code stays
-byte-identical except for ten small hook blocks. This file is plain text with
+byte-identical except for ten small hook blocks. Where an upstream
+document describes behaviour this fork does not have, fork/docs/amendments
+records it; read it before trusting an upstream doc. This file is plain text with
 no extension on purpose: upstream's documentation-audience check requires every
 tracked *.md, *.mdx, *.rst, and *.txt file to be registered in an upstream-owned
 inventory, and the fork does not edit that inventory.
@@ -14,28 +16,19 @@ Ownership boundary
 
   Upstream core       everything outside fork/ and .github/workflows/fork-ci.yml,
                       unchanged except the ten hook blocks below.
-  Hook blocks (10)    HK1 and HK8 in bin/fm-spawn.sh, HK2 in bin/fm-control.sh,
-                      HK3-HK6 in bin/fm-watch.sh - the resurface guard that
-                      makes a recovery wake fire only while a wake row MAIN
-                      would receive is actually queued (HK3, HK4, HK5), and the
-                      parked-awaiting-review absorb that stops a done worker's
-                      open PR from raising a stale alarm on every pane-hash
-                      change (HK6) - HK7 in bin/fm-extension.mjs, the
-                      captured-result home reference that lets an extension
-                      judge a captured result against its home's own task
-                      records (HK7) - and HK8 in bin/fm-spawn.sh, the
-                      registry-key resolution a ship's standing posture is
-                      looked up under - and HK9 in bin/fm-tool-update-check.sh,
-                      the unverified-timeout classification and per-tool budget
-                      slice that keep a watch remote slower than the probe bound
-                      from reporting as a broken tool and keep one slow remote
-                      from spending the whole sweep - and HK10 in
-                      bin/fm-composer-lib.sh, the themed-HUD pre-filter that
-                      blanks a local theme's HUD footer out of the scan's pane
-                      copy so an idle Claude pane carrying that footer still
-                      classifies as empty (HK10). Canonical copies:
-                      fork/hooks/*.block. They are the only fork edits to
-                      upstream files.
+  Hook blocks (10)    The only fork edits to upstream files. Canonical copies:
+                      fork/hooks/*.block; the detail is in "The hook points"
+                      below, and fm-fork-hook-check verifies each one.
+                        HK1   bin/fm-spawn.sh            launch-policy gate on spawn
+                        HK2   bin/fm-control.sh          launch-policy gate on relaunch
+                        HK3   bin/fm-watch.sh            resurface guard, ordinary branch
+                        HK4   bin/fm-watch.sh            defines the main-eligible row test
+                        HK5   bin/fm-watch.sh            resurface guard, handling successor
+                        HK6   bin/fm-watch.sh            parked-awaiting-review absorb
+                        HK7   bin/fm-extension.mjs       home reference on captured results
+                        HK8   bin/fm-spawn.sh            registry-key resolution for posture
+                        HK9   bin/fm-tool-update-check.sh  unverified-timeout class, per-tool budget slice
+                        HK10  bin/fm-composer-lib.sh     themed-HUD footer pre-filter
   Fork policy         fork/bin/fm-launch-policy: brief intake guard, consult
                       gate, project pins, machine/model resource capacity,
                       Claude subscription, and arming the ask-user
@@ -99,6 +92,24 @@ Ownership boundary
                       It edits no upstream file and is loaded explicitly
                       (pi -e), so the repository change alone activates
                       nothing (fork/wake-guard/README).
+  Detached launch     fork/bin/fm-detach-launch: starts a long-running command
+                      detached from the caller's directory, pinned into a
+                      --cwd it proves lies outside every root
+                      bin/fm-teardown.sh reaps (a linked git worktree, or the
+                      launching task's own worktree and task temp), so a
+                      deliberately detached service survives the task that
+                      launched it. Prints only the pid; covered by
+                      fork/tests/fm-fork-detach-launch.test.sh.
+  Discord releases    fork/bin/fm-discord-release: build, verify, switch, and
+                      list immutable content-addressed releases of the Discord
+                      bridge (bin/ from the checkout's HEAD plus the bridge
+                      files of fork/discord/), which the LaunchAgent runs;
+                      switch repoints `current` atomically after verify and
+                      rollback is a switch to an older id (fork/discord/README,
+                      "Service").
+  Amendments          fork/docs/amendments: what this fork does instead of what
+                      an upstream document says. Read it before trusting an
+                      upstream doc.
   Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
                       fork/bin/fm-fork-workflow-guard, fork/tests/.
   Fork CI             .github/workflows/fork-ci.yml; its workflow-guard step
