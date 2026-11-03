@@ -193,14 +193,15 @@ test_startup_pending_queued_row_wakes_once() {
 
 # --- wiring: fork/bin/fm-fork-hook-check's HK3 knowledge ----------------------
 
-# copy_watch_tree <name>: a minimal tree with the four hooked files, the
+# copy_watch_tree <name>: a minimal tree with the five hooked files, the
 # canonical blocks, one unhooked upstream bin file, and the four upstream
 # libraries the hook check greps for HK4/HK6's contract names. Echoes its root.
 copy_watch_tree() {
   local t="$TMP_ROOT/$1"
   mkdir -p "$t/bin" "$t/fork/hooks"
   cp "$ROOT/bin/fm-spawn.sh" "$ROOT/bin/fm-control.sh" "$ROOT/bin/fm-watch.sh" \
-    "$ROOT/bin/fm-extension.mjs" "$ROOT/bin/fm-send.sh" "$ROOT/bin/fm-wake-lib.sh" \
+    "$ROOT/bin/fm-extension.mjs" "$ROOT/bin/fm-tool-update-check.sh" \
+    "$ROOT/bin/fm-send.sh" "$ROOT/bin/fm-wake-lib.sh" \
     "$ROOT/bin/fm-push-transition-lib.sh" "$ROOT/bin/fm-classify-lib.sh" \
     "$ROOT/bin/fm-backend.sh" "$t/bin/"
   cp "$ROOT/fork/hooks/"*.block "$t/fork/hooks/"
