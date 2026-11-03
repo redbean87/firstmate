@@ -22,7 +22,8 @@
 #                        path the fork owns; stop and decide by hand
 #            hook file   bin/fm-spawn.sh, bin/fm-control.sh,
 #                        bin/fm-watch.sh, bin/fm-extension.mjs, or
-#                        bin/fm-tool-update-check.sh: take
+#                        bin/fm-tool-update-check.sh, or
+#                        bin/fm-composer-lib.sh: take
 #                        upstream's side, then re-insert the block from
 #                        fork/hooks/
 #            upstream    any other path: the fork has edited an upstream file,
@@ -50,7 +51,7 @@ usage() { sed -n '6,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 owner_of() {  # <path>: fork-owned | hook file | upstream
   case "$1" in
     fork/*|.github/workflows/fork-ci.yml) echo fork-owned ;;
-    bin/fm-spawn.sh|bin/fm-control.sh|bin/fm-watch.sh|bin/fm-extension.mjs|bin/fm-tool-update-check.sh) echo "hook file" ;;
+    bin/fm-spawn.sh|bin/fm-control.sh|bin/fm-watch.sh|bin/fm-extension.mjs|bin/fm-tool-update-check.sh|bin/fm-composer-lib.sh) echo "hook file" ;;
     *) echo upstream ;;
   esac
 }
@@ -141,7 +142,7 @@ cmd_check() {
   echo "== fork tests"; "$root/fork/tests/run" || failed=1
   echo "== review: commits this import brings"
   git -C "$root" log --oneline --no-merges "refs/heads/$from..$sha" | head -50
-  echo "== review: upstream-owned delta vs the imported commit (expect only the five hook files)"
+  echo "== review: upstream-owned delta vs the imported commit (expect only the six hook files)"
   git -C "$root" diff --stat "$sha" HEAD -- . ':(exclude)fork' ':(exclude).github/workflows/fork-ci.yml'
   [ "$failed" -eq 0 ] && echo "check: all passed" || echo "check: FAILED"
   return "$failed"

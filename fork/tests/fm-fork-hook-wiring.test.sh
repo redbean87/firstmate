@@ -10,7 +10,7 @@ CHECK="$ROOT/fork/bin/fm-fork-hook-check"
 TMP_ROOT=$(fm_test_tmproot fm-fork-hook-wiring)
 mkdir -p "$TMP_ROOT"
 
-# copy_tree <name>: a minimal tree holding the five hooked files, the canonical
+# copy_tree <name>: a minimal tree holding the six hooked files, the canonical
 # blocks, one other upstream bin file, and the upstream libraries the hook
 # check greps for HK4/HK6's contract names. Echoes its root.
 copy_tree() {
@@ -18,6 +18,7 @@ copy_tree() {
   mkdir -p "$t/bin" "$t/fork/hooks"
   cp "$ROOT/bin/fm-spawn.sh" "$ROOT/bin/fm-control.sh" "$ROOT/bin/fm-watch.sh" "$ROOT/bin/fm-extension.mjs" \
     "$ROOT/bin/fm-tool-update-check.sh" \
+    "$ROOT/bin/fm-composer-lib.sh" \
     "$ROOT/bin/fm-send.sh" \
     "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-push-transition-lib.sh" \
     "$ROOT/bin/fm-classify-lib.sh" "$ROOT/bin/fm-backend.sh" "$t/bin/"
@@ -34,7 +35,8 @@ s = open(p).read()
 hk1 = open(p.rsplit("/bin/", 1)[0] + "/fork/hooks/hk1-spawn.block").read()
 hk2 = open(p.rsplit("/bin/", 1)[0] + "/fork/hooks/hk2-control.block").read()
 hk9 = open(p.rsplit("/bin/", 1)[0] + "/fork/hooks/hk9-tool-update.block").read()
-s2 = eval(expr, {"s": s, "hk1": hk1, "hk2": hk2, "hk9": hk9})
+hk10 = open(p.rsplit("/bin/", 1)[0] + "/fork/hooks/hk10-composer-hud.block").read()
+s2 = eval(expr, {"s": s, "hk1": hk1, "hk2": hk2, "hk9": hk9, "hk10": hk10})
 assert s2 != s, "mutation did not change the file"
 open(p, "w").write(s2)
 PY
@@ -96,6 +98,29 @@ test_detects_lost_upstream_anchor() {
   edit "$t/bin/fm-spawn.sh" 's.replace("# Project capacity admission", "# Capacity admission")'
   expect_detected "$t" "HK1: an upstream anchor is gone" "renamed upstream anchor"
   pass "wiring: a vanished upstream anchor is reported for re-anchoring"
+}
+
+test_detects_missing_hk10() {
+  local t; t=$(copy_tree no-hk10)
+  edit "$t/bin/fm-composer-lib.sh" 's.replace(hk10, "")'
+  expect_detected "$t" "HK10: expected exactly one hook block" "missing HK10"
+  pass "wiring: a removed HK10 is detected"
+}
+
+test_detects_edited_hk10() {
+  local t; t=$(copy_tree edit-hk10)
+  # shellcheck disable=SC2016 # Python source, not shell expansion
+  edit "$t/bin/fm-composer-lib.sh" 's.replace("      fm_hud_changed=1\n", "      fm_hud_changed=0\n")'
+  expect_detected "$t" "HK10: hook block in bin/fm-composer-lib.sh differs" "edited HK10"
+  pass "wiring: an HK10 block that stops flagging the HUD block is detected"
+}
+
+test_detects_hk10_after_row_loop() {
+  local t; t=$(copy_tree late-hk10)
+  # shellcheck disable=SC2016 # Python source, not shell expansion
+  edit "$t/bin/fm-composer-lib.sh" 's.replace(hk10, "").replace("\n  while IFS= read -r line; do\n", "\n  while IFS= read -r line; do\n" + hk10, 1)'
+  expect_detected "$t" "HK10: block must sit inside _fm_composer_scan_screen" "HK10 after the row loop"
+  pass "wiring: HK10 moved past the row loop (after the rows it pre-filters) is detected"
 }
 
 test_detects_hk2_after_checkpoint() {
