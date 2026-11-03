@@ -3,7 +3,7 @@ Firstmate fork layer
 
 This directory holds everything the Firstmate fork adds on top of upstream
 firstmate (https://github.com/kunchenguid/firstmate). Upstream code stays
-byte-identical except for seven small hook blocks. This file is plain text with
+byte-identical except for eight small hook blocks. This file is plain text with
 no extension on purpose: upstream's documentation-audience check requires every
 tracked *.md, *.mdx, *.rst, and *.txt file to be registered in an upstream-owned
 inventory, and the fork does not edit that inventory.
@@ -13,8 +13,8 @@ Ownership boundary
 ------------------
 
   Upstream core       everything outside fork/ and .github/workflows/fork-ci.yml,
-                      unchanged except the seven hook blocks below.
-  Hook blocks (7)     HK1 in bin/fm-spawn.sh, HK2 in bin/fm-control.sh,
+                      unchanged except the eight hook blocks below.
+  Hook blocks (8)     HK1 and HK8 in bin/fm-spawn.sh, HK2 in bin/fm-control.sh,
                       HK3-HK6 in bin/fm-watch.sh - the resurface guard that
                       makes a recovery wake fire only while a wake row MAIN
                       would receive is actually queued (HK3, HK4, HK5), and the
@@ -23,7 +23,9 @@ Ownership boundary
                       change (HK6) - and HK7 in bin/fm-extension.mjs, the
                       captured-result home reference that lets an extension
                       judge a captured result against its home's own task
-                      records (HK7). Canonical copies: fork/hooks/*.block. They
+                      records (HK7) - and HK8 in bin/fm-spawn.sh, the
+                      registry-key resolution a ship's standing posture is
+                      looked up under. Canonical copies: fork/hooks/*.block. They
                       are the only fork edits to upstream files.
   Fork policy         fork/bin/fm-launch-policy: brief intake guard, consult
                       gate, project pins, machine/model resource capacity,
@@ -160,13 +162,25 @@ The hook points
        self-conclude a capture whose task is already concluded
        (fork/pr-green/README, "Event delivery and acknowledgement"). It calls
        no fork script.
+  HK8  bin/fm-spawn.sh, directly after upstream's PROJ_NAME basename
+       resolution and before the posture queries: re-resolves PROJ_NAME
+       through fork/bin/fm-registry-key, so a ship's standing posture is
+       looked up under the project's registry key rather than blindly under
+       the directory basename - the registered basename when there is one,
+       otherwise this repository's own registered key when the directory IS
+       this code root by repository identity (never a hard-coded directory
+       name), and the unchanged basename for anything else, keeping
+       upstream's unregistered default and its warning exactly as they are.
 
 HK1 and HK2 call fork/bin/fm-launch-policy only when the home has
 config/fork-policies. A home without that file behaves exactly as upstream.
 With the file present, any non-zero exit refuses - including a missing or
 unexecutable policy script. HK3-HK7 have no policy gate: they call no fork
 script, their guards are unconditional, and a main-eligible row queued at
-that moment resurfaces exactly as upstream.
+that moment resurfaces exactly as upstream. HK8 has no policy gate either: it
+unconditionally calls fork/bin/fm-registry-key, which falls back to the
+directory basename whenever the registry declares no home entry, so a home
+without that declaration resolves posture exactly as upstream did.
 
 Hook contract (environment HK1 and HK2 pass; see the policy script header):
 FM_LP_PHASE, FM_LP_TASK, FM_LP_KIND, FM_LP_PROJECT, FM_LP_HARNESS, FM_LP_MODEL,
@@ -183,7 +197,8 @@ last_status_line and status_line_verb (bin/fm-classify-lib.sh), fm_meta_get
 (bin/fm-backend.sh), and fm-watch.sh's own wedge_episode_end,
 clear_write_tracking, resurface_absorbed, stat_mtime, and triage_log. HK7
 reads only bin/fm-extension.mjs's own invokeProcessEvent home parameter and
-its captured input assignment.
+its captured input assignment. HK8 reads only bin/fm-spawn.sh's own PROJ_ABS,
+FM_ROOT, and ID.
 fm-fork-hook-check verifies these hook inputs and the integration boundary
 (below).
 
@@ -542,7 +557,7 @@ Fork CI tests the fork's code and its integration with upstream, not upstream:
                       It never calls bin/fm-test-run.sh, and fork tests live
                       outside tests/, so upstream's selector, lanes, and
                       coverage guard never see them.
-  Hook wiring         fm-fork-hook-check verifies all seven blocks are present
+  Hook wiring         fm-fork-hook-check verifies all eight blocks are present
                       once, identical to fork/hooks/*.block, and at their
                       lifecycle positions, that the upstream names they read
                       exist, and that no other upstream bin/ file references

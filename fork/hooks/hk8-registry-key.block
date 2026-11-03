@@ -1,0 +1,6 @@
+  # >>> fork registry-key hook HK8 (fork/README; fork edit in this file)
+  if ! PROJ_NAME=$("$FM_ROOT/fork/bin/fm-registry-key" "$PROJ_ABS"); then
+    echo "error: $ID cannot launch: the registry key for $PROJ_ABS could not be resolved (see the refusal above); correct data/projects.md or fork/bin/fm-registry-key and spawn again" >&2
+    exit 1
+  fi
+  # <<< fork registry-key hook HK8

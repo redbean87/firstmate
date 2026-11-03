@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm-fork-hook-check - prove the fork's seven upstream integration points are
+# fm-fork-hook-check - prove the fork's eight upstream integration points are
 # present, unmodified, and at their lifecycle positions, and (with --base) that
 # no other upstream-owned file differs from upstream.
 #
@@ -48,6 +48,13 @@
 #     capture against its own task records; the upstream names it reads (the
 #     invokeProcessEvent home parameter, the captured input assignment) exist
 #     in that file.
+#   - HK8 appears exactly once in bin/fm-spawn.sh, byte-identical to
+#     fork/hooks/hk8-registry-key.block, directly after upstream's
+#     `PROJ_NAME=$(basename "$PROJ_ABS")` resolution and before the first
+#     posture query that reads $PROJ_NAME, so every standing-posture lookup
+#     (forge, mode, PR text, ship-branch prefix) runs against the key
+#     fork/bin/fm-registry-key resolves; the upstream names it reads (PROJ_ABS,
+#     FM_ROOT, ID) are assigned earlier in the file.
 #   - No upstream-owned bin/ file other than the launch-policy hook files
 #     references fork code.
 #   - --base: `git diff <ref>` outside fork/ and the fork CI workflow touches
@@ -62,7 +69,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT=$(cd "${2:?--root needs a path}" && pwd); shift 2 ;;
     --base) BASE=${2:?--base needs a ref}; shift 2 ;;
-    -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,63p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "fm-fork-hook-check: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -82,7 +89,8 @@ HK4="$ROOT/fork/hooks/hk4-main-eligible.block"
 HK5="$ROOT/fork/hooks/hk5-resurface-successor.block"
 HK6="$ROOT/fork/hooks/hk6-parked-review.block"
 HK7="$ROOT/fork/hooks/hk7-result-configref.block"
-for f in "$SPAWN" "$CONTROL" "$WATCH" "$EXTENSION" "$HK1" "$HK2" "$HK3" "$HK4" "$HK5" "$HK6" "$HK7"; do
+HK8="$ROOT/fork/hooks/hk8-registry-key.block"
+for f in "$SPAWN" "$CONTROL" "$WATCH" "$EXTENSION" "$HK1" "$HK2" "$HK3" "$HK4" "$HK5" "$HK6" "$HK7" "$HK8"; do
   [ -f "$f" ] || { bad "missing file ${f#"$ROOT"/}"; exit 1; }
 done
 
@@ -342,6 +350,36 @@ if find_block "$EXTENSION" "$HK7" HK7; then
   fi
 fi
 
+# --- HK8: bin/fm-spawn.sh registry-key posture resolution ---------------------
+if find_block "$SPAWN" "$HK8" HK8; then
+  # Anchor: directly after upstream's basename resolution - the exact lookup
+  # this hook corrects - and before the first posture query that reads
+  # $PROJ_NAME, so no standing posture is resolved from the raw basename.
+  # shellcheck disable=SC2016 # literal upstream source line
+  projname=$(line_of "$SPAWN" '  PROJ_NAME=$(basename "$PROJ_ABS")')
+  # shellcheck disable=SC2016 # literal upstream source line
+  standing_forge=$(grep -nF 'STANDING_FORGE=$("$FM_ROOT/bin/fm-project-mode.sh" --forge "$PROJ_NAME"' "$SPAWN" | head -1 | cut -d: -f1)
+  if [ -z "$projname" ] || [ -z "$standing_forge" ]; then
+    bad "HK8: an upstream anchor is gone (the PROJ_NAME basename resolution or the first posture query); re-anchor the block"
+  elif [ "$BLOCK_BEGIN" -ne $(( projname + 1 )) ]; then
+    bad "HK8: block must sit directly after upstream's PROJ_NAME basename resolution (line $projname)"
+  elif [ "$BLOCK_END" -ge "$standing_forge" ]; then
+    bad "HK8: block must come before the first posture query that reads \$PROJ_NAME (line $standing_forge)"
+  else
+    ok "HK8: directly after the basename resolution ($projname), before the posture queries ($standing_forge)"
+  fi
+  missing=
+  for var in PROJ_ABS FM_ROOT ID; do
+    at=$(first_assignment "$SPAWN" "$var")
+    if [ -z "$at" ] || [ "$at" -ge "$BLOCK_BEGIN" ]; then missing="$missing $var"; fi
+  done
+  if [ -n "$missing" ]; then
+    bad "HK8: upstream contract variables not assigned before the block:$missing"
+  else
+    ok "HK8: every upstream contract variable is assigned before the block"
+  fi
+fi
+
 # --- no other fork reference in upstream-owned bin/ ---------------------------
 others=$(grep -lE 'fork/bin/|FM_LP_[A-Z]' "$ROOT"/bin/* 2>/dev/null | grep -vxF -e "$SPAWN" -e "$CONTROL" || true)
 if [ -n "$others" ]; then
@@ -379,7 +417,7 @@ if [ -n "$BASE" ]; then
         added=$(printf '%s\n' "$diff_out" | grep -E '^\+' | grep -vE '^\+\+\+ ' | sed 's/^+//')
         expected=$(
           case "$file" in
-            bin/fm-spawn.sh) set -- "$HK1" ;;
+            bin/fm-spawn.sh) set -- "$HK1" "$HK8" ;;
             bin/fm-control.sh) set -- "$HK2" ;;
             bin/fm-watch.sh) set -- "$HK4" "$HK5" "$HK3" "$HK6" ;;
             bin/fm-extension.mjs) set -- "$HK7" ;;
