@@ -1,0 +1,397 @@
+Firstmate fork: progress-stall guard
+===================================
+
+Registers the fork-owned source that wakes Firstmate when a worker looks busy
+but has stopped producing anything: a task that is still declaring `working`
+while its status file, its recorded worktree, and its data directory have all
+been silent past a threshold window. That wake closes the gap where a pane
+stays legitimately active - so no existing supervision alarms - while the run
+behind it goes nowhere, a class of stall that today is only caught when the
+captain asks what is taking so long, or by a per-task check written by hand
+for one job. This source is one standing guard for any task and any harness:
+no per-task wiring, no poll to run by hand.
+
+It is fork-owned. Everything lives under fork/progress-guard/, upstream code
+stays byte-identical (no hook block is needed), and it reaches Firstmate
+through the same documented extension seam the PR-readiness wake uses: an
+external process-event adapter, registered in the home, that emits one
+ordinary process-event wake which Firstmate's existing supervision already
+consumes.
+
+Like fork/README and fork/pr-green/README, this file is plain text with no
+extension on purpose: upstream's documentation-audience check requires every
+tracked *.md, *.mdx, *.rst, and *.txt file to be registered in an
+upstream-owned inventory, and the fork does not edit that inventory.
+
+
+Advisory by construction
+------------------------
+
+The wake this source emits is advisory: it says "look at this worker", never
+"the worker is stuck" as a verdict and never an instruction to act. The
+constraints below bind the predicate installed at the seam, and the shipped
+code keeps them.
+
+  - Nothing here steers a worker, answers a finding, changes a task record,
+    interrupts or relaunches anything, or touches any lifecycle, merge, or
+    supervision authority. The only file it ever writes is its own latch
+    marker (see "One wake per stall: the latch").
+  - Silence is the default for the stall judgment: an unreadable status file,
+    a task whose worktree cannot be attributed, an evidence walk that fails or
+    runs out of its bounded budget, a status line that changes between the
+    gate's read and delivery, or any doubt must produce no wake, never a guess
+    that a worker is stuck. A guard that cries wolf is worse than no guard.
+  - A failure of the adapter's own read is not stall evidence: it is captured
+    as host failure evidence and classified apart from the advisory body (see
+    "Event delivery and acknowledgement"), never as a stalled worker.
+
+
+Supported scope
+---------------
+
+  Tasks        Any task of this home whose record state/<id>.meta exists,
+               whose LAST status line carries the exact `working` verb, whose
+               record carries a usable spawn_gen= incarnation, and whose
+               worktree is attributable: a worktree= path that is absolute and
+               currently an ordinary directory, without a secondmate-home
+               marker inside it. There is no delivery-mode, yolo, kind, or
+               harness gate: a stall is a stall whatever the task ships with.
+  Refused      A secondmate record (kind=secondmate or mode=secondmate) is
+               never eligible: a secondmate home runs its own supervision
+               inside the worktree, so its tree churns whether or not the mate
+               is producing anything and the evidence would be meaningless.
+               So are a record with no usable spawn_gen=, a record with no
+               worktree= or a worktree that is gone (attribution failure - the
+               source stays silent rather than guess), a task with no status
+               file, and any task whose last status line is not `working`: a
+               declared `paused:` wait with a resume condition, a `blocked:`
+               or `needs-decision:` line, a terminal `done:` or `failed:`
+               line, and trailing continuation prose are all silence however
+               long they wait.
+  Home         Each home reads only its own state, data, and recorded
+               worktrees: a secondmate home that wants this capability
+               registers its own source against its own home, and no home ever
+               evaluates another home's records.
+  Records      A record that is not a plain regular file, that carries a
+               duplicate key, that cannot be read, or whose task id is not
+               path-safe is skipped silently.
+
+
+Signals and the stall threshold
+-------------------------------
+
+A candidate task stalls only when ALL THREE evidence sources have been silent
+for the whole threshold window:
+
+  status       no new line in state/<id>.status (the file's own mtime).
+  worktree     no new or modified file or directory under the recorded
+               worktree, through a git status-free mtime walk: .git is never
+               opened (a supervisor's own read-only git commands can never
+               make the walk self-fulfilling), symlinks are counted but never
+               followed, the walk is bounded to six levels of depth and to its
+               share of one wall-clock budget, and the same generated trees
+               bin/fm-classify-lib.sh prunes (node_modules, venv, target,
+               dist, and the rest) are skipped so a package tree cannot eat
+               the budget. Directories count as evidence because a file
+               created and deleted between two polls still moves its parent
+               directory's mtime.
+  data         no new file or directory under data/<id>/. A task with no data
+               directory simply has no evidence there; a data directory that
+               exists but cannot be read is doubt, not silence.
+
+The newest mtime across those sources is the task's newest evidence, and
+now minus that newest evidence is the observed silence; when the silence
+reaches the threshold the task is stalled. The threshold is
+state/progress-guard/stall-threshold-secs, 1500 seconds (25 minutes) by
+default, and that file is the one place a home tunes the window (range
+1..86400; a malformed knob falls back to the default rather than lengthening
+or disabling it).
+
+Verb classification belongs to bin/fm-classify-lib.sh, and this source reads
+the last status line's verb through a re-expression of its status_line_verb
+(text before the first colon, cut at the first bracket, trimmed, correlation
+tokens dropped after the first word). The reading is strictly conservative
+against the library's own last-event scan: the library may skip a trailing
+line this source treats as the last line (a missed wake, the safe direction),
+never the reverse, because a trailing line that parses as `working` is always
+an event for the library too. Only an exact `working` verb is ever a
+candidate, so a `paused:` declaration can never alarm regardless of how the
+threshold is set.
+
+
+One wake per stall: the latch
+-----------------------------
+
+On a stall the source emits exactly one wake naming the task, the observed
+silence, and the newest evidence it could find, then latches per (task,
+latest status line) so the same stall wakes once. The latch is one marker per
+task, <home>/state/<id>.progress-guard-latch, written as one fixed-arity line
+record and published by temp-file rename (0600, same directory, fsynced):
+
+  marker     version line fm-fork-progress-guard-v1, then task id, the task
+             record's spawn_gen= incarnation, the sha256 of the latest status
+             line the wake was about, the host request id that produced the
+             wake, and the epoch second it was published.
+  latches    a marker suppresses when its incarnation and status-line hash
+             equal the ones the gate just read: the same task, worker, and
+             latest status line is one stall and wakes once. A new status
+             line or a new spawn_gen (a relaunch) re-arms the question.
+  caps       a re-armed question is still suppressed while now minus the
+             marker's epoch is under state/progress-guard/
+             min-wake-interval-secs (3600 by default), so a task never gets
+             more than one wake per hour no matter how the threshold, a
+             changed status line, or a relaunch interact (range 0..86400; 0
+             disables the cap, which only a test or a deliberate operator
+             choice asks for).
+  repeat     two things make the latch fail toward one possible duplicate
+             wake and never toward suppression. (1) A marker write that
+             fails, is interrupted, or is unreadable afterwards leaves no
+             valid marker, so the next poll answers again. (2) The marker
+             records the host request id that produced its wake, and core
+             derives that id from the next uncaptured result sequence -
+             unchanged while a wake has not been captured, new once it has
+             been. A retry after a crash between answering and capture
+             arrives with the same id as the marker and is answered again,
+             while an ordinary later poll arrives with a different id and is
+             silent.
+
+The marker is written before the wake is returned, never after: a crash in
+between is repaired by the request-id rule above. A marker whose identity no
+longer matches still holds the hourly cap, because the cap is the hard bound;
+pruning drops a marker only when the task record itself is gone or the marker
+file is malformed, so a relaunch or a changed status line never resets the
+hour. Pruning runs on every poll, so a torn-down task leaves nothing behind;
+there is no separate teardown command because the marker is inert state that
+names only its own task and the next poll after a teardown removes it.
+
+
+Registration
+------------
+
+Registration is an operator step; this repository change activates nothing.
+The package must live outside every Git project, as upstream requires for any
+bound package. With FM_HOME exported as the home the source belongs to:
+
+  mkdir -p "$HOME/.local/share/firstmate-packages"
+  cp -R fork/progress-guard/extension "$HOME/.local/share/firstmate-packages/progress-guard"
+  bin/fm-extension.sh bind "$HOME/.local/share/firstmate-packages/progress-guard" \
+    --adapter progress-guard --trust-same-user-code \
+    --consent task-metadata
+  bin/fm-procevent.sh register-extension progress-guard progress-guard \
+    --config-ref "home:$FM_HOME"
+
+The one consent is honest rather than sandboxing: the package reads task
+records, status files, worktrees, and data directories of the registered home
+(task-metadata). It never opens a network connection, never reads a
+credential, and requests neither consent. The config reference is the
+private, non-secret statement of which home the source belongs to; it appears
+in envelopes and registrations and never holds a credential.
+
+`register-extension` prints the owner token and the exact retirement command.
+Keep the token. To change the package, withdraw and re-bind:
+
+  bin/fm-procevent.sh retire progress-guard --if-owner <owner-token>
+  bin/fm-extension.sh retire-binding org.firstmate.fork.progress-guard \
+    --if-binding-digest <binding-digest>
+  (then bind and register the new copy again)
+
+A registered source keeps Firstmate's supervision running and the watcher
+restarts it every cycle, so retire the source to stop it. Before retiring for
+good, drop the latch markers with the same shape of cleanup the poll already
+runs: `rm -f "$FM_HOME"/state/*.progress-guard-latch` (they are inert, but a
+home that goes away should leave none).
+
+
+Event delivery and acknowledgement
+----------------------------------
+
+When the seam reports stalled tasks, the adapter returns one result carrying
+an advisory block for each of them - never only the task whose id sorts
+first - up to the result-size limit under "Known limits". Core captures it as
+external evidence and publishes the ordinary bounded process-event wake, so
+nothing new is introduced into Firstmate's supervision. The path is the one
+the fork tests drive end to end:
+
+  check: procevent progress-guard progress-guard <sequence>
+
+  classify    bin/fm-procevent.sh classify <result-file> prints
+              stall-advisory for a stall body and stall-error for a host
+              failure record, so a failed read is never presented as stall
+              evidence and stall evidence is never read as an instruction or
+              a decision.
+  terminal    no. The source never concludes itself, so it keeps listening
+              for the next stall.
+  silent      exactly two contents are recorded handled without a wake:
+              (1) the host's own timeout evidence on this source: a captured
+              firstmate.process-event-extension-error.v1 record with code
+              timeout and operation source.poll under this extension's id is
+              a poll the host stopped waiting for - its invoke timer counts
+              time the machine spends asleep - so there is no stall content
+              to wake about; (2) a stall capture whose every advisory is
+              already concluded when the capture is read: each advisory's
+              task record state/<id>.meta is gone, or its last status line
+              carries a terminal `done` or `failed` verb. The question is
+              asked at read time, never cached at capture time, so a task
+              that finishes between capture and read never resurrects a moot
+              wake.
+              Both absorbs are safe because the source is advisory by
+              construction: a lost poll is re-run by the next launch, the
+              self-conclusion demands positive proof and never guesses (a
+              live task, an unreadable status file, any other verb, a missing
+              or unusable home reference, or a capture with any non-advisory
+              leading line all keep the wake), a capture with several
+              advisories concludes only when every one of them does, so a
+              still-live task keeps the whole capture announced, and the
+              latch can only repeat a wake, never swallow one.
+              Every other result - a stall advisory for a live task, a
+              non-timeout host failure, or a timeout naming another
+              operation - keeps its wake and is re-announced until firstmate
+              acknowledges it, so a single wake is never lost to a missed
+              turn. That retry is per result sequence, not per task.
+  acknowledge bin/fm-procevent.sh handled progress-guard <sequence>
+
+The latch lives in the seam, not in core, so a re-announced result and a
+re-polled stall stay different things: the first is core's ordinary retry of
+one sequence until `handled`, the second is a poll the seam answers with
+silence because that stall is already recorded. Neither is wake-queue
+deduplication, and neither may stand in for the marker described under "One
+wake per stall: the latch".
+
+
+Latency and cost
+----------------
+
+The source holds one bounded long poll (up to 50 seconds) and re-scans the
+home's task records every 5 seconds inside it, so a newly stalled task is
+picked up mid-poll rather than at the next cycle. Each eligible task's
+evidence walk happens at most once per poll per latest status line, inside
+one shared 20-second scan budget for the poll with a 10-second per-task cap,
+so one large worktree spends only its own share and a walk that runs out of
+budget is silence for that task in that poll, never a stall verdict. When the
+poll returns no result the runner exits and the ordinary supervision cycle
+restarts it (FM_POLL, 15 seconds by default), so a stall is normally announced
+within roughly one poll plus one cycle after the threshold passes.
+
+Tests set state/progress-guard/poll-wait-ms (100-50000) to keep those waits
+short; an operator may shorten it too, and it can never lengthen a wait.
+
+
+Adapter state
+-------------
+
+The fork's own adapter state belongs to the seam. It writes exactly one
+thing: the latch marker <home>/state/<id>.progress-guard-latch, described
+under "One wake per stall: the latch", which the ordinary poll also prunes.
+Everything else it reads belongs to upstream or to optional configuration it
+never writes: state/<id>.meta, state/<id>.status, the recorded worktree,
+data/<id>/, and the two knobs under state/progress-guard/. It never writes a
+task record, a status line, or any authority record.
+
+
+Files
+-----
+
+  extension/firstmate-extension.json  the process-event-adapter/1 manifest:
+                                      id org.firstmate.fork.progress-guard,
+                                      adapter name "progress-guard", consent
+                                      task-metadata only.
+  extension/fm-progress-guard.mjs     the adapter: config_ref validation, the
+                                      scope gate above, the bounded long
+                                      poll, and the protocol verbs.
+  extension/stall.mjs                 the stall seam. It is the whole of the
+                                      adapter's judgment: the three-source
+                                      evidence scan, the stall predicate and
+                                      threshold, the latch and its hourly cap,
+                                      the wake body, and the self-conclusion
+                                      of an already-captured advisory.
+
+
+Tests
+-----
+
+  fork/tests/fm-fork-progress-guard.test.sh
+                                      the scope gate against a fixture home
+                                      (including the paused, terminal,
+                                      continuation-prose, secondmate, and
+                                      unattributable-worktree refusals), a
+                                      malformed or unusable config_ref and the
+                                      classification of the failure it
+                                      captures, a working task with fresh
+                                      evidence staying silent, and the real
+                                      binding, registration, capture, wake,
+                                      classification, re-announcement, and
+                                      acknowledgement path for one stalled
+                                      task.
+  fork/tests/fm-fork-progress-guard-latch.test.sh
+                                      the latch's own suite: a declared
+                                      `paused:` task staying silent however
+                                      long its evidence has been aged, one
+                                      stall waking once with a second sweep
+                                      silent, the hourly cap holding a
+                                      re-armed question, a new status line
+                                      re-arming the wake once the cap allows,
+                                      and the same-request-id repeat of an
+                                      uncaptured answer.
+  fork/tests/fm-fork-progress-guard-self-conclude.test.sh
+                                      the self-conclusion's own suite: a
+                                      capture whose task record is gone, and
+                                      one whose last status line is terminal,
+                                      both recorded handled with no wake
+                                      through the real host and runner; a
+                                      conclusion landing between capture and
+                                      read concluding the capture at read
+                                      time; a live task's capture still
+                                      re-announcing until acknowledged; and
+                                      the side verdicts (live record, missing
+                                      home reference, non-advisory content,
+                                      the poll-timeout absorb, and a
+                                      multi-advisory capture with one live
+                                      task) all keeping their wake.
+
+Every case drives the real extension host, the real process-event runner, and
+real upstream task records against fixture homes; no test contacts a network,
+a live fleet, or the running session's own home.
+
+
+Known limits
+------------
+
+  - Deliberately undetected rather than guessed at: secondmate tasks (their
+    homes churn on their own supervision, so the evidence is meaningless);
+    tasks with no recorded worktree or a worktree that is gone (attribution
+    failure, which stays silent by design); a status file whose last line is
+    continuation prose after a `working` line (the strict last-line reading
+    keeps the source silent, missing that stall rather than risking a false
+    wake); activity confined entirely to a pruned tree (node_modules, venv,
+    target, dist, and the rest) or deeper than six levels; and a walk that
+    spends its whole wall-clock budget, which is inconclusive silence for
+    that poll rather than a verdict.
+  - The evidence is file mtimes, so a worker whose entire output for the
+    window is CPU work with no file or status write at all looks identical to
+    a stalled one; the wake is advisory evidence to look, and firstmate's own
+    read of the worker decides what happened.
+  - The verb reading honors the default vocabulary only: the extension host
+    hands a bound package a minimal environment, so an FM_CAPTAIN_RE or
+    FM_CLASSIFY_PAUSED_VERB override set in a watcher's environment is not
+    visible here. That only ever widens silence (an override line parses as
+    itself, not as `working`), never a wake.
+  - The hourly cap reads its marker epoch against the poll's clock, so a
+    backwards system clock can extend the cap until the clock catches up;
+    that costs a late wake, never a duplicate one.
+  - The latch needs the host's own request id to prove delivery. A consult
+    without one neither reads nor writes a marker, so it can only ever repeat
+    a wake. The real host always sends the id; only a test or a foreign
+    caller reaches this case.
+  - One result carries at most 30000 bytes of advisory blocks. A home with
+    more simultaneously stalled tasks than fit leaves the ones past the bound
+    out of that result instead of publishing a result the host would refuse.
+    The seam latches a task when it returns its advisory, before the adapter
+    measures the body, so a task dropped past that bound is latched like the
+    rest and is re-offered only when its status line changes or its worker is
+    replaced: a missed wake that needs dozens of simultaneously stalled
+    tasks to reach, and a miss is the safe direction.
+  - Two local homes each maintain their own registration, source, and
+    markers; neither evaluates the other's records.
+  - Nothing here has been exercised against a live fleet: the tests run the
+    real extension host, the real process-event runner, the real stall seam,
+    and real upstream task records against fixture homes with no network.
