@@ -68,6 +68,19 @@ Ownership boundary
                       for that latch state), and the self-conclusion that
                       records a capture handled without a wake when its task is
                       already concluded by the time the capture is read.
+  Progress-stall wake fork/progress-guard/: process-event extension (adapter
+                      "progress-guard"). It ships the adapter, its
+                      registration, and the stall seam that emits an advisory
+                      wake when a task still declaring `working` has had no
+                      new status line, no new file or directory in its
+                      recorded worktree, and no new file or directory under
+                      data/<id>/ for a threshold window (25 minutes by
+                      default), while a paused, blocked, terminal, or
+                      unattributable task stays silent. Its latch wakes once
+                      per task per stall (a new status line re-arms) with a
+                      hard one-wake-per-task-per-hour cap, and a capture whose
+                      task is already concluded when it is read records
+                      handled with no wake (fork/progress-guard/README).
   Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
                       fork/bin/fm-fork-workflow-guard, fork/tests/.
   Fork CI             .github/workflows/fork-ci.yml; its workflow-guard step
@@ -102,6 +115,24 @@ wake per head: the latch"). A capture whose own task is already concluded when
 the capture is read - its pull request merged, or its task record gone -
 concludes itself: recorded handled with no wake, so a moot advisory is never
 presented or re-delivered (fork/pr-green/README, "Event delivery and
+acknowledgement").
+
+Progress-stall wake: fork/progress-guard/ (see fork/progress-guard/README).
+A fork-owned process-event extension, registered through the same seam as the
+PR-readiness wake. It wakes Firstmate when a worker looks busy but has stopped
+producing anything: a task whose last status line still carries `working`
+while its status file, its recorded worktree, and its data directory have all
+been silent past the stall threshold, while a declared `paused:` wait, a
+`blocked:` line, a terminal line, a secondmate, and a task whose worktree
+cannot be attributed stay silent however long they wait. The wake is advisory
+evidence to look at the worker - it names the task, the observed silence, and
+the newest evidence it found - and the package steers nothing, answers
+nothing, and writes only its own latch marker, one per task per stall, with a
+hard one-wake-per-task-per-hour cap (fork/progress-guard/README, "One wake per
+stall: the latch"). A capture whose task is already concluded when the
+capture is read - its record gone, or its last status line terminal -
+concludes itself: recorded handled with no wake, so a moot advisory is never
+presented or re-delivered (fork/progress-guard/README, "Event delivery and
 acknowledgement").
 
 Plan breakdown (the worker-construction step) is part of the ChatGPT channel,
