@@ -35,6 +35,26 @@ identical to one Pi accepted and has not yet consumed. It changes delivery for
 present rows, so it is deliberately not part of this guard.
 
 
+The recovery marker is not the engine
+-------------------------------------
+
+A drain that acknowledges the last queued row leaves state/.watcher-down at
+acked:handling:<generation> with an empty queue. That state cannot make the
+watcher announce check: rearm-resurface:
+  - the acked branch of _fm_recovery_marker_arm_check (bin/fm-wake-lib.sh)
+    recovers only while the queue file is non-empty, and the fork's HK3/HK5
+    guards additionally require a main-eligible queued row;
+  - a handling successor (every post-wake arm of the Pi extension) consumes
+    the marker once at startup, so the later in-loop check sees it already
+    reopened and waits;
+  - a running successor announces again only when a row is appended to the
+    queue, which reopens the episode (pending:downtime).
+fork/tests/fm-fork-watch-acked-marker.test.sh pins all three against the real
+watcher. An announcement that finds nothing to drain therefore had a row queued
+at the check that a drain retired before the follow-up was read - the class
+above. The marker lifecycle needs no change, in core or by a hook.
+
+
 The seam
 --------
 
@@ -109,3 +129,9 @@ Tests
                                               defect itself, it fails and
                                               this guard can be retired.
   fork/tests/moot-wake-lib.sh and moot-wake-fake-pi.mjs are their fixtures.
+  fork/tests/fm-fork-watch-acked-marker.test.sh
+                                              the real watcher with an acked
+                                              recovery marker: silent against
+                                              an empty queue in both roles,
+                                              announcing once only after a
+                                              row is appended.
