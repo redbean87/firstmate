@@ -140,7 +140,7 @@ run_check() {
 # --- the latency-only sweep --------------------------------------------------
 
 test_a_latency_only_sweep_produces_no_wake() {
-  local home fake out i work tools= record
+  local home fake out i work record tools_json=""
   # Six watch clones, every remote slower than any bound the sweep can give it.
   # Pre-fix this printed six "origin did not answer where main points" lines
   # against a silent, up-to-date fleet; it must print nothing at all.
@@ -149,10 +149,10 @@ test_a_latency_only_sweep_produces_no_wake() {
   make_remote_fake_git "$fake"
   for i in 1 2 3 4 5 6; do
     work=$(git_fixture "slow-$i")
-    [ -z "$tools" ] || tools="$tools,"
-    tools="$tools{\"name\":\"tool$i\",\"git\":{\"repo\":\"$work\",\"remote\":\"origin\",\"branch\":\"main\"}}"
+    [ -z "$tools_json" ] || tools_json="$tools_json,"
+    tools_json="$tools_json{\"name\":\"tool$i\",\"git\":{\"repo\":\"$work\",\"remote\":\"origin\",\"branch\":\"main\"}}"
   done
-  write_config "$home" "{\"tools\":[$tools]}"
+  write_config "$home" "{\"tools\":[$tools_json]}"
   out="$home/out.txt"
   run_check "$home" "$(fixture_path "$fake")" "$out" FM_TOOL_UPDATE_PROBE_SECS=1 FM_TOOL_UPDATE_BUDGET_SECS=12
   [ ! -s "$out" ] || fail "a sweep whose only findings are probe timeouts produced a wake: $(cat "$out")"
@@ -166,7 +166,7 @@ test_a_latency_only_sweep_produces_no_wake() {
 # --- one slow remote must not starve the tools after it ----------------------
 
 test_one_slow_remote_does_not_starve_the_tools_after_it() {
-  local home fake out work behind tools= report
+  local home fake out work behind report tools_json=""
   # Pre-fix, the first two slow remotes spent the whole budget on their own
   # probes: the sweep reported "check incomplete" for the third tool and never
   # reached the stale clone at all. The stale answer behind the slow remotes is
@@ -175,13 +175,13 @@ test_one_slow_remote_does_not_starve_the_tools_after_it() {
   fake="$TMP_ROOT/slice-fakebin"
   make_remote_fake_git "$fake"
   for work in "$(git_fixture slow-a)" "$(git_fixture slow-b)" "$(git_fixture slow-c)"; do
-    [ -z "$tools" ] || tools="$tools,"
-    tools="$tools{\"name\":\"${work##*/}\",\"git\":{\"repo\":\"$work\",\"remote\":\"origin\",\"branch\":\"main\"}}"
+    [ -z "$tools_json" ] || tools_json="$tools_json,"
+    tools_json="$tools_json{\"name\":\"${work##*/}\",\"git\":{\"repo\":\"$work\",\"remote\":\"origin\",\"branch\":\"main\"}}"
   done
   behind=$(git_fixture behind)
   behind_branch "$behind"
-  tools="$tools,{\"name\":\"behind\",\"git\":{\"repo\":\"$behind\",\"remote\":\"origin\",\"branch\":\"main\"}}"
-  write_config "$home" "{\"tools\":[$tools]}"
+  tools_json="$tools_json,{\"name\":\"behind\",\"git\":{\"repo\":\"$behind\",\"remote\":\"origin\",\"branch\":\"main\"}}"
+  write_config "$home" "{\"tools\":[$tools_json]}"
   out="$home/out.txt"
   run_check "$home" "$(fixture_path "$fake")" "$out" FM_TOOL_UPDATE_PROBE_SECS=4 FM_TOOL_UPDATE_BUDGET_SECS=8
   report=$(cat "$out")
@@ -229,7 +229,7 @@ test_a_local_probe_that_runs_and_stalls_still_reports() {
 # --- the silence and the record stay honest together -------------------------
 
 test_a_silent_sweep_does_not_mask_a_later_real_finding() {
-  local home fake out work behind tools= report
+  local home fake out work behind report tools_json=""
   # The record is the no-nag gate: unverified timeouts must not enter it, and a
   # real finding arriving on a later sweep must print even while the slow
   # remotes keep timing out in the same report.
@@ -238,10 +238,10 @@ test_a_silent_sweep_does_not_mask_a_later_real_finding() {
   make_remote_fake_git "$fake"
   for i in 1 2; do
     work=$(git_fixture "fslow-$i")
-    [ -z "$tools" ] || tools="$tools,"
-    tools="$tools{\"name\":\"tool$i\",\"git\":{\"repo\":\"$work\",\"remote\":\"origin\",\"branch\":\"main\"}}"
+    [ -z "$tools_json" ] || tools_json="$tools_json,"
+    tools_json="$tools_json{\"name\":\"tool$i\",\"git\":{\"repo\":\"$work\",\"remote\":\"origin\",\"branch\":\"main\"}}"
   done
-  write_config "$home" "{\"tools\":[$tools]}"
+  write_config "$home" "{\"tools\":[$tools_json]}"
   out="$home/out.txt"
   run_check "$home" "$(fixture_path "$fake")" "$out" FM_TOOL_UPDATE_PROBE_SECS=1 FM_TOOL_UPDATE_BUDGET_SECS=8
   [ ! -s "$out" ] || fail "the first slow sweep was not silent: $(cat "$out")"
@@ -249,7 +249,7 @@ test_a_silent_sweep_does_not_mask_a_later_real_finding() {
 
   behind=$(git_fixture fbehind)
   behind_branch "$behind"
-  write_config "$home" "{\"tools\":[$tools,{\"name\":\"behind\",\"git\":{\"repo\":\"$behind\",\"remote\":\"origin\",\"branch\":\"main\"}}]}"
+  write_config "$home" "{\"tools\":[$tools_json,{\"name\":\"behind\",\"git\":{\"repo\":\"$behind\",\"remote\":\"origin\",\"branch\":\"main\"}}]}"
   run_check "$home" "$(fixture_path "$fake")" "$out" FM_TOOL_UPDATE_PROBE_SECS=1 FM_TOOL_UPDATE_BUDGET_SECS=8
   report=$(cat "$out")
   assert_contains "$report" "behind update available: local main is 2 commits behind origin/main" "a real finding arriving after a silent timeout sweep was masked"
