@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# fm-registry-key - the registry key whose posture a project directory inherits.
+#
+# bin/fm-spawn.sh resolves a ship task's standing posture (mode, forge, PR
+# text, ship-branch prefix) by asking bin/fm-project-mode.sh about the project
+# directory's basename. That basename is the registry key for every project
+# cloned under projects/, but not for this home's own repository: the registry
+# registers the Firstmate repository under its own key while the checkout
+# directory keeps whatever name the operator cloned it as, so a spawn against
+# the home code root fell through to the unregistered-project default and
+# printed a false "less rigor than the captain's standing posture" notice.
+#
+# Usage: fm-registry-key <project-dir>
+# Prints exactly one registry key and exits 0:
+#   1. <project-dir>'s basename, when that name is a registered key;
+#   2. otherwise, when <project-dir> IS this repository's own code root by
+#      repository identity - bin/fm-role-lib.sh's fm_role_self_repo against
+#      this checkout (shared git common dir, or shared root commits), never a
+#      hard-coded directory name - the key of the registry entry that declares
+#      itself the home's own code root: the first data/projects.md entry whose
+#      line contains "home's own code root" (the description this registry
+#      gives the Firstmate repository entry, so the mapping is declared in the
+#      registry itself rather than in code);
+#   3. otherwise the basename unchanged, so a genuinely unregistered project
+#      keeps bin/fm-project-mode.sh's "not in registry" warning and its
+#      no-mistakes off default exactly as upstream resolves them.
+#
+# The registry path resolves exactly as bin/fm-project-mode.sh resolves it
+# (FM_DATA_OVERRIDE, else FM_HOME/data with FM_HOME defaulting under
+# FM_ROOT_OVERRIDE or this checkout), so the key and every posture query read
+# the same file. A registry line's key follows the format
+# bin/fm-project-mode.sh's header owns: the text after "- " up to the first
+# " [" or " - " (or the line end).
+#
+# Exits non-zero only when the key cannot be computed at all (an unreadable
+# registry fails loudly); bin/fm-spawn.sh's HK8 hook refuses the launch rather
+# than dispatching a ship on an unknown key.
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
+REG="$DATA/projects.md"
+PROJ=${1:?usage: fm-registry-key <project-dir>}
+BASE=$(basename "$PROJ")
+MARKER="home's own code root"
+
+registered=no
+home_key=
+if [ -f "$REG" ]; then
+  parsed=$(awk -v want="$BASE" -v marker="$MARKER" '
+    function key_of(line,   rest, i, j) {
+      rest = substr(line, 3)
+      i = index(rest, " [")
+      j = index(rest, " - ")
+      if (i && (!j || i < j)) return substr(rest, 1, i - 1)
+      if (j) return substr(rest, 1, j - 1)
+      return rest
+    }
+    substr($0, 1, 2) == "- " {
+      k = key_of($0)
+      if (k == want) registered = "yes"
+      if (home_key == "" && index($0, marker)) home_key = k
+    }
+    END {
+      print (registered == "yes" ? "registered=yes" : "registered=no")
+      print "home=" home_key
+    }
+  ' "$REG")
+  while IFS= read -r line; do
+    case $line in
+      registered=*) registered=${line#registered=} ;;
+      home=*) home_key=${line#home=} ;;
+    esac
+  done <<EOF
+$parsed
+EOF
+fi
+
+if [ "$registered" = yes ]; then
+  printf '%s\n' "$BASE"
+  exit 0
+fi
+if [ -n "$home_key" ]; then
+  # shellcheck source=bin/fm-role-lib.sh
+  . "$FM_ROOT/bin/fm-role-lib.sh"
+  if fm_role_self_repo "$PROJ" "$FM_ROOT"; then
+    printf '%s\n' "$home_key"
+    exit 0
+  fi
+fi
+printf '%s\n' "$BASE"

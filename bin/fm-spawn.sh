@@ -4069,7 +4069,7 @@ if [ -n "$SPAWN_PROJECT_CAPACITY" ]; then
     exit "$FM_PROJECT_CAPACITY_DEFER_EXIT"
   fi
 fi
-# >>> fork launch-policy hook HK1 (fork/README; the only fork edit in this file)
+# >>> fork launch-policy hook HK1 (fork/README; fork edit in this file)
 if [ -e "$CONFIG/fork-policies" ]; then
   FM_LP_PHASE=$([ "$RELAUNCH" -eq 1 ] && echo relaunch || echo spawn) FM_LP_TASK=$ID FM_LP_KIND=$KIND \
     FM_LP_PROJECT=$PROJ_ABS FM_LP_HARNESS=$HARNESS FM_LP_MODEL=$MODEL FM_LP_EFFORT=$EFFORT \
@@ -4174,6 +4174,12 @@ delivery_rigor_rank() { # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task 
 # differ, which is the exact drift this contract prevents.
 if [ "$KIND" = ship ]; then
   PROJ_NAME=$(basename "$PROJ_ABS")
+  # >>> fork registry-key hook HK8 (fork/README; fork edit in this file)
+  if ! PROJ_NAME=$("$FM_ROOT/fork/bin/fm-registry-key" "$PROJ_ABS"); then
+    echo "error: $ID cannot launch: the registry key for $PROJ_ABS could not be resolved (see the refusal above); correct data/projects.md or fork/bin/fm-registry-key and spawn again" >&2
+    exit 1
+  fi
+  # <<< fork registry-key hook HK8
   # The parser's own refusal reaches the operator here rather than being
   # discarded: an entry it refuses (an unknown forge token, or a forge on
   # local-only) resolves to no posture at all, and launching on the silent
