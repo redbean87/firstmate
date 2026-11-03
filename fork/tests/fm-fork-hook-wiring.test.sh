@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hook wiring: fork/bin/fm-fork-hook-check passes on this tree and detects each
-# way the two upstream integration points can go missing, drift, or move.
+# way an upstream hook block can go missing, drift, or move.
 # Mutations run on temporary copies; the real tree is never edited.
 set -u
 # shellcheck source=fork/tests/lib.sh
@@ -10,13 +10,14 @@ CHECK="$ROOT/fork/bin/fm-fork-hook-check"
 TMP_ROOT=$(fm_test_tmproot fm-fork-hook-wiring)
 mkdir -p "$TMP_ROOT"
 
-# copy_tree <name>: a minimal tree holding the four hooked files, the canonical
-# blocks, one other upstream bin file, and the four upstream libraries the
-# hook check greps for HK4/HK6's contract names. Echoes its root.
+# copy_tree <name>: a minimal tree holding the five hooked files, the canonical
+# blocks, one other upstream bin file, and the upstream libraries the hook
+# check greps for HK4/HK6's contract names. Echoes its root.
 copy_tree() {
   local t="$TMP_ROOT/$1"
   mkdir -p "$t/bin" "$t/fork/hooks"
   cp "$ROOT/bin/fm-spawn.sh" "$ROOT/bin/fm-control.sh" "$ROOT/bin/fm-watch.sh" "$ROOT/bin/fm-extension.mjs" \
+    "$ROOT/bin/fm-tool-update-check.sh" \
     "$ROOT/bin/fm-send.sh" \
     "$ROOT/bin/fm-wake-lib.sh" "$ROOT/bin/fm-push-transition-lib.sh" \
     "$ROOT/bin/fm-classify-lib.sh" "$ROOT/bin/fm-backend.sh" "$t/bin/"
@@ -32,7 +33,8 @@ p, expr = sys.argv[1], sys.argv[2]
 s = open(p).read()
 hk1 = open(p.rsplit("/bin/", 1)[0] + "/fork/hooks/hk1-spawn.block").read()
 hk2 = open(p.rsplit("/bin/", 1)[0] + "/fork/hooks/hk2-control.block").read()
-s2 = eval(expr, {"s": s, "hk1": hk1, "hk2": hk2})
+hk9 = open(p.rsplit("/bin/", 1)[0] + "/fork/hooks/hk9-tool-update.block").read()
+s2 = eval(expr, {"s": s, "hk1": hk1, "hk2": hk2, "hk9": hk9})
 assert s2 != s, "mutation did not change the file"
 open(p, "w").write(s2)
 PY
@@ -115,6 +117,29 @@ test_detects_hk2_before_profile() {
   edit "$t/bin/fm-control.sh" 's.replace("  resolve_relaunch_profile\n", "", 1)'
   expect_detected "$t" "HK2: block must follow resolve_relaunch_profile" "HK2 before the relaunch target is resolved"
   pass "wiring: HK2 judging an unresolved relaunch target is detected"
+}
+
+test_detects_missing_hk9() {
+  local t; t=$(copy_tree no-hk9)
+  edit "$t/bin/fm-tool-update-check.sh" 's.replace(hk9, "")'
+  expect_detected "$t" "HK9: expected exactly one hook block" "missing HK9"
+  pass "wiring: a removed HK9 is detected"
+}
+
+test_detects_hk9_moved_before_the_dispatch() {
+  local t; t=$(copy_tree early-hk9)
+  # Placing the block earlier would let upstream's later definitions overwrite
+  # its redefinitions, so the position is load-bearing, not cosmetic.
+  edit "$t/bin/fm-tool-update-check.sh" 's.replace(hk9, "").replace("\ngit_findings() {", "\n" + hk9 + "\ngit_findings() {", 1)'
+  expect_detected "$t" "HK9: block must sit directly before the action dispatch" "HK9 before the action dispatch"
+  pass "wiring: HK9 moved away from the action dispatch is detected"
+}
+
+test_detects_edited_hk9() {
+  local t; t=$(copy_tree edit-hk9)
+  edit "$t/bin/fm-tool-update-check.sh" 's.replace("      return 1\n      ;;\n    124)", "      return 0\n      ;;\n    124)")'
+  expect_detected "$t" "HK9: hook block in bin/fm-tool-update-check.sh differs" "edited HK9"
+  pass "wiring: an HK9 block that no longer classifies an unissued probe as unverified is detected"
 }
 
 test_detects_fork_reference_elsewhere() {

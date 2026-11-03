@@ -117,4 +117,22 @@ test_watch_conflict_is_classified_as_hook_file() {
   pass "sync: a bin/fm-watch.sh conflict classifies as a hook file"
 }
 
+test_tool_update_conflict_is_classified_as_hook_file() {
+  local r sha out rc
+  r=$(make_repo toolupdate)
+  git -C "$r" checkout -q main
+  printf 'tool line 1\ntool line 2\n' > "$r/bin/fm-tool-update-check.sh"
+  git -C "$r" add bin/fm-tool-update-check.sh
+  git -C "$r" commit -q -m "upstream adds tool check"
+  sha=$(git -C "$r" rev-parse HEAD)
+  git -C "$r" checkout -q fork/stage1-enforcement
+  printf 'tool line 1\n# fork hook\ntool line 2\n' > "$r/bin/fm-tool-update-check.sh"
+  git -C "$r" add bin/fm-tool-update-check.sh
+  git -C "$r" commit -q -m "fork hooks tool check"
+  out=$("$r/fork/bin/fm-fork-sync" prepare "$sha" --worktree "$TMP_ROOT/toolupdate-wt" 2>&1); rc=$?
+  expect_code 3 "$rc" "a tool-update conflict must exit 3"$'\n'"$out"
+  assert_contains "$out" "hook file  bin/fm-tool-update-check.sh" "bin/fm-tool-update-check.sh must classify as a hook file, not a boundary violation"
+  pass "sync: a bin/fm-tool-update-check.sh conflict classifies as a hook file"
+}
+
 fork_run_tests

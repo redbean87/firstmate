@@ -932,6 +932,147 @@ action_disarm() {
   return 0
 }
 
+# >>> fork tool-update hook HK9 (fork/README; fork edit in this file)
+# A watch remote that is slower than the probe bound is unverified, not broken:
+# on a link that answers git in 7-10 seconds every ls-remote hits the bound and
+# the sweep used to report "origin did not answer where main points" as a
+# tooling fault on every poll, and the spent budget then starved the tools
+# after it with "check incomplete". Only what the clock - never an answer -
+# produced is reclassified here:
+#   - a git probe the sweep never issued (GIT_PROBE_NOT_ISSUED) says nothing;
+#   - a git probe to the watch remote that hit its bound (124) says nothing:
+#     git_probe_answered receives the remote name as the subject of exactly
+#     those probes and the repository's absolute path for the local ones, the
+#     split config_validate enforces on both fields;
+#   - a local git probe that ran and never answered keeps reporting upstream's
+#     check failure, because on a local repository that stall is a real
+#     tooling problem, not network latency;
+#   - every answered probe reports byte-for-byte as upstream wrote it,
+#     including a genuine remote error (a non-zero status that is not the
+#     bound) and upstream's own "check incomplete" line when the whole sweep
+#     budget truly runs out.
+# The starvation half: every tool takes its own slice of the sweep budget
+# (whole seconds of the budget still left, divided by the tools still
+# unvisited, never below one second and never past the sweep deadline), so one
+# slow remote spends only its own slice and every tool after it still gets its
+# turn. The slices sum below the budget behind a small reserve, so a slow
+# sweep's last tools still open their turn instead of reading as truncated.
+FORK_TOOL_SLICE_RESERVE=2
+FORK_TOOL_LAST=
+FORK_TOOL_COUNT=0
+FORK_TOOL_INDEX=0
+FORK_TOOL_DEADLINE=0
+
+# fork_tool_begin <name>: open this tool's slice. budget_allows runs once per
+# tool at the top of the sweep loop and again from git_findings, so the
+# same-name call is a no-op and each tool's slice is opened exactly once.
+fork_tool_begin() {
+  local name=$1 now left remaining share
+  [ "$name" = "$FORK_TOOL_LAST" ] && return 0
+  FORK_TOOL_LAST=$name
+  if [ "$FORK_TOOL_COUNT" -le 0 ]; then
+    FORK_TOOL_COUNT=$(config_records | grep -c . 2>/dev/null)
+    case "$FORK_TOOL_COUNT" in
+      ''|*[!0-9]*) FORK_TOOL_COUNT=0 ;;
+    esac
+  fi
+  FORK_TOOL_INDEX=$((FORK_TOOL_INDEX + 1))
+  now=$(real_epoch)
+  left=$((DEADLINE - now))
+  remaining=$((FORK_TOOL_COUNT - FORK_TOOL_INDEX + 1))
+  if [ "$FORK_TOOL_COUNT" -le 0 ] || [ "$remaining" -le 0 ]; then
+    # The registry could not be counted: fall back to the unshared sweep
+    # budget rather than guess a slice from nothing.
+    FORK_TOOL_DEADLINE=$DEADLINE
+    return 0
+  fi
+  share=$(((left - FORK_TOOL_SLICE_RESERVE) / remaining))
+  [ "$share" -ge 1 ] || share=1
+  FORK_TOOL_DEADLINE=$((now + share))
+  [ "$FORK_TOOL_DEADLINE" -le "$DEADLINE" ] || FORK_TOOL_DEADLINE=$DEADLINE
+  return 0
+}
+
+# The sweep deadline alone - what upstream's budget_allows still answers
+# against. A finished per-tool slice must never read as a spent sweep here, or
+# one slow tool would silence every tool after it a second time.
+fork_global_budget_exhausted() {
+  [ "$(real_epoch)" -ge "$DEADLINE" ]
+}
+
+# The probe bound, now also cut to this tool's slice, so no probe - local or
+# network - can spend a whole sweep on one remote. Never below
+# PROBE_MIN_SECS, because fm_run_timed treats a non-positive bound as none.
+probe_bound() {
+  local now left tool_left
+  now=$(real_epoch)
+  left=$((DEADLINE - now))
+  if [ "$FORK_TOOL_DEADLINE" -gt 0 ]; then
+    tool_left=$((FORK_TOOL_DEADLINE - now))
+    if [ "$tool_left" -lt "$left" ]; then
+      left=$tool_left
+    fi
+  fi
+  if [ "$left" -lt "$PROBE_MIN_SECS" ]; then
+    printf '%s\n' "$PROBE_MIN_SECS"
+  elif [ "$left" -lt "$PROBE_SECS" ]; then
+    printf '%s\n' "$left"
+  else
+    printf '%s\n' "$PROBE_SECS"
+  fi
+}
+
+# A probe is out of time when the sweep deadline passed or this tool's own
+# slice did: the loops stop instead of issuing it, and git_probe reports
+# GIT_PROBE_NOT_ISSUED, which git_probe_answered below reads as unverified.
+budget_exhausted() {
+  local now
+  now=$(real_epoch)
+  [ "$now" -ge "$DEADLINE" ] && return 0
+  [ "$FORK_TOOL_DEADLINE" -gt 0 ] && [ "$now" -ge "$FORK_TOOL_DEADLINE" ]
+}
+
+# Upstream's sweep-level gate, unchanged in text and still driven by the whole
+# sweep budget only: a sweep that genuinely cannot finish keeps naming the tool
+# it did not finish, exactly as before. The per-tool slice lives in
+# budget_exhausted and probe_bound, never here.
+budget_allows() {
+  local name=$1
+  fork_tool_begin "$name"
+  fork_global_budget_exhausted || return 0
+  if [ "$INCOMPLETE_REPORTED" -eq 0 ]; then
+    INCOMPLETE_REPORTED=1
+    emit "check incomplete: the time budget ran out before $name"
+  fi
+  return 1
+}
+
+# The single reclassification point: upstream reads a hit bound as a failed
+# probe for every subject. An answer that never arrived - never issued, or
+# issued to the watch remote and killed by its bound - is unverified and stays
+# out of the report; a local probe that ran and stalled keeps upstream's check
+# failure, and any real status flows through untouched.
+git_probe_answered() {
+  local status=$1 name=$2 subject=$3 question=$4
+  case "$status" in
+    "$GIT_PROBE_NOT_ISSUED")
+      return 1
+      ;;
+    124)
+      case "$subject" in
+        /*)
+          emit "$name check failed: $subject did not answer $question"
+          return 1
+          ;;
+        *)
+          return 1
+          ;;
+      esac
+      ;;
+  esac
+  return 0
+}
+# <<< fork tool-update hook HK9
 case "${1:-check}" in
   check) action_check ;;
   arm) action_arm ;;
