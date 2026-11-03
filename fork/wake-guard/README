@@ -1,0 +1,111 @@
+Firstmate fork: moot-wake guard
+===============================
+
+Stops a Pi primary from being woken for a wake whose queue rows are already
+gone. The cost it removes is one full model turn that runs the drain, prints
+nothing, and acknowledges nothing.
+
+It is fork-owned and edits no upstream file. Everything lives under
+fork/wake-guard/. Like fork/README, this file is plain text with no extension
+on purpose: upstream's documentation-audience check requires every tracked
+*.md, *.mdx, *.rst, and *.txt file to be registered in an upstream-owned
+inventory, and the fork does not edit that inventory.
+
+
+The defect
+----------
+
+The upstream Pi watch extension (.pi/extensions/fm-primary-pi-watch.ts)
+delivers an actionable close to main without reading the wake queue, and keeps
+a delivered-but-unconsumed close in a pending record that rides a session
+replacement (/new, /resume, /fork, reload) and is delivered again. Consumption
+is matched on message text, not on a queue row. So a wake whose rows a drain
+retired in the meantime reaches main again, and main's drain prints nothing.
+
+What this guard does NOT cover: a follow-up Pi already holds in its queue.
+Pi offers no way to cancel or veto a queued extension follow-up (the input
+event runs when it is sent, before_agent_start cannot veto), so a row that
+still existed when the follow-up was sent is outside this guard. The live
+2026-11-03 repeats were of that kind: the watcher itself emitted
+check: rearm-resurface three times, about 52 seconds apart, each time with a
+main-eligible row queued (the HK3/HK4/HK5 guards were present and passed), main
+was busy, and its first drain then retired the row and printed nothing. The
+follow-up that remains is coalescing: do not send a wake whose text is
+identical to one Pi accepted and has not yet consumed. It changes delivery for
+present rows, so it is deliberately not part of this guard.
+
+
+The seam
+--------
+
+Before a close reaches main, the upstream extension emits one offer on the
+extension event bus, FM_BRANCH_DISPATCH_EVENT ("fm-branch-supervision:dispatch",
+.pi/extensions/lib/fm-branch-dispatch.ts), and when a listener calls
+offer.accept() it treats the close as handled by that listener: the pending
+record finishes and nothing is sent. The offer is made only after the successor
+watcher is restored and the --handling-delivered handshake has run, and never
+when restoration failed, so continuity and every watcher-failure alarm are
+untouched. fm-pi-moot-wake.ts is a second listener on that event. The
+supervision branch is the first; an offer another listener already accepted is
+never touched.
+
+
+The rule
+--------
+
+The guard accepts an offer only when both hold:
+
+  1. The close is a row-backed wake kind: the watcher appends a queue row
+     before it prints one of check: rearm-resurface, signal:, stale:, and
+     heartbeat. Wakes that carry their own durable payload without a queue row
+     (check: inactive-outcome, contribution checks, process-event results) and
+     every watcher-failure alarm are never settled here.
+  2. state/.wake-queue exists, reads cleanly, and holds zero bytes. A missing,
+     unreadable, non-empty, or blank-line queue is not proof, so the wake is
+     delivered exactly as upstream would. A queue holding any row, including
+     rows reserved for the supervision branch, is left to the upstream path.
+
+Any error inside the handler is swallowed and the offer is left declined, so a
+doubt delivers. Each settled wake appends one line to state/.moot-wake.log
+(bounded, best-effort; a logging failure never changes the outcome).
+
+
+Activation
+----------
+
+Loading is EXPLICIT, like fork/discord/fm-pi-reply-mirror.ts: the operator-owned
+launcher must pass the extension on Pi launches:
+
+  pi -e "$home/fork/wake-guard/fm-pi-moot-wake.ts"
+
+A launcher that already passes pi -e for fm-pi-reply-mirror.ts adds this as a
+second -e. Auto-discovery is not available: a new file under the
+upstream-owned .pi/extensions/ is refused by fork/bin/fm-fork-hook-check
+--base, so the repository change alone activates nothing. A session restarted
+without the flag silently runs without the guard; state/.moot-wake.log is the
+evidence that it is active.
+
+
+Tests
+-----
+
+  fork/tests/fm-fork-moot-wake.test.sh       decision cases against hand-built
+                                              offers: each wake kind, every
+                                              doubt, a prior acceptance,
+                                              malformed offers, the log bound,
+                                              and the pinned event name.
+  fork/tests/fm-fork-moot-wake-e2e.test.sh   the REAL upstream extension and
+                                              this extension on one fake Pi
+                                              event bus: a gone-row wake is
+                                              settled on replay and before its
+                                              first delivery with the
+                                              successor and handshake intact;
+                                              a present-row wake is delivered
+                                              as today; rows-less wakes and
+                                              restoration failures always
+                                              deliver. The unguarded baseline
+                                              is the pinned reproduction: if
+                                              an upstream sync fixes the
+                                              defect itself, it fails and
+                                              this guard can be retired.
+  fork/tests/moot-wake-lib.sh and moot-wake-fake-pi.mjs are their fixtures.

@@ -81,6 +81,15 @@ Ownership boundary
                       hard one-wake-per-task-per-hour cap, and a capture whose
                       task is already concluded when it is read records
                       handled with no wake (fork/progress-guard/README).
+  Moot-wake guard     fork/wake-guard/fm-pi-moot-wake.ts: a fork-owned Pi
+                      extension that listens on the upstream Pi watch
+                      extension's dispatch-offer event and settles a row-backed
+                      wake (check: rearm-resurface, signal:, stale:,
+                      heartbeat) as handled, sending nothing to main, only
+                      when the wake queue is readable and holds zero bytes.
+                      It edits no upstream file and is loaded explicitly
+                      (pi -e), so the repository change alone activates
+                      nothing (fork/wake-guard/README).
   Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
                       fork/bin/fm-fork-workflow-guard, fork/tests/.
   Fork CI             .github/workflows/fork-ci.yml; its workflow-guard step
@@ -134,6 +143,21 @@ capture is read - its record gone, or its last status line terminal -
 concludes itself: recorded handled with no wake, so a moot advisory is never
 presented or re-delivered (fork/progress-guard/README, "Event delivery and
 acknowledgement").
+
+Moot-wake guard: fork/wake-guard/ (see fork/wake-guard/README). A fork-owned Pi
+extension for a Pi primary. The upstream Pi watch extension never reads the
+wake queue before it delivers a close, and replays an accepted-but-unconsumed
+close into a replacement session, so a wake whose queue rows were drained in
+the meantime still costs main a turn that drains nothing. Before a close
+reaches main the upstream extension emits one dispatch offer on the extension
+event bus and treats an accepted offer as handled; this guard accepts it only
+for a row-backed wake kind while the queue is readable and holds zero bytes.
+The successor watcher is restored and the --handling-delivered handshake has
+already run by then, and a restoration failure never makes an offer, so
+continuity and every watcher-failure alarm are untouched. It edits no upstream
+file (fm-fork-hook-check --base refuses even a new file under the upstream
+.pi/extensions/) and is loaded explicitly with pi -e, so the repository change
+alone activates nothing.
 
 Plan breakdown (the worker-construction step) is part of the ChatGPT channel,
 not the bridge: the bridge (codex-chatgpt-web, fm-chatgpt-bridge-lib.sh,
