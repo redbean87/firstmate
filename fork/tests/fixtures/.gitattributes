@@ -1,0 +1,4 @@
+# These fixtures are sanitized captures of real herdr pane output, and the
+# ANSI form carries the CRLF line endings herdr itself emits, so git stores
+# their exact bytes instead of applying core.autocrlf=input.
+* -text

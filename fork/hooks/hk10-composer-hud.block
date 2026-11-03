@@ -1,0 +1,40 @@
+  # >>> fork composer-hud hook HK10 (fork/README; fork edit in this file)
+  # The themed HUD footer a local theme draws below a Claude composer - the
+  # `◆ GIG ...⌂ ...` title row and the objective, rule, and LVL/XP/RAM stat
+  # rows under it - is harness furniture, never composer content, but its rule
+  # rows are byte-shape-identical to a pi separator, so the row loop below
+  # closed a separator pair across the HUD title rows, selected those rows as
+  # the bottom-most composer, and answered unknown on an idle empty pane,
+  # which refused the doorbell, exit, and relaunch (herdr + local theme,
+  # 2026-11-02).
+  # Once the title row is seen, every later row is blanked in this scan's own
+  # pane copy: blanked in place, so every row index the loop records still
+  # points at the caller's screen, and only in this copy, so the caller's
+  # screen bytes and every content read of the selected rows stay untouched.
+  # A capture without that title row never sets the flag and passes through
+  # byte-identical, so no other harness's verdict can move, and the
+  # asymmetry holds: the block can only stop furniture BELOW the composer
+  # from counting as structure, never blank a row above it that the
+  # composer verdict depends on.
+  local fm_hud_seen=0 fm_hud_changed=0 fm_hud_line fm_hud_trim
+  local fm_hud_out=''
+  while IFS= read -r fm_hud_line; do
+    fm_hud_trim=$fm_hud_line
+    fm_composer_normalize_trim_var fm_hud_trim
+    if [ "$fm_hud_seen" = 0 ]; then
+      case "$fm_hud_trim" in
+        '◆ GIG'*'⌂'*) fm_hud_seen=1 ;;
+      esac
+    fi
+    if [ "$fm_hud_seen" = 1 ]; then
+      fm_hud_line=''
+      fm_hud_changed=1
+    fi
+    fm_hud_out="${fm_hud_out}${fm_hud_line}"$'\n'
+  done <<EOF
+$pane
+EOF
+  if [ "$fm_hud_changed" = 1 ]; then
+    pane=${fm_hud_out%$'\n'}
+  fi
+  # <<< fork composer-hud hook HK10

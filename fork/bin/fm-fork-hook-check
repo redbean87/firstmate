@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fm-fork-hook-check - prove the fork's nine upstream integration points are
+# fm-fork-hook-check - prove the fork's ten upstream integration points are
 # present, unmodified, and at their lifecycle positions, and (with --base) that
 # no other upstream-owned file differs from upstream.
 #
@@ -60,10 +60,15 @@
 #     its redefinitions and per-tool slice state are in place before
 #     `case "${1:-check}"` runs action_check; every upstream name it reads is
 #     defined earlier in that file.
+#   - HK10 appears exactly once in bin/fm-composer-lib.sh, byte-identical to
+#     fork/hooks/hk10-composer-hud.block, inside _fm_composer_scan_screen
+#     directly before its row loop, so the themed-HUD pre-filter runs on every
+#     scan; the upstream names it reads (the pane local, the row loop, and
+#     fm_composer_normalize_trim_var) exist in that file.
 #   - No upstream-owned bin/ file other than the launch-policy hook files
 #     references fork code.
 #   - --base: `git diff <ref>` outside fork/ and the fork CI workflow touches
-#     only the five hooked files, and only by adding their canonical hook
+#     only the six hooked files, and only by adding their canonical hook
 #     blocks (every block the base lacks, in file order).
 # Prints one `ok:` or `FAIL:` line per check; exits 1 if any check fails.
 set -u
@@ -74,7 +79,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT=$(cd "${2:?--root needs a path}" && pwd); shift 2 ;;
     --base) BASE=${2:?--base needs a ref}; shift 2 ;;
-    -h|--help) sed -n '2,68p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "fm-fork-hook-check: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -88,6 +93,7 @@ CONTROL="$ROOT/bin/fm-control.sh"
 WATCH="$ROOT/bin/fm-watch.sh"
 EXTENSION="$ROOT/bin/fm-extension.mjs"
 TOOLCHECK="$ROOT/bin/fm-tool-update-check.sh"
+COMPOSER="$ROOT/bin/fm-composer-lib.sh"
 HK1="$ROOT/fork/hooks/hk1-spawn.block"
 HK2="$ROOT/fork/hooks/hk2-control.block"
 HK3="$ROOT/fork/hooks/hk3-watch.block"
@@ -97,7 +103,8 @@ HK6="$ROOT/fork/hooks/hk6-parked-review.block"
 HK7="$ROOT/fork/hooks/hk7-result-configref.block"
 HK8="$ROOT/fork/hooks/hk8-registry-key.block"
 HK9="$ROOT/fork/hooks/hk9-tool-update.block"
-for f in "$SPAWN" "$CONTROL" "$WATCH" "$EXTENSION" "$TOOLCHECK" "$HK1" "$HK2" "$HK3" "$HK4" "$HK5" "$HK6" "$HK7" "$HK8" "$HK9"; do
+HK10="$ROOT/fork/hooks/hk10-composer-hud.block"
+for f in "$SPAWN" "$CONTROL" "$WATCH" "$EXTENSION" "$TOOLCHECK" "$COMPOSER" "$HK1" "$HK2" "$HK3" "$HK4" "$HK5" "$HK6" "$HK7" "$HK8" "$HK9" "$HK10"; do
   [ -f "$f" ] || { bad "missing file ${f#"$ROOT"/}"; exit 1; }
 done
 
@@ -433,6 +440,31 @@ if find_block "$TOOLCHECK" "$HK9" HK9; then
   fi
 fi
 
+# --- HK10: bin/fm-composer-lib.sh themed-HUD furniture pre-filter -------------
+if find_block "$COMPOSER" "$HK10" HK10; then
+  # Anchor: inside _fm_composer_scan_screen, directly before its row loop, so
+  # the pre-filter rewrites the scan's pane copy before any row is classified.
+  fn_start=$(grep -nE '^_fm_composer_scan_screen\(\) \{' "$COMPOSER" | head -1 | cut -d: -f1)
+  # shellcheck disable=SC2016 # literal upstream source line
+  row_loop=$(line_of "$COMPOSER" '  while IFS= read -r line; do')
+  next=$(awk -v n="$BLOCK_END" 'NR > n && NF { print NR; exit }' "$COMPOSER")
+  if [ -z "$fn_start" ] || [ -z "$row_loop" ]; then
+    bad "HK10: an upstream anchor is gone (_fm_composer_scan_screen or its row loop); re-anchor the block"
+  elif [ "$BLOCK_BEGIN" -le "$fn_start" ] || [ "$next" != "$row_loop" ]; then
+    bad "HK10: block must sit inside _fm_composer_scan_screen (line $fn_start), directly before its row loop (line $row_loop)"
+  else
+    ok "HK10: inside _fm_composer_scan_screen ($fn_start), directly before its row loop ($row_loop)"
+  fi
+  missing=
+  grep -qE '^fm_composer_normalize_trim_var\(\)' "$COMPOSER" || missing="$missing fm_composer_normalize_trim_var"
+  [ -n "$(first_assignment "$COMPOSER" pane)" ] || missing="$missing pane"
+  if [ -n "$missing" ]; then
+    bad "HK10: upstream names the block reads are missing:$missing"
+  else
+    ok "HK10: every upstream name the block reads exists"
+  fi
+fi
+
 # --- no other fork reference in upstream-owned bin/ ---------------------------
 others=$(grep -lE 'fork/bin/|FM_LP_[A-Z]' "$ROOT"/bin/* 2>/dev/null | grep -vxF -e "$SPAWN" -e "$CONTROL" || true)
 if [ -n "$others" ]; then
@@ -450,19 +482,19 @@ if [ -n "$BASE" ]; then
     outside=
     for f in $changed; do
       case "$f" in
-        bin/fm-control.sh|bin/fm-spawn.sh|bin/fm-watch.sh|bin/fm-extension.mjs|bin/fm-tool-update-check.sh) ;;
+        bin/fm-control.sh|bin/fm-spawn.sh|bin/fm-watch.sh|bin/fm-extension.mjs|bin/fm-tool-update-check.sh|bin/fm-composer-lib.sh) ;;
         *) outside="$outside $f" ;;
       esac
     done
     if [ -n "$outside" ]; then
-      bad "--base $BASE: upstream-owned files differing:${outside# } (expected only bin/fm-control.sh bin/fm-spawn.sh bin/fm-watch.sh bin/fm-extension.mjs bin/fm-tool-update-check.sh)"
+      bad "--base $BASE: upstream-owned files differing:${outside# } (expected only bin/fm-control.sh bin/fm-spawn.sh bin/fm-watch.sh bin/fm-extension.mjs bin/fm-tool-update-check.sh bin/fm-composer-lib.sh)"
     else
       # Each hooked file's added lines must be exactly the canonical blocks the
       # BASE copy lacks, concatenated in the working file's own order: a hook
       # the base already carries contributes nothing, and any added line
       # outside a missing block (or a block moved out of order) is extra.
       extra=
-      for file in bin/fm-spawn.sh bin/fm-control.sh bin/fm-watch.sh bin/fm-extension.mjs bin/fm-tool-update-check.sh; do
+      for file in bin/fm-spawn.sh bin/fm-control.sh bin/fm-watch.sh bin/fm-extension.mjs bin/fm-tool-update-check.sh bin/fm-composer-lib.sh; do
         printf '%s\n' "$changed" | grep -qxF -- "$file" || continue
         diff_out=$(git -C "$ROOT" diff -U0 "$BASE" -- "$file")
         deleted=$(printf '%s\n' "$diff_out" | grep -cE '^-([^-]|$)' || true)
@@ -475,6 +507,7 @@ if [ -n "$BASE" ]; then
             bin/fm-watch.sh) set -- "$HK4" "$HK5" "$HK3" "$HK6" ;;
             bin/fm-extension.mjs) set -- "$HK7" ;;
             bin/fm-tool-update-check.sh) set -- "$HK9" ;;
+            bin/fm-composer-lib.sh) set -- "$HK10" ;;
           esac
           for block in "$@"; do
             begin=$(head -1 "$block")
