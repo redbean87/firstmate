@@ -213,7 +213,10 @@ The hook points
        costs main an empty "watching resumed" turn.
   HK4  bin/fm-watch.sh, directly before resurface_after_downtime(): defines
        fork_main_eligible_queued_row on upstream's fm_wake_actor_pending_count
-       (bin/fm-wake-lib.sh), the same main-eligible filter the drain applies.
+       (bin/fm-wake-lib.sh), the same main-eligible filter the drain applies,
+       minus the rows state/.main-eligible-rows records as already presented
+       to main (queued only until its acknowledgement), so a watcher re-armed
+       while main is still handling a row announces nothing.
   HK5  bin/fm-watch.sh, inside resurface_after_downtime()'s
        FM_WATCH_HANDLING_SUCCESSOR branch, between upstream's queue gate and
        that branch's trailing wake. This is the site the live noise actually
