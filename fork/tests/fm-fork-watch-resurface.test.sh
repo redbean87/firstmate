@@ -104,6 +104,54 @@ test_empty_queue_produces_no_recovery_wake() {
   pass "resurface: an empty wake queue stays silent - no empty watching-resumed turn"
 }
 
+# The fork's side of the stalled-holder divergence (fork/README "Known
+# divergence"): upstream's arm test expects the replacement of a stalled holder
+# to surface a wake even with nothing queued, which HK3 deliberately withholds.
+# What must still hold under the guard is the replacement itself - the stalled
+# holder is evicted, the successor takes the lock and keeps supervising - and
+# that an empty queue stays silent. A holder is stalled once its beacon age
+# passes the hard bound, so the beacon is backdated instead of slept out.
+test_stalled_holder_is_replaced_silently() {
+  local state fakebin home out holder identity i
+  read -r state fakebin home out < <(make_watch_case resurface-stalled)
+  sleep 300 &
+  holder=$!
+  identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$ROOT/bin/fm-wake-lib.sh" "$holder") \
+    || fail "could not identify the fake holder"
+  mkdir -p "$state/.watch.lock"
+  printf '%s\n' "$holder" > "$state/.watch.lock/pid"
+  printf '%s\n' "$home" > "$state/.watch.lock/fm-home"
+  printf '%s\n' "$WATCH" > "$state/.watch.lock/watcher-path"
+  printf '%s\n' "$identity" > "$state/.watch.lock/pid-identity"
+  : > "$state/.last-watcher-beat"
+  touch -t 200001010000 "$state/.last-watcher-beat"
+  PATH="$fakebin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$state" \
+    FM_POLL=1 FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+    FM_WATCHER_STALL_BOUND=12 "$WATCH" > "$out" 2>&1 &
+  WATCH_PID=$!
+  i=0
+  while [ "$i" -lt 100 ] && kill -0 "$holder" 2>/dev/null; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if kill -0 "$holder" 2>/dev/null; then
+    kill "$holder" 2>/dev/null || true
+    stop_watch "$WATCH_PID"
+    fail "the stalled holder was not evicted: $(cat "$out")"
+  fi
+  wait "$holder" 2>/dev/null || true
+  wait_watch_ready "$state" "$WATCH_PID" \
+    || { stop_watch "$WATCH_PID"; fail "the successor never took the lock: $(cat "$out")"; }
+  sleep 3
+  kill -0 "$WATCH_PID" 2>/dev/null || fail "the successor exited: $(cat "$out")"
+  assert_contains "$(cat "$out")" "watcher: replaced stalled pid $holder " \
+    "the eviction must be announced"
+  assert_not_contains "$(cat "$out")" "$REARM" \
+    "an empty queue must stay silent after a stalled-holder replacement"
+  stop_watch "$WATCH_PID"
+  pass "resurface: a stalled holder is replaced and the empty-queue guard stays silent"
+}
+
 # A row genuinely queued must still resurface exactly as upstream: one wake,
 # one announcement, no silence.
 test_queued_row_resurfaces_exactly_once() {
