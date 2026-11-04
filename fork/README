@@ -711,8 +711,9 @@ tests/fm-watcher-lock.test.sh (the successor recovery-wake case). They are
 excluded from this fork's upstream-suite runs as this recorded reason, never
 edited; drop the exclusion when upstream lands the guard from issue 8092.
 Our own gate for the guard is fork/tests/fm-fork-watch-resurface.test.sh,
-which proves both directions end to end: an empty queue stays silent and a
-queued row still wakes - and fork/tests/fm-fork-watch-parked-main-eligible
+which proves both directions end to end: an empty queue stays silent, a
+stalled lock holder is still replaced (the half of the arm case the fork keeps),
+and a queued row still wakes - and fork/tests/fm-fork-watch-parked-main-eligible
 .test.sh extends it to the branch-granted queue (silent at both wake sites),
 the main-eligible row (still wakes), and the stale path (a stuck worker still
 detected, a done worker parked on a recorded open PR absorbed, the same done
