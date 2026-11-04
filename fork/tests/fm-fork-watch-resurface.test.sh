@@ -191,6 +191,103 @@ test_startup_pending_queued_row_wakes_once() {
   pass "resurface: a queued row with recovery pending still wakes exactly once"
 }
 
+# --- behaviour: a row main was already shown is not "left for" main ----------
+#
+# The drain presents rows and records them in state/.main-eligible-rows; they
+# stay queued until main acknowledges, and a watcher re-armed inside that
+# window used to count them and announce an empty "watching resumed" turn
+# (the recurring noise: marker acked:handling:<gen>, queue holding only the
+# row main was handling, a drain before and after reporting nothing new).
+
+# presented_case <name> <marker-or-empty>: a case whose queue holds one row
+# (seq 1) that the drain already presented to main. Echoes make_watch_case's
+# line. The marker is written after the append, which publishes its own.
+presented_case() {
+  local state fakebin home out
+  read -r state fakebin home out < <(make_watch_case "$1")
+  append_wake "$state" check resurface-presented \
+    'check: fixture row main is already handling' \
+    || fail "fixture: could not append the wake row"
+  printf '1\n' > "$state/.main-eligible-rows"
+  if [ -n "$2" ]; then
+    printf '%s\n' "$2" > "$state/.watcher-down"
+    chmod 600 "$state/.watcher-down"
+  else
+    rm -f "$state/.watcher-down"
+  fi
+  printf '%s %s %s %s\n' "$state" "$fakebin" "$home" "$out"
+}
+
+# watch_for_rearm <state> <fakebin> <home> <out> <polls>: run the real watcher
+# and set WATCH_PID and WAKES (rearm-resurface wakes emitted).
+watch_for_rearm() {
+  local state=$1 fakebin=$2 home=$3 out=$4 polls=$5 i=0
+  start_watch "$state" "$fakebin" "$home" "$out"
+  while [ "$i" -lt "$polls" ] && ! grep -qx "$REARM" "$out" 2>/dev/null; do
+    kill -0 "$WATCH_PID" 2>/dev/null || break
+    sleep 0.5
+    i=$((i + 1))
+  done
+  sleep 1  # let a duplicate wake land if the guard is broken
+  WAKES=$(grep -c "^$REARM$" "$out" 2>/dev/null || true)
+}
+
+test_presented_row_after_acked_handling_stays_silent() {
+  local state fakebin home out wakes
+  read -r state fakebin home out < <(presented_case presented-acked 'acked:handling:fixture.1.presentedacked')
+  watch_for_rearm "$state" "$fakebin" "$home" "$out" 12; wakes=$WAKES
+  if [ "${wakes:-0}" -ne 0 ]; then
+    stop_watch "$WATCH_PID"
+    fail "a row main already presented produced a recovery wake: $(cat "$out")"
+  fi
+  grep "$(printf '\tcheck\tresurface-presented\t')" "$state/.wake-queue" >/dev/null \
+    || fail "the presented row must stay queued until main acknowledges it"
+  stop_watch "$WATCH_PID"
+  pass "resurface: a row main already presented (acked:handling marker) stays silent and queued"
+}
+
+test_presented_row_with_marker_absent_stays_silent() {
+  local state fakebin home out wakes
+  read -r state fakebin home out < <(presented_case presented-nomarker '')
+  watch_for_rearm "$state" "$fakebin" "$home" "$out" 12; wakes=$WAKES
+  if [ "${wakes:-0}" -ne 0 ]; then
+    stop_watch "$WATCH_PID"
+    fail "a presented row with no marker produced a recovery wake: $(cat "$out")"
+  fi
+  stop_watch "$WATCH_PID"
+  pass "resurface: a presented row with the downtime marker absent stays silent"
+}
+
+test_presented_plus_new_row_wakes_once() {
+  local state fakebin home out wakes
+  read -r state fakebin home out < <(presented_case presented-plus-new '')
+  append_wake "$state" check resurface-new \
+    'check: fixture row that arrived after the drain' \
+    || fail "fixture: could not append the second wake row"
+  printf 'acked:handling:fixture.1.presentedplus\n' > "$state/.watcher-down"
+  chmod 600 "$state/.watcher-down"
+  watch_for_rearm "$state" "$fakebin" "$home" "$out" 40; wakes=$WAKES
+  if [ "${wakes:-0}" -ne 1 ]; then
+    stop_watch "$WATCH_PID"
+    fail "a row that arrived after the presentation must wake exactly once (got ${wakes:-0}): $(cat "$out")"
+  fi
+  stop_watch "$WATCH_PID"
+  pass "resurface: a row queued after main's drain still wakes exactly once"
+}
+
+test_invalid_presented_claim_does_not_suppress() {
+  local state fakebin home out wakes
+  read -r state fakebin home out < <(presented_case presented-invalid 'acked:handling:fixture.1.presentedinvalid')
+  printf 'not-a-sequence\n' > "$state/.main-eligible-rows"
+  watch_for_rearm "$state" "$fakebin" "$home" "$out" 40; wakes=$WAKES
+  if [ "${wakes:-0}" -ne 1 ]; then
+    stop_watch "$WATCH_PID"
+    fail "an unreadable presented claim must not suppress a queued row (got ${wakes:-0}): $(cat "$out")"
+  fi
+  stop_watch "$WATCH_PID"
+  pass "resurface: an invalid presented-row claim subtracts nothing"
+}
+
 # --- wiring: fork/bin/fm-fork-hook-check's HK3 knowledge ----------------------
 
 # copy_watch_tree <name>: a minimal tree with the six hooked files, the
