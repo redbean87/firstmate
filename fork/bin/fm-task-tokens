@@ -1,0 +1,646 @@
+#!/usr/bin/env bash
+# fm-task-tokens - per-task token and cost figures read from the harness
+# session stores, over a rolling window (default: the last 7 days).
+#
+# Usage:
+#   fork/bin/fm-task-tokens [--days N] [--json]
+#   fork/bin/fm-task-tokens --help
+#
+# Inputs, and nothing else: no network, no writes, no project clone.
+#   ~/.pi/agent/sessions/<cwd-slug>/<ts>_<uuid>.jsonl
+#       streamed line by line (never loaded whole). message.usage on
+#       assistant messages carries input, output, cacheRead, cacheWrite,
+#       reasoning, totalTokens, and usage.cost carries the recorded cost;
+#       the task id is the first state/<id>.inbox mention - the launch brief
+#       in the first user message, which also pins the task across relaunches
+#       because each relaunch is another file in the same slug directory.
+#   ~/.claude/projects/<cwd-slug>/<uuid>.jsonl
+#       streamed the same way; message.usage on assistant records carries
+#       input_tokens, output_tokens, cache_creation_input_tokens and
+#       cache_read_input_tokens; claude records no separate reasoning field
+#       and no cost, so those columns render `-`.
+#   <opencode database> session table
+#       one row per session already aggregates tokens_input, tokens_output,
+#       tokens_reasoning, tokens_cache_read, tokens_cache_write and cost; the
+#       task id comes from the first user message's parts (the launch brief).
+#       The database is pinned to the one the opencode launcher writes -
+#       OPENCODE_DB in $HOME/.local/bin/opencode (or on PATH), else an
+#       ambient $OPENCODE_DB, else ~/.local/share/opencode/opencode.db - and
+#       the report names the exact file it read, never a guess among several.
+#   state/<id>.meta     kind= and model= for the row; a task record that was
+#                       retired at cleanup falls back to the task's latest
+#                       task.dispatched entry in state/fleet-ledger.jsonl;
+#                       `- when neither holds the field
+#
+# A fact the harness does not record renders as `-`, as does a task whose
+# sessions record no usage at all. A session (or database) that cannot be
+# read is skipped and named at the end - never a failed report; exit 0
+# whenever a report was produced (exit 2 is usage, exit 1 only when there is
+# no state directory to report on, no clock, or no python3).
+#
+# Window: a pi or claude session counts when its file mtime is inside the
+# window, an opencode session when its time_updated is; a task appears when
+# at least one session naming it counts, and only counting sessions are
+# summed, so a relaunch inside the window adds instead of overwriting.
+#
+# What each column counts:
+#   task        the task id whose launch brief (state/<id>.inbox) is embedded
+#               in the session; one row per task
+#   kind, model from state/<id>.meta when the record still exists, else the
+#               task's latest dispatch entry in state/fleet-ledger.jsonl;
+#               - when neither holds the field
+#   harness     the store(s) the task's sessions were actually read from:
+#               pi, claude, opencode; joined with + when a relaunch switched
+#               harness
+#   input       prompt tokens sent to the model (usage.input, input_tokens,
+#               tokens_input)
+#   output      completion tokens generated (usage.output, output_tokens,
+#               tokens_output)
+#   cache       cache read + cache write tokens (cacheRead+cacheWrite,
+#               cache_creation+cache_read, tokens_cache_read+tokens_cache_write)
+#   reasoning   reasoning tokens the harness records separately; - where it
+#               does not (claude folds thinking into output_tokens)
+#   total       input+output+cache+reasoning summed over the task's sessions
+#               (pi's own totalTokens omits reasoning; this column includes
+#               it so the four token columns add up); - when the task's
+#               sessions record no usage at all
+#   cost        recorded spend in US dollars (usage.cost.total,
+#               session.cost); - where the harness records no cost (claude),
+#               and on a row that mixes stores (claude+pi) the cost covers
+#               only the stores that record it
+#   by kind, by model  the same columns summed across the rows of each group;
+#               cost totals include only the rows that record cost, and a
+#               column no row in the group records renders -
+#
+# --json prints one fm-task-tokens.v1 document (the same facts, nulls instead
+# of `-`) and nothing else.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+FM_HOME="${FM_HOME:-$FM_ROOT}"
+STATE="$FM_HOME/state"
+
+usage() { sed -n '2,/^set -u/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^set -u/d'; }
+
+DAYS=7
+JSON=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --days)
+      [ "$#" -ge 2 ] || { echo "fm-task-tokens: --days needs a value" >&2; exit 2; }
+      DAYS=$2
+      shift 2
+      ;;
+    --days=*) DAYS=${1#*=}; shift ;;
+    --json) JSON=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "fm-task-tokens: unknown argument: $1" >&2
+      echo "Try 'fm-task-tokens --help'." >&2
+      exit 2
+      ;;
+  esac
+done
+case "$DAYS" in
+  ''|*[!0-9]*)
+    echo "fm-task-tokens: --days must be a positive integer, got '$DAYS'" >&2
+    exit 2
+    ;;
+esac
+[ "$DAYS" -ge 1 ] || {
+  echo "fm-task-tokens: --days must be at least 1, got '$DAYS'" >&2
+  exit 2
+}
+
+NOW=$(date +%s) || exit 1
+case "$NOW" in ''|*[!0-9]*) echo "fm-task-tokens: cannot read the clock" >&2; exit 1 ;; esac
+CUTOFF=$((NOW - DAYS * 86400))
+
+[ -d "$STATE" ] || {
+  echo "fm-task-tokens: no state directory at $STATE" >&2
+  exit 1
+}
+command -v python3 >/dev/null 2>&1 || {
+  echo "fm-task-tokens: python3 is required to read the session stores" >&2
+  exit 1
+}
+
+FM_TASK_TOKENS_DAYS="$DAYS" \
+FM_TASK_TOKENS_NOW="$NOW" \
+FM_TASK_TOKENS_CUTOFF="$CUTOFF" \
+FM_TASK_TOKENS_JSON="$JSON" \
+FM_HOME="$FM_HOME" \
+python3 - <<'PY'
+import glob
+import json
+import os
+import re
+import shutil
+import sqlite3
+import sys
+
+DAYS = int(os.environ["FM_TASK_TOKENS_DAYS"])
+NOW = int(os.environ["FM_TASK_TOKENS_NOW"])
+CUTOFF = int(os.environ["FM_TASK_TOKENS_CUTOFF"])
+JSON_MODE = os.environ.get("FM_TASK_TOKENS_JSON") == "1"
+HOME = os.environ.get("HOME", "")
+FM_HOME = os.environ.get("FM_HOME", "")
+STATE = os.path.join(FM_HOME, "state")
+PI_ROOT = os.path.join(HOME, ".pi", "agent", "sessions")
+CLAUDE_ROOT = os.path.join(HOME, ".claude", "projects")
+
+INBOX = re.compile(r"state/([a-z0-9-]+)\.inbox")
+
+LEGEND = [
+    ("task", "the task id whose launch brief (state/<id>.inbox) is embedded in the session; one row per task"),
+    ("kind, model", "from state/<id>.meta when the record still exists, else the task's latest dispatch entry in state/fleet-ledger.jsonl; - when neither holds the field"),
+    ("harness", "the store(s) the task's sessions were actually read from: pi, claude, opencode; joined with + when a relaunch switched harness"),
+    ("input", "prompt tokens sent to the model (usage.input, input_tokens, tokens_input)"),
+    ("output", "completion tokens generated (usage.output, output_tokens, tokens_output)"),
+    ("cache", "cache read + cache write tokens (cacheRead+cacheWrite, cache_creation+cache_read, tokens_cache_read+tokens_cache_write)"),
+    ("reasoning", "reasoning tokens the harness records separately; - where it does not (claude folds thinking into output_tokens)"),
+    ("total", "input+output+cache+reasoning summed over the task's sessions (pi's own totalTokens omits reasoning; this column includes it so the four token columns add up); - when the task's sessions record no usage at all"),
+    ("cost", "recorded spend in US dollars (usage.cost.total, session.cost); - where the harness records no cost (claude); on a row mixing stores (claude+pi) the cost covers only the stores that record it"),
+    ("by kind, by model", "the same columns summed across the rows of each group; cost totals include only the rows that record cost, and a column no row in the group records renders -"),
+]
+
+
+def num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
+
+class Agg:
+    def __init__(self):
+        self.sessions = 0
+        self.input = 0
+        self.output = 0
+        self.cache = 0
+        self.reasoning = 0
+        self.cost = 0.0
+        self.usage_seen = False
+        self.reasoning_seen = False
+        self.cost_seen = False
+        self.stores = set()
+
+
+def read_task_facts(task, ledger):
+    """kind and model: the live task record first, then the fleet ledger."""
+    kind = model = None
+    try:
+        with open(os.path.join(STATE, task + ".meta"), encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.rstrip("\n")
+                if "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                if key == "kind":
+                    kind = value
+                elif key == "model":
+                    model = value
+    except OSError:
+        pass
+    fallback = ledger.get(task)
+    if fallback is not None:
+        if kind is None:
+            kind = fallback[0]
+        if model is None:
+            model = fallback[1]
+    return kind, model
+
+
+def load_ledger():
+    """task -> (kind, model) from the latest task.dispatched event per task."""
+    facts = {}
+    try:
+        with open(os.path.join(STATE, "fleet-ledger.jsonl"), encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"task.dispatched"' not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if record.get("event") != "task.dispatched":
+                    continue
+                task = record.get("task")
+                if task:
+                    facts[task] = (record.get("kind"), record.get("model"))
+    except OSError:
+        pass
+    return facts
+
+
+def scan_jsonl(path, harness, aggs, skips, counters):
+    """Stream one pi/claude session file; attribute it, then sum its usage."""
+    try:
+        if os.path.getmtime(path) < CUTOFF:
+            return
+    except OSError as exc:
+        skips.append((path, "cannot stat (%s)" % (exc.strerror or exc)))
+        return
+    try:
+        fh = open(path, encoding="utf-8", errors="replace")
+    except OSError as exc:
+        skips.append((path, "cannot read (%s)" % (exc.strerror or exc)))
+        return
+    task = None
+    usage_seen = reasoning_seen = cost_seen = False
+    t_in = t_out = t_cache = t_reason = 0
+    t_cost = 0.0
+    with fh:
+        for line in fh:
+            if task is None:
+                match = INBOX.search(line)
+                if match:
+                    task = match.group(1)
+            if '"usage"' not in line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                # A live file can race an appended partial line; the rest of
+                # the session still counts.
+                continue
+            msg = obj.get("message")
+            if not isinstance(msg, dict):
+                continue
+            if harness == "pi":
+                if msg.get("role") != "assistant":
+                    continue
+                usage = msg.get("usage")
+                if not isinstance(usage, dict):
+                    continue
+                usage_seen = True
+                t_in += num(usage.get("input"))
+                t_out += num(usage.get("output"))
+                t_cache += num(usage.get("cacheRead")) + num(usage.get("cacheWrite"))
+                if isinstance(usage.get("reasoning"), (int, float)) and not isinstance(usage.get("reasoning"), bool):
+                    reasoning_seen = True
+                    t_reason += usage["reasoning"]
+                cost = usage.get("cost")
+                if not isinstance(cost, dict):
+                    cost = msg.get("cost")
+                if isinstance(cost, dict) and isinstance(cost.get("total"), (int, float)) and not isinstance(cost.get("total"), bool):
+                    cost_seen = True
+                    t_cost += cost["total"]
+            else:  # claude
+                if obj.get("type") != "assistant":
+                    continue
+                usage = msg.get("usage")
+                if not isinstance(usage, dict):
+                    continue
+                usage_seen = True
+                t_in += num(usage.get("input_tokens"))
+                t_out += num(usage.get("output_tokens"))
+                t_cache += num(usage.get("cache_creation_input_tokens")) + num(usage.get("cache_read_input_tokens"))
+    if task is None:
+        return  # not a firstmate task session: named no task, silently not counted
+    agg = aggs.setdefault(task, Agg())
+    agg.sessions += 1
+    agg.stores.add(harness)
+    counters[harness] += 1
+    if usage_seen:
+        agg.usage_seen = True
+        agg.input += t_in
+        agg.output += t_out
+        agg.cache += t_cache
+        if reasoning_seen:
+            agg.reasoning_seen = True
+            agg.reasoning += t_reason
+        if cost_seen:
+            agg.cost_seen = True
+            agg.cost += t_cost
+
+
+def resolve_opencode_db():
+    """The database the opencode launcher writes, resolved, never guessed."""
+    env = os.environ.get("OPENCODE_DB")
+    if env:
+        return os.path.expanduser(os.path.expandvars(env))
+    candidates = [os.path.join(HOME, ".local", "bin", "opencode"), shutil.which("opencode")]
+    for cand in candidates:
+        if not cand or not os.path.isfile(cand):
+            continue
+        try:
+            if os.path.getsize(cand) > 65536:
+                continue
+            with open(cand, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        match = re.search(r"OPENCODE_DB:?=([^\s\"'}]+)", text)
+        if match:
+            return os.path.expanduser(os.path.expandvars(match.group(1)))
+    return os.path.join(HOME, ".local", "share", "opencode", "opencode.db")
+
+
+def opencode_task_id(con, session_id):
+    """The task named by the session's first user message (the launch brief)."""
+    try:
+        messages = con.execute(
+            "SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created",
+            (session_id,),
+        ).fetchall()
+    except sqlite3.Error:
+        return None
+    for message_id, data in messages:
+        try:
+            message = json.loads(data)
+        except ValueError:
+            continue
+        if message.get("role") != "user":
+            continue
+        try:
+            parts = con.execute(
+                "SELECT data FROM part WHERE message_id = ? ORDER BY time_created",
+                (message_id,),
+            ).fetchall()
+        except sqlite3.Error:
+            return None
+        text = ""
+        for (part_data,) in parts:
+            try:
+                part = json.loads(part_data)
+            except ValueError:
+                continue
+            if isinstance(part.get("text"), str):
+                text += part["text"]
+        match = INBOX.search(text)
+        return match.group(1) if match else None
+    return None
+
+
+def scan_opencode(aggs, skips, counters):
+    """Sum every in-window session row of the pinned opencode database."""
+    db = resolve_opencode_db()
+    if not os.path.isfile(db):
+        return db, 0  # no database yet: reported as absent in Sources, not a skip
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
+    except sqlite3.Error as exc:
+        skips.append((db, "opencode database unreadable (%s)" % exc))
+        return db, 0
+    counted = 0
+    try:
+        try:
+            rows = con.execute(
+                "SELECT id, tokens_input, tokens_output, tokens_reasoning,"
+                " tokens_cache_read, tokens_cache_write, cost FROM session"
+                " WHERE time_updated >= ?",
+                (CUTOFF * 1000,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            skips.append((db, "opencode session table unreadable (%s)" % exc))
+            return db, 0
+        for row in rows:
+            session_id, t_in, t_out, t_reason, t_cr, t_cw, cost = row
+            task = opencode_task_id(con, session_id)
+            if task is None:
+                continue
+            agg = aggs.setdefault(task, Agg())
+            agg.sessions += 1
+            agg.stores.add("opencode")
+            counters["opencode"] += 1
+            counted += 1
+            agg.usage_seen = True
+            agg.reasoning_seen = True
+            agg.input += num(t_in)
+            agg.output += num(t_out)
+            agg.reasoning += num(t_reason)
+            agg.cache += num(t_cr) + num(t_cw)
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                agg.cost_seen = True
+                agg.cost += cost
+    except sqlite3.Error as exc:
+        skips.append((db, "opencode read failed (%s)" % exc))
+    finally:
+        con.close()
+    return db, counted
+
+
+def build_rows(aggs, ledger):
+    rows = []
+    for task in sorted(aggs, key=lambda t: t.encode("utf-8")):
+        agg = aggs[task]
+        kind, model = read_task_facts(task, ledger)
+        if agg.usage_seen:
+            tokens = {
+                "input": agg.input,
+                "output": agg.output,
+                "cache": agg.cache,
+                "reasoning": agg.reasoning if agg.reasoning_seen else None,
+                "total": agg.input + agg.output + agg.cache + agg.reasoning,
+                "cost": round(agg.cost, 8) if agg.cost_seen else None,
+            }
+        else:
+            tokens = {"input": None, "output": None, "cache": None,
+                      "reasoning": None, "total": None, "cost": None}
+        rows.append({
+            "task": task,
+            "kind": kind,
+            "model": model,
+            "harness": "+".join(sorted(agg.stores)),
+            "sessions": agg.sessions,
+            **tokens,
+        })
+    return rows
+
+
+def rollup(rows, key):
+    groups = {}
+    for row in rows:
+        groups.setdefault(row[key] if row[key] is not None else None, []).append(row)
+    out = []
+    for value in sorted(groups, key=lambda v: (v is None, v if v is not None else "")):
+        members = groups[value]
+        entry = {key: value, "tasks": len(members)}
+        for column in ("input", "output", "cache", "reasoning", "total", "cost"):
+            known = [m[column] for m in members if m[column] is not None]
+            if not known:
+                entry[column] = None
+            elif column == "cost":
+                entry[column] = round(sum(known), 8)
+            else:
+                entry[column] = sum(known)
+        out.append(entry)
+    return out
+
+
+def fmt_num(value):
+    return "-" if value is None else "{:,}".format(value)
+
+
+def fmt_cost(value):
+    if value is None:
+        return "-"
+    text = ("%.8f" % value).rstrip("0").rstrip(".")
+    return text if text else "0"
+
+
+def epoch_to_iso(epoch):
+    import datetime
+    return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def print_table(headers, rows, left_cols):
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+
+    def line(cells):
+        parts = []
+        for i, cell in enumerate(cells):
+            parts.append(cell.ljust(widths[i]) if i in left_cols else cell.rjust(widths[i]))
+        return "  ".join(parts).rstrip()
+
+    print(line(headers))
+    for row in rows:
+        print(line(row))
+
+
+def task_row_cells(row):
+    return [
+        row["task"],
+        row["kind"] if row["kind"] is not None else "-",
+        row["harness"],
+        row["model"] if row["model"] is not None else "-",
+        fmt_num(row["input"]),
+        fmt_num(row["output"]),
+        fmt_num(row["cache"]),
+        fmt_num(row["reasoning"]),
+        fmt_num(row["total"]),
+        fmt_cost(row["cost"]),
+    ]
+
+
+def group_row_cells(entry, key):
+    return [
+        entry[key] if entry[key] is not None else "-",
+        str(entry["tasks"]),
+        fmt_num(entry["input"]),
+        fmt_num(entry["output"]),
+        fmt_num(entry["cache"]),
+        fmt_num(entry["reasoning"]),
+        fmt_num(entry["total"]),
+        fmt_cost(entry["cost"]),
+    ]
+
+
+def emit_json(now, cutoff, sources, rows, by_kind, by_model, skips, counters):
+    def num_or_null(value):
+        return value
+
+    doc = {
+        "schema": "fm-task-tokens.v1",
+        "generated_at": now,
+        "days": DAYS,
+        "cutoff_epoch": cutoff,
+        "sources": sources,
+        "columns": {name: text for name, text in LEGEND},
+        "sessions_counted": counters,
+        "tasks": [
+            {
+                "task": row["task"],
+                "kind": row["kind"],
+                "harness": row["harness"],
+                "model": row["model"],
+                "sessions": row["sessions"],
+                "input": num_or_null(row["input"]),
+                "output": num_or_null(row["output"]),
+                "cache": num_or_null(row["cache"]),
+                "reasoning": num_or_null(row["reasoning"]),
+                "total": num_or_null(row["total"]),
+                "cost": num_or_null(row["cost"]),
+            }
+            for row in rows
+        ],
+        "by_kind": by_kind,
+        "by_model": by_model,
+        "skipped": [{"path": path, "reason": reason} for path, reason in skips],
+    }
+    print(json.dumps(doc, indent=2, sort_keys=False))
+
+
+def main():
+    aggs = {}
+    skips = []
+    counters = {"pi": 0, "claude": 0, "opencode": 0}
+    store_absent = []
+    for root, harness in ((PI_ROOT, "pi"), (CLAUDE_ROOT, "claude")):
+        if not os.path.isdir(root):
+            store_absent.append(harness)
+            continue
+        for path in sorted(glob.glob(os.path.join(root, "*", "*.jsonl"))):
+            scan_jsonl(path, harness, aggs, skips, counters)
+    opencode_db, _ = scan_opencode(aggs, skips, counters)
+
+    ledger = load_ledger()
+    rows = build_rows(aggs, ledger)
+    by_kind = rollup(rows, "kind")
+    by_model = rollup(rows, "model")
+    opencode_present = os.path.isfile(opencode_db)
+    sources = {
+        "pi_sessions": None if "pi" in store_absent else PI_ROOT,
+        "claude_sessions": None if "claude" in store_absent else CLAUDE_ROOT,
+        "opencode_db": opencode_db,
+        "opencode_db_read": opencode_present,
+    }
+
+    if JSON_MODE:
+        emit_json(NOW, CUTOFF, sources, rows, by_kind, by_model, skips, counters)
+        return 0
+
+    print("fm-task-tokens: task token and cost figures for the last %d days (sessions last written on or after %s)"
+          % (DAYS, epoch_to_iso(CUTOFF)))
+    print()
+    print("What each column counts:")
+    for name, text in LEGEND:
+        print("  %-12s %s" % (name, text))
+    print()
+    print("Sources (read-only, no network, no writes):")
+    print("  pi      %s (%d task sessions in the window)" % (
+        sources["pi_sessions"] or "absent", counters["pi"]))
+    print("  claude  %s (%d task sessions in the window)" % (
+        sources["claude_sessions"] or "absent", counters["claude"]))
+    print("  opencode %s%s (%d task sessions in the window)" % (
+        opencode_db, "" if opencode_present else " (absent)", counters["opencode"]))
+    if opencode_present:
+        print("  The opencode file is the one the opencode launcher pins; it is named here so every figure can be traced.")
+    print("  A session counts when its file mtime (pi, claude) or session time_updated (opencode) is inside the window;")
+    print("  only counting sessions are summed, so a relaunch inside the window adds instead of overwriting.")
+    print()
+    if rows:
+        print_table(
+            ["task", "kind", "harness", "model", "input", "output", "cache",
+             "reasoning", "total", "cost"],
+            [task_row_cells(row) for row in rows],
+            left_cols={0, 1, 2, 3},
+        )
+        print()
+        print("by kind:")
+        print_table(
+            ["kind", "tasks", "input", "output", "cache", "reasoning", "total", "cost"],
+            [group_row_cells(entry, "kind") for entry in by_kind],
+            left_cols={0},
+        )
+        print()
+        print("by model:")
+        print_table(
+            ["model", "tasks", "input", "output", "cache", "reasoning", "total", "cost"],
+            [group_row_cells(entry, "model") for entry in by_model],
+            left_cols={0},
+        )
+    else:
+        print("(no task sessions in the window)")
+    if skips:
+        print()
+        print("skipped (unreadable session or store):")
+        for path, reason in skips:
+            print("  %s: %s" % (path, reason))
+    return 0
+
+
+sys.exit(main())
+PY

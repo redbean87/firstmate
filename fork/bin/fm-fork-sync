@@ -115,7 +115,7 @@ cmd_lint() {
     fork/bin/fm-fork-workflow-guard \
     fork/bin/fm-registry-key \
     fork/bin/fm-askuser-guard \
-    fork/bin/fm-discord-release fork/bin/fm-pr-green-teardown fork/bin/fm-detach-launch fork/chatgpt/*.sh fork/discord/*.sh \
+    fork/bin/fm-discord-release fork/bin/fm-pr-green-teardown fork/bin/fm-detach-launch fork/bin/fm-task-tokens fork/chatgpt/*.sh fork/discord/*.sh \
     fork/discord/fm-discord-service fork/tests/run fork/tests/*.sh) || rc=1
   (cd "$root" && shellcheck -x -S warning bin/fm-spawn.sh bin/fm-control.sh) || rc=1
   [ "$rc" -eq 0 ] && echo "ok: lint"
