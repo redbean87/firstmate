@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# fm-decision-log.sh - append one captain ruling to the decision ledger.
+# fm-decision-log - append one captain ruling to the decision ledger.
 #
 # Usage:
-#   bin/fm-decision-log.sh add --task <id> [--goal <text>] [--words-file <path>]
-#   bin/fm-decision-log.sh add --task <id> [--goal <text>]   # words on stdin
-#   bin/fm-decision-log.sh --help
+#   fork/bin/fm-decision-log add --task <id> [--goal <text>] [--words-file <path>]
+#   fork/bin/fm-decision-log add --task <id> [--goal <text>]   # words on stdin
+#   fork/bin/fm-decision-log --help
 #
 # The ledger lives at data/decisions.md under FM_HOME (default: this
 # checkout's home) and is created with its format header on first use; it is
@@ -36,12 +36,12 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 FM_HOME="${FM_HOME:-$FM_ROOT}"
 DATA="$FM_HOME/data"
 LEDGER="$DATA/decisions.md"
 
-usage() { sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,/^set -u/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^set -u/d'; }
 die() { printf 'fm-decision-log: %s\n' "$*" >&2; exit 2; }
 
 case "${1:-}" in

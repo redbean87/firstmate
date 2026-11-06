@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# fm-step-metrics.sh - per-task and per-kind step metrics from the records this
+# fm-step-metrics - per-task and per-kind step metrics from the records this
 # home already writes, over a rolling window (default: the last 7 days).
 #
 # Usage:
-#   bin/fm-step-metrics.sh [--days N] [--json]
-#   bin/fm-step-metrics.sh --help
+#   fork/bin/fm-step-metrics [--days N] [--json]
+#   fork/bin/fm-step-metrics --help
 #
 # Inputs, and nothing else: no network, no project clone, no memory.
 #   state/<id>.meta     kind, repo (project=), spawn facts (spawn_gen=s<epoch>...)
@@ -47,7 +47,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 FM_HOME="${FM_HOME:-$FM_ROOT}"
 STATE="$FM_HOME/state"
 DATA="$FM_HOME/data"
@@ -55,9 +55,9 @@ DATA="$FM_HOME/data"
 # The status-line grammar (verb and [at=epoch] parsing) has one owner; this
 # script reads events through it rather than re-deriving a second spelling.
 # shellcheck source=bin/fm-classify-lib.sh
-. "$SCRIPT_DIR/fm-classify-lib.sh"
+. "$FM_ROOT/bin/fm-classify-lib.sh"
 
-usage() { sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,/^set -u/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^set -u/d'; }
 
 DAYS=7
 JSON=0
@@ -73,7 +73,7 @@ while [ "$#" -gt 0 ]; do
     -h|--help) usage; exit 0 ;;
     *)
       echo "fm-step-metrics: unknown argument: $1" >&2
-      echo "Try 'fm-step-metrics.sh --help'." >&2
+      echo "Try 'fm-step-metrics --help'." >&2
       exit 2
       ;;
   esac

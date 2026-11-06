@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavioral coverage for bin/fm-step-metrics.sh: the counting rules proven
+# Behavioral coverage for fork/bin/fm-step-metrics: the counting rules proven
 # against fixture records - first-pass landing, rework (recorded relaunches
 # plus paused-to-working returns), escalations, elapsed time, and the report
 # column - plus the rolling window (stamped events, then the mtime fallback),
@@ -11,10 +11,10 @@
 # throwaway FM_HOME; nothing here touches the network or a project clone.
 set -u
 
-# shellcheck source=tests/lib.sh
+# shellcheck source=fork/tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-METRICS="$ROOT/bin/fm-step-metrics.sh"
+METRICS="$ROOT/fork/bin/fm-step-metrics"
 NOW=$(date +%s)
 TMP_ROOT=$(fm_test_tmproot fm-step-metrics)
 
@@ -305,14 +305,4 @@ test_usage_refusals() {
   pass "usage refusals exit with the documented codes"
 }
 
-fm_test_run \
-  test_clean_done_task_is_first_pass_with_elapsed_and_report \
-  test_rework_escalations_and_first_pass_rules \
-  test_in_flight_and_failed_states \
-  test_missing_records_are_skipped_and_named_once \
-  test_absent_facts_render_dash \
-  test_window_uses_last_stamp_then_mtime \
-  test_rollup_groups_by_kind_including_absent_kind \
-  test_status_grammar_edges_do_not_distort_counts \
-  test_json_document_shape_and_legend \
-  test_usage_refusals
+fork_run_tests

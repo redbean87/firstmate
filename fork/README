@@ -117,6 +117,10 @@ Ownership boundary
   Home configuration  config/fork-policies, config/fork-project-pins.json,
                       config/fork-resources.json, config/budget-mode
                       (gitignored, per home).
+  Decision ledger     fork/bin/fm-decision-log: a ruling's verbatim words and
+                      date go to the append-only data/decisions.md chronology,
+                      while the distilled rule keeps going to the preference
+                      file (the script's header owns the entry format).
 
 ChatGPT consultation channel: fork/chatgpt/ (see fork/chatgpt/README); it
 writes the consult gate's relaunch delivery proof and needs no upstream edits.

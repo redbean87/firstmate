@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Behavioral coverage for bin/fm-decision-log.sh: ledger creation with its
+# Behavioral coverage for fork/bin/fm-decision-log: ledger creation with its
 # format header on first use, add via stdin and via --words-file, verbatim
 # multi-line words (quotes, backslashes, and a backtick run that must grow
 # the fence), the goal field passed or defaulted to -, append-only
@@ -11,10 +11,10 @@
 # distinction. Fixtures are throwaway FM_HOME directories; no network.
 set -u
 
-# shellcheck source=tests/lib.sh
+# shellcheck source=fork/tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-DECISION_LOG="$ROOT/bin/fm-decision-log.sh"
+DECISION_LOG="$ROOT/fork/bin/fm-decision-log"
 TMP_ROOT=$(fm_test_tmproot fm-decision-log)
 TODAY=$(date -u +%F)
 
@@ -178,11 +178,4 @@ test_help_owns_the_contract() {
   pass "--help documents the location, the distinction, and the entry format"
 }
 
-fm_test_run \
-  test_first_add_creates_header_and_entry_from_stdin \
-  test_words_file_keeps_bytes_and_fence_grows_for_backticks \
-  test_goal_defaults_to_dash \
-  test_ledger_is_append_only_across_entries \
-  test_empty_ruling_is_refused_and_ledger_untouched \
-  test_argument_refusals \
-  test_help_owns_the_contract
+fork_run_tests
