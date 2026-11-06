@@ -1,0 +1,530 @@
+#!/usr/bin/env bash
+# fm-step-metrics - per-task and per-kind step metrics from the records this
+# home already writes, over a rolling window (default: the last 7 days).
+#
+# Usage:
+#   fork/bin/fm-step-metrics [--days N] [--json]
+#   fork/bin/fm-step-metrics --help
+#
+# Inputs, and nothing else: no network, no project clone, no memory.
+#   state/<id>.meta     kind, repo (project=), spawn facts (spawn_gen=s<epoch>...)
+#                       and relaunch facts (control_relaunch_tx= lines)
+#   state/<id>.status   the append-only status event stream
+#   data/<id>/report.md whether the task's own report file exists
+# A fact that is not in those files renders as `-`. A task whose record is
+# missing or unreadable is skipped and named once at the end - never a failed
+# report; exit 0 whenever a report was produced (exit 2 is usage, exit 1 only
+# when there is no state directory to report on).
+#
+# Window: a task appears when its status record was last written within the
+# window - the epoch of its last stamped status event when it has one,
+# otherwise the status file's modification time.
+#
+# What each column counts:
+#   first-pass  yes = the task reached done with no recorded relaunch and no
+#                 blocked or needs-decision event; no = it reached done with
+#                 either one; - = it has not reached done
+#   rework      recorded relaunches (the task record's control-plane relaunch
+#                 transactions) plus returns from paused back to working;
+#                 0 when neither occurred
+#   escalations needs-decision plus blocked events in the status record;
+#                 0 when none
+#   elapsed     finished: the terminal event's stamped time minus the start;
+#                 in-flight: now minus the start. The start is the record's
+#                 spawn time, else its first stamped status event. - when a
+#                 needed time is unknown or the end precedes the start.
+#   report      yes = data/<id>/report.md exists; no = it does not
+#   kind, repo  read straight from the task record; - when the field is absent
+#   state       done, failed, in-flight; - when the record holds no event
+#
+# A relaunch is counted only as recorded: the task record carries the latest
+# control-plane relaunch transaction, so a task relaunched more than once can
+# report fewer relaunches than happened. First-pass landing and rework use that
+# same recorded count.
+#
+# --json prints one fm-step-metrics.v1 document (the same facts, nulls instead
+# of `-`) and nothing else.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+FM_HOME="${FM_HOME:-$FM_ROOT}"
+STATE="$FM_HOME/state"
+DATA="$FM_HOME/data"
+
+# The status-line grammar (verb and [at=epoch] parsing) has one owner; this
+# script reads events through it rather than re-deriving a second spelling.
+# shellcheck source=bin/fm-classify-lib.sh
+. "$FM_ROOT/bin/fm-classify-lib.sh"
+
+usage() { sed -n '2,/^set -u/p' "$0" | sed -e 's/^# \{0,1\}//' -e '/^set -u/d'; }
+
+DAYS=7
+JSON=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --days)
+      [ "$#" -ge 2 ] || { echo "fm-step-metrics: --days needs a value" >&2; exit 2; }
+      DAYS=$2
+      shift 2
+      ;;
+    --days=*) DAYS=${1#*=}; shift ;;
+    --json) JSON=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "fm-step-metrics: unknown argument: $1" >&2
+      echo "Try 'fm-step-metrics --help'." >&2
+      exit 2
+      ;;
+  esac
+done
+case "$DAYS" in
+  ''|*[!0-9]*)
+    echo "fm-step-metrics: --days must be a positive integer, got '$DAYS'" >&2
+    exit 2
+    ;;
+esac
+[ "$DAYS" -ge 1 ] || {
+  echo "fm-step-metrics: --days must be at least 1, got '$DAYS'" >&2
+  exit 2
+}
+
+NOW=$(date +%s) || exit 1
+case "$NOW" in ''|*[!0-9]*) echo "fm-step-metrics: cannot read the clock" >&2; exit 1 ;; esac
+CUTOFF=$((NOW - DAYS * 86400))
+
+[ -d "$STATE" ] || {
+  echo "fm-step-metrics: no state directory at $STATE" >&2
+  exit 1
+}
+
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/fm-step-metrics.XXXXXX") || exit 1
+trap 'rm -rf "$WORK"' EXIT
+ROWS="$WORK/rows.tsv"
+ROLLUP="$WORK/rollup.tsv"
+SKIPS="$WORK/skips.txt"
+: > "$ROWS"
+: > "$ROLLUP"
+: > "$SKIPS"
+
+# epoch -> one UTC ISO line, for the human header only.
+epoch_to_iso() {  # <epoch>
+  date -u -r "$1" +%Y-%m-%dT%H:%MZ 2>/dev/null \
+    || date -u -d "@$1" +%Y-%m-%dT%H:%MZ 2>/dev/null \
+    || printf '%s' "$1"
+}
+
+fmt_duration() {  # <seconds> -> e.g. 3d4h, 5h12m, 47m, 0m
+  local s=$1 d h m
+  d=$((s / 86400))
+  h=$((s % 86400 / 3600))
+  m=$((s % 3600 / 60))
+  if [ "$d" -gt 0 ]; then
+    printf '%dd%dh' "$d" "$h"
+  elif [ "$h" -gt 0 ]; then
+    printf '%dh%dm' "$h" "$m"
+  else
+    printf '%dm' "$m"
+  fi
+}
+
+# One pass over a task record's meta content: last value wins per key (the
+# fm_meta_get read), tabs flattened so the TSV row cannot split, and the spawn
+# epoch extracted from spawn_gen=s<epoch>.<pid>.<rand>. Prints
+# kind<TAB>project<TAB>spawn-epoch-or-dash<TAB>relaunch-count.
+meta_fields() {  # <meta-content>
+  printf '%s\n' "$1" | awk -F= '
+    index($0, "=") == 0 { next }
+    {
+      k = $1
+      v = substr($0, index($0, "=") + 1)
+      gsub(/\t/, " ", v)
+      if (k == "kind") kind = v
+      else if (k == "project") project = v
+      else if (k == "spawn_gen") sg = v
+      else if (k == "control_relaunch_tx") relaunches++
+    }
+    END {
+      ep = "-"
+      if (sg != "" && substr(sg, 1, 1) == "s") {
+        e = substr(sg, 2)
+        sub(/\..*$/, "", e)
+        if (e ~ /^[0-9]+$/ && length(e) <= 12) ep = e
+      }
+      printf "%s\t%s\t%s\t%d\n", (kind == "" ? "-" : kind), \
+        (project == "" ? "-" : project), ep, relaunches + 0
+    }'
+}
+
+process_task() {  # <id>
+  local id=$1 meta status meta_content status_content meta_out
+  local kind project spawn_epoch relaunches repo report
+  local verb epoch='' line have_event=0 last_work_verb='' first_stamp='' last_stamp=''
+  local terminal_epoch='' escalations=0 paused_armed=0 rework_returns=0
+  local window_epoch start end state first_pass rework elapsed_secs elapsed_fmt
+
+  meta=$STATE/$id.meta
+  status=$STATE/$id.status
+  if [ ! -f "$meta" ] || [ ! -r "$meta" ]; then
+    printf '%s\tmissing or unreadable state/%s.meta\n' "$id" "$id" >> "$SKIPS"
+    return 0
+  fi
+  if [ ! -f "$status" ] || [ ! -r "$status" ]; then
+    printf '%s\tmissing or unreadable state/%s.status\n' "$id" "$id" >> "$SKIPS"
+    return 0
+  fi
+  if ! meta_content=$(cat -- "$meta" 2>/dev/null); then
+    printf '%s\tunreadable state/%s.meta\n' "$id" "$id" >> "$SKIPS"
+    return 0
+  fi
+  if ! status_content=$(cat -- "$status" 2>/dev/null); then
+    printf '%s\tunreadable state/%s.status\n' "$id" "$id" >> "$SKIPS"
+    return 0
+  fi
+
+  meta_out=$(meta_fields "$meta_content")
+  IFS=$'\t' read -r kind project spawn_epoch relaunches <<< "$meta_out"
+  if [ "$project" = "-" ]; then
+    repo=-
+  else
+    repo=${project##*/}
+    [ -n "$repo" ] || repo=$project
+  fi
+  if [ -f "$DATA/$id/report.md" ]; then report=yes; else report=no; fi
+
+  verb=
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    status_line_verb "$line" verb
+    case "$verb" in
+      working|needs-decision|blocked|done|failed|note|paused|resolved|captain-held) ;;
+      *) continue ;;
+    esac
+    have_event=1
+    # The grammar owner's out-var parser (bin/fm-classify-lib.sh): it clears the
+    # out-var first, so an unstamped line yields an empty epoch, never a stale one.
+    if _fm_status_at_epoch "$line" epoch; then
+      last_stamp=$epoch
+      [ -n "$first_stamp" ] || first_stamp=$epoch
+    fi
+    case "$verb" in
+      needs-decision|blocked)
+        escalations=$((escalations + 1))
+        last_work_verb=$verb
+        terminal_epoch=
+        ;;
+      paused)
+        last_work_verb=$verb
+        terminal_epoch=
+        paused_armed=1
+        ;;
+      working)
+        if [ "$paused_armed" -eq 1 ]; then
+          rework_returns=$((rework_returns + 1))
+          paused_armed=0
+        fi
+        last_work_verb=$verb
+        terminal_epoch=
+        ;;
+      done|failed)
+        last_work_verb=$verb
+        paused_armed=0
+        terminal_epoch=$epoch
+        ;;
+      note|resolved|captain-held)
+        # Bookkeeping events neither end nor revive the work phase.
+        ;;
+    esac
+  done <<< "$status_content"
+
+  if [ "$have_event" -eq 0 ]; then
+    state=-
+  else
+    case "$last_work_verb" in
+      done) state="done" ;;
+      failed) state="failed" ;;
+      *) state=in-flight ;;
+    esac
+  fi
+
+  # Window: the last stamped event when there is one, else the file's mtime.
+  if [ -n "$last_stamp" ]; then
+    window_epoch=$last_stamp
+  else
+    window_epoch=$(_fm_status_file_mtime "$status") || window_epoch=
+  fi
+  case "$window_epoch" in
+    ''|*[!0-9]*) ;; # No usable time: nothing proves the task is outside the window.
+    *) [ "$window_epoch" -ge "$CUTOFF" ] || return 0 ;;
+  esac
+
+  if [ "$spawn_epoch" != "-" ]; then
+    start=$spawn_epoch
+  elif [ -n "$first_stamp" ]; then
+    start=$first_stamp
+  else
+    start=-
+  fi
+  case "$state" in
+    done|failed) end=${terminal_epoch:--} ;;
+    in-flight) end=$NOW ;;
+    *) end=- ;;
+  esac
+  elapsed_secs=-
+  elapsed_fmt=-
+  case "$start:$end" in
+    *[!0-9:]*|-:*|*:-) ;;
+    *)
+      if [ "$end" -ge "$start" ]; then
+        elapsed_secs=$((end - start))
+        elapsed_fmt=$(fmt_duration "$elapsed_secs")
+      fi
+      ;;
+  esac
+
+  if [ "$state" = "done" ]; then
+    if [ "$relaunches" -eq 0 ] && [ "$escalations" -eq 0 ]; then
+      first_pass=yes
+    else
+      first_pass=no
+    fi
+  else
+    first_pass=-
+  fi
+  rework=$((relaunches + rework_returns))
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$id" "$kind" "$repo" "$state" "$first_pass" "$rework" "$escalations" \
+    "$elapsed_fmt" "$elapsed_secs" "$report" >> "$ROWS"
+}
+
+# Enumerate task ids from the union of state/*.meta and state/*.status;
+# hidden staging files (.$id.meta.spawn.*) never match these globs.
+ids=$(
+  {
+    for f in "$STATE"/*.meta "$STATE"/*.status; do
+      [ -e "$f" ] || continue
+      b=${f##*/}
+      case "$b" in
+        *.meta) printf '%s\n' "${b%.meta}" ;;
+        *.status) printf '%s\n' "${b%.status}" ;;
+      esac
+    done
+  } | LC_ALL=C sort -u
+)
+while IFS= read -r id; do
+  [ -n "$id" ] || continue
+  process_task "$id"
+done <<< "$ids"
+
+# Rollup by kind, deterministic kind order; a task with no kind= lands in "-".
+if [ -s "$ROWS" ]; then
+  awk -F'\t' '
+    {
+      kind = $2; state = $4; fp = $5
+      rework = $6 + 0; esc = $7 + 0; secs = $9
+      tasks[kind]++
+      if (state == "done") done[kind]++
+      else if (state == "failed") failed[kind]++
+      else if (state == "in-flight") inflight[kind]++
+      if (fp == "yes") fpyes[kind]++
+      rework_sum[kind] += rework
+      esc_sum[kind] += esc
+      if (secs ~ /^[0-9]+$/) secs_sum[kind] += secs
+    }
+    END {
+      for (k in tasks) {
+        secs_out = (k in secs_sum) ? secs_sum[k] : "-"
+        printf "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n", k, tasks[k], \
+          done[k] + 0, failed[k] + 0, inflight[k] + 0, fpyes[k] + 0, \
+          rework_sum[k] + 0, esc_sum[k] + 0, secs_out
+      }
+    }' "$ROWS" | LC_ALL=C sort > "$ROLLUP"
+fi
+
+if [ "$JSON" -eq 1 ]; then
+  json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+  json_or_null() { # <value>: "-" -> null, else quoted string
+    if [ "$1" = "-" ]; then printf 'null'; else printf '"%s"' "$(json_str "$1")"; fi
+  }
+  json_num_or_null() { # <value>: digits -> number, else null
+    case "$1" in
+      ''|*[!0-9]*) printf 'null' ;;
+      *) printf '%s' "$1" ;;
+    esac
+  }
+
+  printf '{\n'
+  printf '  "schema": "fm-step-metrics.v1",\n'
+  printf '  "generated_at": %s,\n' "$NOW"
+  printf '  "days": %s,\n' "$DAYS"
+  printf '  "cutoff_epoch": %s,\n' "$CUTOFF"
+  printf '  "columns": {\n'
+  printf '    "first-pass": "yes = reached done with no recorded relaunch and no blocked or needs-decision event; no = reached done with either; null = has not reached done",\n'
+  printf '    "rework": "recorded relaunches plus returns from paused back to working; 0 when neither occurred",\n'
+  printf '    "escalations": "needs-decision plus blocked events in the status record; 0 when none",\n'
+  printf '    "elapsed_seconds": "finished: terminal event time minus start; in-flight: now minus start; start = spawn time else first stamped status event; null when unknown",\n'
+  printf '    "report": "true = the task report file exists"\n'
+  printf '  },\n'
+  printf '  "tasks": [\n'
+  sep=
+  while IFS=$'\t' read -r t_id t_kind t_repo t_state t_fp t_rework t_esc t_fmt t_secs t_report; do
+    [ -n "$t_id" ] || continue
+    [ -z "$sep" ] || printf ',\n'
+    sep=,
+    printf '    {"task": "%s", "kind": %s, "repo": %s, "state": %s, "first_pass": %s, "rework": %s, "escalations": %s, "elapsed": %s, "elapsed_seconds": %s, "report": %s}' \
+      "$(json_str "$t_id")" \
+      "$(json_or_null "$t_kind")" \
+      "$(json_or_null "$t_repo")" \
+      "$(json_or_null "$t_state")" \
+      "$(json_or_null "$t_fp")" \
+      "$t_rework" "$t_esc" \
+      "$(json_or_null "$t_fmt")" \
+      "$(json_num_or_null "$t_secs")" \
+      "$([ "$t_report" = yes ] && printf true || printf false)"
+  done < "$ROWS"
+  printf '\n  ],\n'
+  printf '  "by_kind": [\n'
+  sep=
+  while IFS=$'\t' read -r r_kind r_tasks r_done r_failed r_inflight r_fp r_rework r_esc r_secs; do
+    [ -n "$r_kind" ] || continue
+    [ -z "$sep" ] || printf ',\n'
+    sep=,
+    printf '    {"kind": %s, "tasks": %s, "done": %s, "failed": %s, "in_flight": %s, "first_pass": %s, "rework": %s, "escalations": %s, "elapsed_seconds": %s}' \
+      "$(json_or_null "$r_kind")" "$r_tasks" "$r_done" "$r_failed" \
+      "$r_inflight" "$r_fp" "$r_rework" "$r_esc" \
+      "$(json_num_or_null "$r_secs")"
+  done < "$ROLLUP"
+  printf '\n  ],\n'
+  # Totals are recomputed from the per-task rows so they never depend on the
+  # rollup's grouping; elapsed sums only the rows whose time is known.
+  t_tasks=0 t_done=0 t_failed=0 t_inflight=0 t_fp=0 t_rework=0 t_esc=0 t_secs=0 t_secs_known=0
+  while IFS=$'\t' read -r _ _ _ t_state2 t_fp2 t_rework2 t_esc2 _ t_secs2 _; do
+    t_tasks=$((t_tasks + 1))
+    case "$t_state2" in
+      done) t_done=$((t_done + 1)) ;;
+      failed) t_failed=$((t_failed + 1)) ;;
+      in-flight) t_inflight=$((t_inflight + 1)) ;;
+    esac
+    [ "$t_fp2" = yes ] && t_fp=$((t_fp + 1))
+    t_rework=$((t_rework + t_rework2))
+    t_esc=$((t_esc + t_esc2))
+    case "$t_secs2" in
+      ''|*[!0-9]*) ;;
+      *) t_secs=$((t_secs + t_secs2)); t_secs_known=$((t_secs_known + 1)) ;;
+    esac
+  done < "$ROWS"
+  t_total_secs=$t_secs
+  [ "$t_secs_known" -gt 0 ] || t_total_secs=-
+  printf '  "totals": {"tasks": %s, "done": %s, "failed": %s, "in_flight": %s, "first_pass": %s, "rework": %s, "escalations": %s, "elapsed_seconds": %s},\n' \
+    "$t_tasks" "$t_done" "$t_failed" "$t_inflight" "$t_fp" "$t_rework" "$t_esc" \
+    "$(json_num_or_null "$t_total_secs")"
+  printf '  "skipped": [\n'
+  sep=
+  while IFS=$'\t' read -r s_id s_reason; do
+    [ -n "$s_id" ] || continue
+    [ -z "$sep" ] || printf ',\n'
+    sep=,
+    printf '    {"task": "%s", "reason": "%s"}' "$(json_str "$s_id")" "$(json_str "$s_reason")"
+  done < "$SKIPS"
+  printf '\n  ]\n'
+  printf '}\n'
+  exit 0
+fi
+
+# --- human report -----------------------------------------------------------
+
+printf 'fm-step-metrics: task records for the last %s days (status record last written on or after %s)\n' \
+  "$DAYS" "$(epoch_to_iso "$CUTOFF")"
+printf '\n'
+printf 'What each column counts:\n'
+printf '  first-pass  yes = reached done with no recorded relaunch and no blocked or needs-decision event; no = reached done with either; - = has not reached done\n'
+printf '  rework      recorded relaunches (the task record control-plane relaunch transactions) plus returns from paused back to working; 0 when neither occurred\n'
+printf '  escalations needs-decision plus blocked events in the status record; 0 when none\n'
+printf '  elapsed     finished: terminal event time minus start; in-flight: now minus start; start = the record spawn time, else its first stamped status event; - when a time is unknown\n'
+printf '  report      yes = the task report file exists; no = it does not\n'
+printf '  kind, repo, state read straight from the records; - = the field is absent or the record holds no event\n'
+printf '  The by-kind and totals lines count rows per state and sum rework, escalations, and known elapsed; first-pass there counts yes.\n'
+printf '  A relaunch is counted only as recorded: the task record carries the latest relaunch transaction, so a task relaunched more than once can report fewer relaunches than happened.\n'
+printf '\n'
+
+if [ -s "$ROWS" ]; then
+  w_task=4 w_kind=4 w_repo=4 w_state=5 w_fp=9 w_rework=6 w_esc=11 w_elapsed=7 w_report=6
+  while IFS=$'\t' read -r c_id c_kind c_repo c_state c_fp c_rework c_esc c_fmt _ c_report; do
+    [ -n "$c_id" ] || continue
+    [ "${#c_id}" -gt "$w_task" ] && w_task=${#c_id}
+    [ "${#c_kind}" -gt "$w_kind" ] && w_kind=${#c_kind}
+    [ "${#c_repo}" -gt "$w_repo" ] && w_repo=${#c_repo}
+    [ "${#c_state}" -gt "$w_state" ] && w_state=${#c_state}
+    [ "${#c_fp}" -gt "$w_fp" ] && w_fp=${#c_fp}
+    [ "${#c_rework}" -gt "$w_rework" ] && w_rework=${#c_rework}
+    [ "${#c_esc}" -gt "$w_esc" ] && w_esc=${#c_esc}
+    [ "${#c_fmt}" -gt "$w_elapsed" ] && w_elapsed=${#c_fmt}
+    [ "${#c_report}" -gt "$w_report" ] && w_report=${#c_report}
+  done < "$ROWS"
+  printf '%-*s  %-*s  %-*s  %-*s  %-*s  %*s  %*s  %*s  %-*s\n' \
+    "$w_task" task "$w_kind" kind "$w_repo" repo "$w_state" state \
+    "$w_fp" first-pass "$w_rework" rework "$w_esc" escalations \
+    "$w_elapsed" elapsed "$w_report" report
+  while IFS=$'\t' read -r c_id c_kind c_repo c_state c_fp c_rework c_esc c_fmt _ c_report; do
+    [ -n "$c_id" ] || continue
+    printf '%-*s  %-*s  %-*s  %-*s  %-*s  %*s  %*s  %*s  %-*s\n' \
+      "$w_task" "$c_id" "$w_kind" "$c_kind" "$w_repo" "$c_repo" \
+      "$w_state" "$c_state" "$w_fp" "$c_fp" "$w_rework" "$c_rework" \
+      "$w_esc" "$c_esc" "$w_elapsed" "$c_fmt" "$w_report" "$c_report"
+  done < "$ROWS"
+  printf '\n'
+
+  printf 'by kind:\n'
+  w_roll_kind=4
+  while IFS=$'\t' read -r r_kind _; do
+    [ -n "$r_kind" ] || continue
+    [ "${#r_kind}" -gt "$w_roll_kind" ] && w_roll_kind=${#r_kind}
+  done < "$ROLLUP"
+  rfmt_w=$w_roll_kind
+  printf '%-*s  %5s  %4s  %6s  %9s  %10s  %6s  %11s  %8s\n' \
+    "$rfmt_w" kind tasks "done" failed in-flight first-pass rework escalations elapsed
+  while IFS=$'\t' read -r r_kind r_tasks r_done r_failed r_inflight r_fp r_rework r_esc r_secs; do
+    [ -n "$r_kind" ] || continue
+    case "$r_secs" in
+      ''|*[!0-9]*) r_elapsed=- ;;
+      *) r_elapsed=$(fmt_duration "$r_secs") ;;
+    esac
+    printf '%-*s  %5s  %4s  %6s  %9s  %10s  %6s  %11s  %8s\n' \
+      "$rfmt_w" "$r_kind" "$r_tasks" "$r_done" "$r_failed" "$r_inflight" \
+      "$r_fp" "$r_rework" "$r_esc" "$r_elapsed"
+  done < "$ROLLUP"
+  printf '\n'
+
+  t_tasks=0 t_done=0 t_failed=0 t_inflight=0 t_fp=0 t_rework=0 t_esc=0 t_secs=0 t_secs_known=0
+  while IFS=$'\t' read -r _ _ _ t_state2 t_fp2 t_rework2 t_esc2 _ t_secs2 _; do
+    t_tasks=$((t_tasks + 1))
+    case "$t_state2" in
+      done) t_done=$((t_done + 1)) ;;
+      failed) t_failed=$((t_failed + 1)) ;;
+      in-flight) t_inflight=$((t_inflight + 1)) ;;
+    esac
+    [ "$t_fp2" = yes ] && t_fp=$((t_fp + 1))
+    t_rework=$((t_rework + t_rework2))
+    t_esc=$((t_esc + t_esc2))
+    case "$t_secs2" in
+      ''|*[!0-9]*) ;;
+      *) t_secs=$((t_secs + t_secs2)); t_secs_known=$((t_secs_known + 1)) ;;
+    esac
+  done < "$ROWS"
+  if [ "$t_secs_known" -gt 0 ]; then t_total=$(fmt_duration "$t_secs"); else t_total=-; fi
+  printf 'totals: %s tasks, %s done, %s failed, %s in-flight, %s first-pass, %s rework, %s escalations, %s elapsed\n' \
+    "$t_tasks" "$t_done" "$t_failed" "$t_inflight" "$t_fp" "$t_rework" "$t_esc" "$t_total"
+else
+  printf '(no task records in the window)\n'
+fi
+
+if [ -s "$SKIPS" ]; then
+  printf '\nskipped (missing or unreadable record):\n'
+  while IFS=$'\t' read -r s_id s_reason; do
+    [ -n "$s_id" ] || continue
+    printf '  %s: %s\n' "$s_id" "$s_reason"
+  done < "$SKIPS"
+fi
+
+exit 0
