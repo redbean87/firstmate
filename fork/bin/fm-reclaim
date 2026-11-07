@@ -1,0 +1,399 @@
+#!/usr/bin/env bash
+# fm-reclaim - reclaim raw run residue out of finished tasks' data folders,
+# gated on recorded proof of the finding rather than a report beside the residue.
+#
+# Usage:
+#   fork/bin/fm-reclaim [--apply] [--days N]
+#   fork/bin/fm-reclaim --help
+#
+# Dry run by default: it prints the case per task - folder size, possible
+# reclaim, and where the proof was found - and deletes nothing. --apply
+# performs the deletion and prints what was freed per task and in total.
+# --days N holds back any residue tree holding a file modified within the
+# last N days (default 0 = no age filter).
+#
+# Eligibility, in order, for each data/<task>/ folder that holds at least one
+# residue tree:
+#   1. a live task (state/<task>.meta exists) is skipped;
+#   2. a standing resource is skipped - the names config/bin/fm-archive
+#      keeps from archiving, plus reference and extensions, plus any name
+#      the home lists in config/archive-extra-keep;
+#   3. recorded proof of the finding, any ONE of:
+#        a. data/<task>/report.md, notes.md or progress.md exists;
+#        b. the task's backlog row (data/backlog.md and its archive,
+#           data/done-archive.md, paths read from .tasks.toml when present)
+#           records a link that resolves to an existing file;
+#        c. a path named in that row's body resolves to an existing file,
+#           against the home, this code root, or the row's (repo: ...) clone
+#           ($FM_HOME/projects/<repo>, $HOME/Projects/<repo>, or a sibling of
+#           the home - whichever first holds the file).
+#   Without proof the task is listed BLOCKED with what would satisfy it and
+#   is never touched. The gate only ever READS records: fm-reclaim never
+#   writes the proof it acts on, so a finding recorded in a committed
+#   results file or the backlog row is what unlocks deletion - not a report
+#   written beside the residue to unlock it.
+#
+# Residue: directory trees named ws-*, agents, agents-*, node_modules,
+# __pycache__, .cache, tmp or scratch, at any depth inside an eligible task
+# (the same pattern set fm-tidy reclaims; shared deliberately). Never a
+# file, never brief.md, launch-brief.md, report.md, patch/yml files,
+# evidence or scripts, never the task folder itself, never a live task,
+# never a standing resource. Every tree is re-verified as a directory inside
+# the task folder, under a still-live check and a re-read proof, immediately
+# before an --apply deletion.
+#
+# Home: FM_HOME, else this script's code root. Output is one ELIGIBLE or
+# BLOCKED line per candidate task (plus SKIP lines for live, standing and
+# age-held tasks that hold residue), the per-tree listing under each
+# ELIGIBLE task, and a total. Exit 0 on a completed run, 1 when the home is
+# not a firstmate home or a deletion failed, 2 on usage.
+set -uo pipefail
+
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+home=${FM_HOME:-$FM_ROOT}
+
+apply=0
+days=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --apply) apply=1 ;;
+    --days)
+      [ $# -ge 2 ] || { echo "usage: --days N" >&2; exit 2; }
+      case $2 in ''|*[!0-9]*) echo "--days: N must be a number" >&2; exit 2 ;; esac
+      days=$2
+      shift ;;
+    -h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+[ -d "$home/data" ] && [ -d "$home/state" ] || {
+  echo "STOP: $home is not a firstmate home (no data/ or state/)"
+  exit 1
+}
+sibling=$(dirname "$home")
+
+# Standing resources: fm-archive's KEEP set (its config/bin/fm-archive owns
+# the archiving contract), plus reference and extensions, plus the home's own
+# config/archive-extra-keep additions - skipped so they are never candidates.
+standing=' archive checkin-health chrome-profiles context-cap crest-smoke-runs dev-env inbox launch-restart-kit proof-page-check scorecard settings-backups shared-tips standups reference extensions '
+if [ -f "$home/config/archive-extra-keep" ]; then
+  while IFS= read -r extra || [ -n "$extra" ]; do
+    case $extra in ''|\#*) continue ;; esac
+    standing="$standing$extra "
+  done < "$home/config/archive-extra-keep"
+fi
+is_standing() {
+  case $standing in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+# The backlog store: data/backlog.md and its archive, overridden by the
+# markdown path/archive keys of .tasks.toml when that file holds them.
+backlog="$home/data/backlog.md"
+archive="$home/data/done-archive.md"
+if [ -f "$home/.tasks.toml" ]; then
+  p=$(sed -n 's/^path = "\(.*\)"$/\1/p' "$home/.tasks.toml" | head -1)
+  a=$(sed -n 's/^archive = "\(.*\)"$/\1/p' "$home/.tasks.toml" | head -1)
+  [ -z "$p" ] || case $p in /*) backlog=$p ;; *) backlog=$home/$p ;; esac
+  [ -z "$a" ] || case $a in /*) archive=$a ;; *) archive=$home/$a ;; esac
+fi
+
+# row_lines <file> <id>: the row's header line as H: and its body as B:.
+# A row starts at column 0 with "- [ ] <id> - " / "- [x] <id> - " and runs
+# until the next column-0 row or heading; body lines are indented.
+row_lines() {
+  awk -v id="$2" '
+    /^- \[[ x]\] / {
+      line = $0
+      sub(/^- \[[ x]\] /, "", line)
+      rid = line
+      sub(/ - .*/, "", rid)
+      if (rid == id) { inh = 1; print "H:" $0 } else if (inh) { inh = 0 }
+      next
+    }
+    inh && /^## / { inh = 0 }
+    inh { print "B:" $0 }
+  ' "$1"
+}
+
+# row_tokens <line>: path-shaped tokens of the line - characters outside
+# [A-Za-z0-9._/-] split, trailing dots and slashes stripped, URLs and
+# parent-hopping tokens dropped.
+row_tokens() {
+  printf '%s\n' "$1" | awk '{
+    n = split($0, a, "[^A-Za-z0-9._/-]+")
+    for (i = 1; i <= n; i++) {
+      t = a[i]
+      sub(/[.\/]+$/, "", t)
+      if (t == "" || index(t, "/") == 0) continue
+      if (index(t, "//") > 0 || index(t, "..") > 0) continue
+      print t
+    }
+  }'
+}
+
+# resolve_file <token> <repo>: the first existing regular file at the token,
+# absolute as-is, else against the home, else this code root, else the row's
+# clone under the projects dir, $HOME/Projects, or a sibling of the home.
+resolve_file() {
+  local tok=$1 repo=$2 c
+  case $tok in
+    /*)
+      [ -f "$tok" ] || return 1
+      printf '%s\n' "$tok"
+      return 0 ;;
+  esac
+  for c in "$home/$tok" "$FM_ROOT/$tok"; do
+    [ -f "$c" ] || continue
+    printf '%s\n' "$c"
+    return 0
+  done
+  [ -n "$repo" ] || return 1
+  for c in "${FM_PROJECTS_OVERRIDE:-$home/projects}/$repo/$tok" \
+           "${HOME:-/nonexistent}/Projects/$repo/$tok" \
+           "$sibling/$repo/$tok"; do
+    [ -f "$c" ] || continue
+    printf '%s\n' "$c"
+    return 0
+  done
+  return 1
+}
+
+# find_proof <id>: sets PROOF_DESC (naming the proof source) and ROW_SEEN,
+# returns 0 when any one proof source holds. Read-only: it never writes a
+# record.
+PROOF_DESC=
+ROW_SEEN=0
+find_proof() {
+  local id=$1 f line hdr repo t r
+  PROOF_DESC=
+  ROW_SEEN=0
+  for f in report.md notes.md progress.md; do
+    [ -f "$home/data/$id/$f" ] || continue
+    PROOF_DESC="data/$id/$f"
+    return 0
+  done
+  for f in "$backlog" "$archive"; do
+    [ -f "$f" ] || continue
+    while IFS= read -r line; do
+      case $line in
+        H:*)
+          ROW_SEEN=1
+          hdr=${line#H:}
+          repo=$(printf '%s\n' "$hdr" | sed -n 's/.*(repo: \([^)]*\)).*/\1/p' | head -1)
+          while IFS= read -r t; do
+            [ -n "$t" ] || continue
+            r=$(resolve_file "$t" "$repo") || continue
+            PROOF_DESC="row report link $t -> $r"
+            return 0
+          done <<EOF
+$(row_tokens "$hdr")
+EOF
+          ;;
+        B:*)
+          while IFS= read -r t; do
+            [ -n "$t" ] || continue
+            r=$(resolve_file "$t" "$repo") || continue
+            PROOF_DESC="row body path $t -> $r"
+            return 0
+          done <<EOF
+$(row_tokens "${line#B:}")
+EOF
+          ;;
+      esac
+    done < <(row_lines "$f" "$id")
+  done
+  return 1
+}
+
+NEEDS_BASE="write data/<id>/report.md (or notes.md/progress.md), or name in its backlog row a path that exists on disk (a committed results file, for instance)"
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/fm-reclaim.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT
+: > "$tmp/out"      # id \t class \t desc, in data/ order
+: > "$tmp/residue"  # id \t reclaimable tree
+: > "$tmp/kept"     # id \t age-held tree
+
+for d in "$home"/data/*/; do
+  [ -d "$d" ] || continue
+  d=${d%/}
+  id=${d##*/}
+  # Candidate only when residue exists; live and standing precede the proof
+  # gate so they never reach an eligible or BLOCKED verdict.
+  residue=$(find "$d" -mindepth 1 -type d \( -name 'ws-*' -o -name agents \
+      -o -name 'agents-*' -o -name node_modules -o -name __pycache__ \
+      -o -name .cache -o -name tmp -o -name scratch \) -prune -print 2>/dev/null)
+  [ -n "$residue" ] || continue
+  if [ -e "$home/state/$id.meta" ]; then
+    printf '%s\t%s\t%s\n' "$id" skip "live task" >> "$tmp/out"
+    continue
+  fi
+  if is_standing "$id"; then
+    printf '%s\t%s\t%s\n' "$id" skip "standing resource" >> "$tmp/out"
+    continue
+  fi
+  nre=0
+  nkept=0
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    recent=
+    if [ "$days" -gt 0 ]; then
+      recent=$(find "$t" -type f -mtime "-$days" -print -quit 2>/dev/null)
+    fi
+    if [ -n "$recent" ]; then
+      printf '%s\t%s\n' "$id" "$t" >> "$tmp/kept"
+      nkept=$((nkept + 1))
+    else
+      printf '%s\t%s\n' "$id" "$t" >> "$tmp/residue"
+      nre=$((nre + 1))
+    fi
+  done <<EOF
+$residue
+EOF
+  if [ "$nre" -eq 0 ]; then
+    printf '%s\t%s\t%s\n' "$id" skip "all residue touched within $days days" >> "$tmp/out"
+    continue
+  fi
+  if find_proof "$id"; then
+    printf '%s\t%s\t%s\n' "$id" eligible "$PROOF_DESC" >> "$tmp/out"
+  else
+    needs=$(printf '%s' "$NEEDS_BASE" | sed "s|<id>|$id|g")
+    [ "$ROW_SEEN" -eq 1 ] || needs="$needs; no backlog row found for $id"
+    printf '%s\t%s\t%s\n' "$id" blocked "$needs" >> "$tmp/out"
+  fi
+done
+
+# Sizes: one du over every candidate task and its reclaimable trees, so the
+# case per task shows folder size and possible reclaim from one walk.
+args=()
+while IFS=$'\t' read -r id class desc; do
+  case $class in eligible|blocked)
+    args+=("$home/data/$id")
+    while IFS=$'\t' read -r rid path; do
+      [ "$rid" = "$id" ] || continue
+      args+=("$path")
+    done < "$tmp/residue"
+    ;;
+  esac
+done < "$tmp/out"
+: > "$tmp/du"
+if [ ${#args[@]} -gt 0 ]; then
+  du -sk ${args[@]+"${args[@]}"} > "$tmp/du" 2>/dev/null || true
+fi
+
+kb_of() {
+  awk -F'\t' -v p="$1" '$2 == p { print $1; exit }' "$tmp/du"
+}
+human() {
+  awk -v kb="${1:-0}" 'BEGIN {
+    if (kb >= 1048576) printf "%.1fG", kb / 1048576
+    else if (kb >= 1024) printf "%.1fM", kb / 1024
+    else printf "%dK", kb
+  }'
+}
+residue_kb_of() { # <id> -> total reclaimable kb of that task
+  local rid path sum=0 pkb
+  while IFS=$'\t' read -r rid path; do
+    [ "$rid" = "$1" ] || continue
+    pkb=$(kb_of "$path"); pkb=${pkb:-0}
+    sum=$((sum + pkb))
+  done < "$tmp/residue"
+  printf '%s\n' "$sum"
+}
+eligible_n=$(awk -F'\t' '$2 == "eligible" { n++ } END { print n + 0 }' "$tmp/out")
+
+if [ "$apply" -eq 1 ]; then
+  printf 'fm-reclaim: %s - apply\n' "$home"
+else
+  printf 'fm-reclaim: %s - dry run, nothing deleted (--apply to delete)\n' "$home"
+fi
+
+total_kb=0
+total_trees=0
+blocked_kb=0
+blocked_n=0
+freed_kb=0
+freed_n=0
+failed=0
+while IFS=$'\t' read -r id class desc; do
+  case $class in
+    skip)
+      printf 'SKIP %s  %s\n' "$id" "$desc"
+      ;;
+    blocked)
+      tkb=$(kb_of "$home/data/$id"); tkb=${tkb:-0}
+      rkb=$(residue_kb_of "$id")
+      blocked_kb=$((blocked_kb + rkb))
+      blocked_n=$((blocked_n + 1))
+      printf 'BLOCKED %s  size %s  reclaim %s  needs: %s\n' \
+        "$id" "$(human "$tkb")" "$(human "$rkb")" "$desc"
+      ;;
+    eligible)
+      tkb=$(kb_of "$home/data/$id"); tkb=${tkb:-0}
+      rkb=$(residue_kb_of "$id")
+      n=0
+      while IFS=$'\t' read -r rid path; do
+        [ "$rid" = "$id" ] || continue
+        n=$((n + 1))
+      done < "$tmp/residue"
+      total_kb=$((total_kb + rkb))
+      total_trees=$((total_trees + n))
+      printf 'ELIGIBLE %s  size %s  reclaim %s  proof: %s\n' \
+        "$id" "$(human "$tkb")" "$(human "$rkb")" "$desc"
+      while IFS=$'\t' read -r rid path; do
+        [ "$rid" = "$id" ] || continue
+        printf '  %s  %s\n' "${path#"$home/data/$id/"}" "$(human "$(kb_of "$path")")"
+      done < "$tmp/residue"
+      while IFS=$'\t' read -r rid path; do
+        [ "$rid" = "$id" ] || continue
+        printf '  %s  %s  kept (within %s days)\n' \
+          "${path#"$home/data/$id/"}" "$(human "$(kb_of "$path")")" "$days"
+      done < "$tmp/kept"
+      if [ "$apply" -eq 1 ]; then
+        # Re-verify at delete time: still not live, proof still recorded.
+        if [ -e "$home/state/$id.meta" ]; then
+          printf 'SKIP %s  went live before deletion; not touched\n' "$id"
+          continue
+        fi
+        if ! find_proof "$id"; then
+          printf 'SKIP %s  proof no longer readable; not touched\n' "$id"
+          continue
+        fi
+        while IFS=$'\t' read -r rid path; do
+          [ "$rid" = "$id" ] || continue
+          case $path in
+            "$home/data/$id"/*) ;;
+            *)
+              printf 'REFUSED %s  outside its task folder: %s\n' "$id" "$path"
+              failed=1
+              continue ;;
+          esac
+          [ -d "$path" ] || continue
+          if rm -rf -- "$path"; then
+            freed_n=$((freed_n + 1))
+          else
+            printf 'FAILED %s  could not delete: %s\n' "$id" "$path" >&2
+            failed=1
+          fi
+        done < "$tmp/residue"
+        freed_kb=$((freed_kb + rkb))
+        printf 'FREED %s  %s\n' "$id" "$(human "$rkb")"
+      fi
+      ;;
+  esac
+done < "$tmp/out"
+
+if [ "$apply" -eq 1 ]; then
+  printf 'RECLAIM: %s eligible task(s), %s folder(s), freed %s\n' \
+    "$eligible_n" "$freed_n" "$(human "$freed_kb")"
+else
+  printf 'RECLAIM: %s eligible task(s), %s folder(s), would free %s (dry run; --apply to delete)\n' \
+    "$eligible_n" "$total_trees" "$(human "$total_kb")"
+fi
+if [ "$blocked_n" -gt 0 ]; then
+  printf 'BLOCKED: %s task(s), %s with no recorded proof - never touched\n' \
+    "$blocked_n" "$(human "$blocked_kb")"
+fi
+exit "$failed"

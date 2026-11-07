@@ -107,6 +107,25 @@ Ownership boundary
                       switch repoints `current` atomically after verify and
                       rollback is a switch to an older id (fork/discord/README,
                       "Service").
+  Data reclaim       fork/bin/fm-reclaim: reclaims raw run residue (ws-*, agents,
+                      agents-*, node_modules, __pycache__, .cache, tmp and scratch
+                      directory trees - the same pattern set fm-tidy reclaims) out
+                      of finished tasks' data folders, dry-run by default with
+                      --apply to act and --days N to hold back residue touched
+                      within N days, never near a live task or a standing resource,
+                      and it prints the size, the possible reclaim and where the
+                      proof was found per task before any total. Its gate is
+                      recorded proof of the finding - a local report.md, notes.md
+                      or progress.md, the row's recorded report link, or an
+                      existing file path named in the row's body - rather than a
+                      report sitting beside the residue, because a delete tool must
+                      never write the proof it acts on: fm-tidy's local-report
+                      guard is right that findings have to exist before residue
+                      goes, but a finding already recorded in a committed results
+                      file or the backlog row is the same proof, and demanding it
+                      again beside the residue would either strand proven-clean
+                      residue forever or invite a report written only to unlock
+                      deletion (fork/tests/fm-fork-reclaim.test.sh).
   Amendments          fork/docs/amendments: what this fork does instead of what
                       an upstream document says. Read it before trusting an
                       upstream doc.
