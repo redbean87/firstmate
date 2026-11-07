@@ -9,12 +9,12 @@
 # accident (fork/bin/fm-fork-workflow-guard).
 name: Fork CI
 
+# No push trigger: GitHub paused this fork's workflows for the scale of its
+# Actions usage, a merge commit is already proven by the pull request that
+# produced it, and a fork/** sync branch is covered by its own pull request
+# run.
 on:
   pull_request:
-  push:
-    branches:
-      - main
-      - 'fork/**'
 
 permissions:
   contents: read
