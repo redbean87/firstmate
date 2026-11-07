@@ -8,6 +8,10 @@ an unnamed project check set, and conflicting bounded promises with no
 stated composition).
 The refusal message names every missing element with the exact line to add,
 so a refused launch is fixed by editing the brief and dispatching again.
+It also refuses two write-scope defects: a brief that declares
+`Write outside worktree:` while still carrying the standard containment
+line, and a brief that names an outside write target without declaring it
+(both are described with the marker list below).
 Nothing outside fork/ changes; the check rides the existing HK1/HK2 seam.
 
 Two things must be in place before a launch meets the check.
@@ -51,6 +55,10 @@ marker is fine, but the value must sit on the same line):
                 the test that pins that combined promise>
       Required as soon as two or more Bound: lines appear - the defect
       that cost three review rounds finding one starvation route each time.
+  Write outside worktree: <absolute paths or directories>
+      One line, in the Task section, when the brief hands the worker real write targets outside its worktree.
+      A scout brief which must edit real files carries this declaration line instead of the containment line: replace the standard "Stay inside this worktree; outside it, write only the report and status file" rule with an explicit exception naming the same paths.
+      The checker refuses a brief that declares this line while still carrying that containment sentence, and refuses an outside write target that is declared nowhere with this exact line to add.
 
 Secondmate charters are exempt: a charter is a standing contract, not a
 slice brief, and the policy never checks one.
