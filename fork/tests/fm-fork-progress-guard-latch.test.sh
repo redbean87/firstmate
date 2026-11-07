@@ -91,6 +91,23 @@ adapter_poll_with_id() {  # <config-ref> <64-hex-request-id>
 
 wake_payloads() { awk -F '\t' '{print $5}' "$1/state/.wake-queue" 2>/dev/null; }
 
+# The runner appends a result's wake row only AFTER the result file lands -
+# its post-capture silence verdict runs first - and `start` returns
+# immediately while an earlier runner still holds the source claim, so under
+# load the runner that captured can be one this test is not waiting for.
+# Poll the queue for the row, bounded, before asserting it; the assertion
+# below owns failure and still fails when the row never appears.
+wait_wake_payload() {  # <home> <needle> [attempts]
+  local home=$1 needle=$2 attempts=${3:-150} i
+  for i in $(seq 1 "$attempts"); do
+    case "$(wake_payloads "$home")" in
+      *"$needle"*) return 0 ;;
+    esac
+    sleep 0.1
+  done
+  return 1
+}
+
 install_package() {
   local home=$1 pkg=$2
   FM_HOME="$home" "$EXT_HOST" bind "$pkg" --adapter progress-guard --trust-same-user-code \
@@ -187,7 +204,13 @@ test_one_stall_wakes_once_a_new_status_line_rearms_and_the_hourly_cap_holds() {
   # A second sweep of the SAME stall stays silent: same task, same worker,
   # same latest status line - one stall, one wake.
   : > "$home/state/.wake-queue"
-  FM_HOME="$home" "$PROCEVENT" reconcile >/dev/null 2>&1
+  # The runner this reconcile detaches is launched but has not yet claimed;
+  # under load it can take longer than the default three seconds, and the
+  # launch-confirm strand wake for that slow start would fail the empty-queue
+  # check below for a runner that is merely slow to start, not stranded. The
+  # strand diagnostic has its own suite - this one only needs the window long
+  # enough to tolerate a slow claim.
+  FM_HOME="$home" FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=15 "$PROCEVENT" reconcile >/dev/null 2>&1
   [ -z "$(wake_payloads "$home")" ] || fail "the handled wake is re-announced: $(wake_payloads "$home")"
   start_source "$home"
   [ ! -e "$home/state/procevent-inbox/progress-guard.2.result" ] \
@@ -217,6 +240,7 @@ test_one_stall_wakes_once_a_new_status_line_rearms_and_the_hourly_cap_holds() {
     || fail "a new status line did not re-arm the wake after the cap"
   result="$home/state/procevent-inbox/progress-guard.2.result"
   assert_contains "$(cat "$result")" "$new_line" "the re-armed wake carries the new latest status line"
+  wait_wake_payload "$home" "procevent progress-guard progress-guard 2"
   assert_contains "$(wake_payloads "$home")" "procevent progress-guard progress-guard 2" \
     "the re-armed stall is announced as its own wake sequence"
   [ "$(FM_HOME="$home" "$PROCEVENT" classify "$result")" = stall-advisory ] \
