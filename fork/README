@@ -132,7 +132,10 @@ Ownership boundary
   Fork checks/tests   fork/bin/fm-fork-hook-check, fork/bin/fm-fork-sync,
                       fork/bin/fm-fork-workflow-guard, fork/tests/.
   Fork CI             .github/workflows/fork-ci.yml; its workflow-guard step
-                      runs fork/bin/fm-fork-workflow-guard.
+                      runs fork/bin/fm-fork-workflow-guard. It runs on pull
+                      requests only, because GitHub paused this fork's
+                      workflows for the scale of Actions usage and a merge is
+                      already proven by the pull request that produced it.
   Home configuration  config/fork-policies, config/fork-project-pins.json,
                       config/fork-resources.json, config/budget-mode
                       (gitignored, per home).
